@@ -16,7 +16,7 @@ export const RemotionRoot: React.FC = () => {
       id="TimelineVideo"
       component={TimelineVideo}
       defaultProps={{ timeline: fallback }}
-      calculateMetadata={({ props }) => {
+      calculateMetadata={({ props }: { props: { timeline: Timeline } }) => {
         const t = (props as { timeline: Timeline }).timeline;
         return {
           durationInFrames: Math.max(1, timelineDurationInFrames(t)),
