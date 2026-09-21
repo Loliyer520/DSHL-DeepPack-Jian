@@ -1,0 +1,20 @@
+{
+  "manifestVersion": 5,
+  "type": "profile",
+  "name": "djian",
+  "version": "0.1.0",
+  "displayName": {
+    "zh-CN": "D剪 · AI 视频剪辑工作台",
+    "en-US": "Djian · AI Video Editing Workbench"
+  },
+  "description": {
+    "zh-CN": "JSON 时间线驱动的视频剪辑：AI 操作与手动 WebUI 编辑同一份时间线，一键出片。",
+    "en-US": "JSON-timeline-driven video editing: AI operations and manual WebUI edits share one timeline."
+  },
+  "author": "Loliy",
+  "profileName": "djian",
+  "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"],
+  "dependencies": {
+    "@djian/engine": "0.1.0"
+  }
+}

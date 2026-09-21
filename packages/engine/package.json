@@ -1,0 +1,31 @@
+{
+  "name": "@djian/engine",
+  "version": "0.1.0",
+  "description": "D剪渲染引擎：JSON 时间线进 → mp4 出（Remotion）",
+  "type": "module",
+  "main": "dist/render.js",
+  "types": "dist/render.d.ts",
+  "bin": {
+    "djian-render": "bin/djian-render.mjs"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.526",
+    "@remotion/renderer": "4.0.526",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.526",
+    "zod": "3.23.8"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "typescript": "5.6.3"
+  }
+}

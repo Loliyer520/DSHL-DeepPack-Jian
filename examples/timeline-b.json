@@ -1,0 +1,12 @@
+{
+  "meta": { "fps": 24, "width": 960, "height": 540, "durationInFrames": 168 },
+  "clips": [
+    { "id": "x1", "type": "video", "src": "a.mp4", "inPoint": 3, "clipDuration": 3, "transition": "none" },
+    { "id": "x2", "type": "video", "src": "a.mp4", "inPoint": 2, "clipDuration": 2, "transition": "fade" },
+    { "id": "x3", "type": "video", "src": "a.mp4", "inPoint": 8, "clipDuration": 2, "transition": "fade" }
+  ],
+  "audio": null,
+  "overlays": [
+    { "text": "竖版 9:16 · 24fps · 三段快剪（同一组件，不同数据）", "startSeconds": 0.2, "endSeconds": 5, "position": "top", "fontSize": 40, "color": "#ffd166" }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "djian",
+  "version": "0.1.0",
+  "private": true,
+  "description": "D剪 — JSON 时间线驱动的视频剪辑引擎 + dsh 整合包",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build:engine": "npm run build -w @djian/engine",
+    "pack": "node packages/pack/scripts/build-dspack.mjs"
+  },
+  "license": "MIT"
+}

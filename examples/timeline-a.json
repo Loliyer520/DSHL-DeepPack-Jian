@@ -1,0 +1,11 @@
+{
+  "meta": { "fps": 30, "width": 1280, "height": 720, "durationInFrames": 240 },
+  "clips": [
+    { "id": "c1", "type": "video", "src": "a.mp4", "inPoint": 0.5, "clipDuration": 4, "transition": "fade" },
+    { "id": "c2", "type": "video", "src": "a.mp4", "inPoint": 6, "clipDuration": 4, "transition": "none" }
+  ],
+  "audio": null,
+  "overlays": [
+    { "text": "D剪 spike · 时间线 A（Remotion 渲染）", "startSeconds": 0.5, "endSeconds": 3.5, "position": "bottom", "fontSize": 56, "color": "#ffffff" }
+  ]
+}
