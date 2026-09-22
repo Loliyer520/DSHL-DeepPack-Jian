@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Player } from '@remotion/player';
 import {
   timelineDurationInFrames,
+  type AudioClip,
   type Clip,
   type Overlay,
   type Timeline,
@@ -14,6 +15,7 @@ import { ProjectBar } from './ProjectBar';
 import { CanvasDialog } from './CanvasDialog';
 import { AssetsSection } from './AssetsSection';
 import { ExportControl } from './ExportControl';
+import { HistoryDialog } from './HistoryDialog';
 
 const fmtSec = (s: number) => `${s.toFixed(1)}s`;
 
@@ -179,7 +181,7 @@ const ops = (mutate: Mutate) => ({
       ...t,
       audioTracks: t.audioTracks.map((tr) => (tr.id === id ? { ...tr, ...patch } : tr)),
     })),
-  updateAudioClip: (id: string, patch: Partial<{ atSeconds: number; duration: number; volume: number }>) =>
+  updateAudioClip: (id: string, patch: Partial<{ atSeconds: number; duration: number; volume: number; inPoint: number }>) =>
     mutate((t) => ({
       ...t,
       audioTracks: t.audioTracks.map((tr) => ({
@@ -187,6 +189,41 @@ const ops = (mutate: Mutate) => ({
         clips: tr.clips.map((c) => (c.id === id ? { ...c, ...patch } : c)),
       })),
     })),
+  // 分割：全局时间轴切点，主轨/叠加/音频 clip 通用（与 5180 服务端 op 同语义）
+  splitClip: (id: string, atSeconds: number) =>
+    mutate((t) => {
+      for (let ti = 0; ti < t.videoTracks.length; ti++) {
+        const tr = t.videoTracks[ti];
+        const idx = tr.clips.findIndex((c) => c.id === id);
+        if (idx === -1) continue;
+        const clip = tr.clips[idx];
+        let start = 0;
+        if (ti === 0) for (let i = 0; i < idx; i++) start += tr.clips[i].clipDuration;
+        else start = clip.atSeconds ?? 0;
+        const off = atSeconds - start;
+        if (!(off > 0.05) || off >= clip.clipDuration - 0.05) return t;
+        const left = { ...clip, clipDuration: off };
+        const right: Clip = { ...clip, id: clipId(), inPoint: clip.inPoint + off, clipDuration: clip.clipDuration - off };
+        if (clip.atSeconds !== undefined) right.atSeconds = clip.atSeconds + off;
+        const clips = [...tr.clips];
+        clips.splice(idx, 1, left, right);
+        return { ...t, videoTracks: t.videoTracks.map((x, i) => (i === ti ? { ...x, clips } : x)) };
+      }
+      for (let ti = 0; ti < t.audioTracks.length; ti++) {
+        const tr = t.audioTracks[ti];
+        const idx = tr.clips.findIndex((c) => c.id === id);
+        if (idx === -1) continue;
+        const clip = tr.clips[idx];
+        const off = atSeconds - clip.atSeconds;
+        if (!(off > 0.05) || off >= clip.duration - 0.05) return t;
+        const left = { ...clip, duration: off };
+        const right = { ...clip, id: clipId(), inPoint: clip.inPoint + off, duration: clip.duration - off, atSeconds: clip.atSeconds + off };
+        const clips = [...tr.clips];
+        clips.splice(idx, 1, left, right);
+        return { ...t, audioTracks: t.audioTracks.map((x, i) => (i === ti ? { ...x, clips } : x)) };
+      }
+      return t;
+    }),
   reorderClips: (order: string[]) =>
     mutate((t) => {
       const tr0 = t.videoTracks[0];
@@ -236,24 +273,169 @@ const NumberField: React.FC<{
   </label>
 );
 
-// 多轨轨道条：主轨串行块 + 叠加轨（绝对位置）+ 音频轨，共用一条时间轴，点击 seek
-const TrackStrip: React.FC<{ t: Timeline; onSeekClip: (start: number) => void }> = ({ t, onSeekClip }) => {
+// 多轨轨道条（交互版）：主轨块裁剪拖柄；叠加/音频块拖拽移动 + 裁剪；吸附到 0/播放头/同轨邻块边缘
+// 拖拽过程只改本地预览，松手才 commit（一次进历史栈，不刷屏）
+interface DragState {
+  kind: 'move' | 'trimL' | 'trimR';
+  lane: 'main' | 'pip' | 'audio';
+  id: string;
+  startX: number;
+  secPerPx: number;
+  origAt: number;
+  origDur: number;
+  origIn?: number;
+  previewAt: number;
+  previewDur: number;
+}
+
+const TrackStrip: React.FC<{
+  t: Timeline;
+  o: ReturnType<typeof ops>;
+  playheadRef: React.MutableRefObject<number>;
+  onSeekClip: (start: number) => void;
+}> = ({ t, o, playheadRef, onSeekClip }) => {
   const [playhead, setPlayhead] = useState(0);
-  const total = Math.max(
-    0.1,
-    timelineDurationInFrames(t) / t.meta.fps,
-  );
+  const total = Math.max(0.1, timelineDurationInFrames(t) / t.meta.fps);
+  const dragRef = useRef<DragState | null>(null);
+  const justDragged = useRef(false);
+  const [, forceRender] = useState(0);
+  const ctxRef = useRef({ t, o, total });
+  ctxRef.current = { t, o, total };
 
   useEffect(() => {
     let raf = 0;
     const tick = () => {
       const p = playerBus.ref;
-      if (p) setPlayhead(p.getCurrentFrame() / t.meta.fps);
+      if (p) {
+        const sec = p.getCurrentFrame() / t.meta.fps;
+        setPlayhead(sec);
+        playheadRef.current = sec;
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [t.meta.fps]);
+  }, [t.meta.fps, playheadRef]);
+
+  // 拖拽生命周期：监听器只挂一次，闭包经 ctxRef 拿最新 t/o
+  useEffect(() => {
+    const snapV = (cur: DragState, v: number): number => {
+      const SNAP = 0.12;
+      const tt = ctxRef.current.t;
+      const pts: number[] = [0, playheadRef.current];
+      if (cur.lane === 'main') {
+        let a = 0;
+        for (const c of tt.videoTracks[0]?.clips ?? []) {
+          if (c.id !== cur.id) pts.push(a, a + c.clipDuration);
+          a += c.clipDuration;
+        }
+      } else if (cur.lane === 'pip') {
+        for (const tr of tt.videoTracks.slice(1))
+          for (const c of tr.clips) {
+            if (c.id !== cur.id) pts.push(c.atSeconds ?? 0, (c.atSeconds ?? 0) + c.clipDuration);
+          }
+      } else {
+        for (const tr of tt.audioTracks)
+          for (const c of tr.clips) {
+            if (c.id !== cur.id) pts.push(c.atSeconds, c.atSeconds + c.duration);
+          }
+      }
+      let best = v;
+      let bd = SNAP;
+      for (const p of pts) {
+        const dd = Math.abs(p - v);
+        if (dd < bd) {
+          bd = dd;
+          best = p;
+        }
+      }
+      return Math.round(best * 100) / 100;
+    };
+
+    const onMove = (e: MouseEvent) => {
+      const cur = dragRef.current;
+      if (!cur) return;
+      const dsec = (e.clientX - cur.startX) * cur.secPerPx;
+      if (cur.kind === 'move') {
+        cur.previewAt = Math.max(0, snapV(cur, cur.origAt + dsec));
+      } else if (cur.kind === 'trimL') {
+        let at = snapV(cur, cur.origAt + dsec);
+        at = Math.min(Math.max(0, at), cur.origAt + cur.origDur - 0.1);
+        cur.previewAt = at;
+        cur.previewDur = cur.origDur - (at - cur.origAt);
+      } else {
+        const end = Math.max(cur.origAt + 0.1, snapV(cur, cur.origAt + cur.origDur + dsec));
+        cur.previewDur = end - cur.origAt;
+      }
+      forceRender((x) => x + 1);
+    };
+
+    const onUp = () => {
+      const cur = dragRef.current;
+      dragRef.current = null;
+      if (cur) {
+        const moved = Math.abs(cur.previewAt - cur.origAt) > 0.001 || Math.abs(cur.previewDur - cur.origDur) > 0.001;
+        if (moved) {
+          justDragged.current = true;
+          window.setTimeout(() => {
+            justDragged.current = false;
+          }, 0);
+        }
+        const { o: oo } = ctxRef.current;
+        const at = cur.previewAt;
+        const dur = Math.max(0.1, cur.previewDur);
+        if (cur.kind === 'move') {
+          if (cur.lane === 'pip') oo.updateClip(cur.id, { atSeconds: at });
+          else oo.updateAudioClip(cur.id, { atSeconds: at });
+        } else if (cur.lane === 'main') {
+          const patch: Partial<Clip> = { clipDuration: dur };
+          if (cur.kind === 'trimL' && cur.origIn !== undefined) patch.inPoint = Math.max(0, cur.origIn + (at - cur.origAt));
+          oo.updateClip(cur.id, patch);
+        } else if (cur.lane === 'pip') {
+          const patch: Partial<Clip> = { clipDuration: dur };
+          if (cur.kind === 'trimL') {
+            patch.atSeconds = at;
+            if (cur.origIn !== undefined) patch.inPoint = Math.max(0, cur.origIn + (at - cur.origAt));
+          }
+          oo.updateClip(cur.id, patch);
+        } else {
+          const patch: Partial<AudioClip> = { duration: dur };
+          if (cur.kind === 'trimL') {
+            patch.atSeconds = at;
+            if (cur.origIn !== undefined) patch.inPoint = Math.max(0, cur.origIn + (at - cur.origAt));
+          }
+          oo.updateAudioClip(cur.id, patch);
+        }
+      }
+      forceRender((x) => x + 1);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [playheadRef]);
+
+  const beginDrag = (
+    e: React.MouseEvent,
+    init: { kind: DragState['kind']; lane: DragState['lane']; id: string; origAt: number; origDur: number; origIn?: number },
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const laneEl = (e.currentTarget as HTMLElement).closest('.djp-trow-lane') as HTMLElement | null;
+    if (!laneEl) return;
+    const rect = laneEl.getBoundingClientRect();
+    dragRef.current = {
+      ...init,
+      startX: e.clientX,
+      secPerPx: total / Math.max(1, rect.width),
+      previewAt: init.origAt,
+      previewDur: init.origDur,
+    };
+    forceRender((x) => x + 1);
+  };
 
   const onSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -261,14 +443,11 @@ const TrackStrip: React.FC<{ t: Timeline; onSeekClip: (start: number) => void }>
     seekToSeconds(frac * total, t.meta.fps);
   };
 
+  const drag = dragRef.current;
+  const pct = (v: number) => `${(Math.max(0, v) / total) * 100}%`;
+
   const main = t.videoTracks[0];
   const overlays = t.videoTracks.slice(1);
-  let acc = 0;
-  const mainBlocks = main.clips.map((c) => {
-    const start = acc;
-    acc += c.clipDuration;
-    return { clip: c, start, widthPct: (c.clipDuration / total) * 100 };
-  });
 
   const Row: React.FC<{ name: string; children: React.ReactNode }> = ({ name, children }) => (
     <div className="djp-trow" onClick={onSeek}>
@@ -280,67 +459,130 @@ const TrackStrip: React.FC<{ t: Timeline; onSeekClip: (start: number) => void }>
     </div>
   );
 
+  // 主轨：串行布局；被裁剪的块用预览时长，后续块跟着移动（串行语义）
+  let acc = 0;
+  const mainBlocks = (main?.clips ?? []).map((c) => {
+    const isD = drag?.lane === 'main' && drag.id === c.id;
+    const dur = drag && isD ? Math.max(0.1, drag.previewDur) : c.clipDuration;
+    const start = acc;
+    acc += dur;
+    return { clip: c, start, dur, isD };
+  });
+
   return (
     <div className="djp-tstrip">
       <Row name="视频">
-        {mainBlocks.map(({ clip, start, widthPct }) => (
+        {mainBlocks.map(({ clip, start, dur, isD }) => (
           <div
             key={clip.id}
-            className={`djp-track-block ${clip.transition === 'fade' ? 'djp-fade' : ''}`}
-            style={{ width: `${widthPct}%` }}
-            title={`${clip.src} · ${fmtSec(start)}–${fmtSec(start + clip.clipDuration)}`}
+            className={`djp-track-block ${clip.transition === 'fade' ? 'djp-fade' : ''} ${isD ? 'djp-dragging' : ''}`}
+            style={drag && isD ? { position: 'absolute', left: pct(start), width: pct(dur) } : { width: pct(dur) }}
+            title={`${clip.src} · ${fmtSec(start)}–${fmtSec(start + dur)}`}
             onClick={(e) => {
               e.stopPropagation();
+              if (justDragged.current) return;
               onSeekClip(start);
             }}
           >
             <span className="djp-track-label">{clip.src}</span>
+            <div
+              className="djp-handle djp-hl"
+              title="裁剪头部"
+              onMouseDown={(e) =>
+                beginDrag(e, { kind: 'trimL', lane: 'main', id: clip.id, origAt: start, origDur: clip.clipDuration, origIn: clip.inPoint })
+              }
+            />
+            <div
+              className="djp-handle djp-hr"
+              title="裁剪尾部"
+              onMouseDown={(e) =>
+                beginDrag(e, { kind: 'trimR', lane: 'main', id: clip.id, origAt: start, origDur: clip.clipDuration, origIn: clip.inPoint })
+              }
+            />
           </div>
         ))}
-        {main.clips.length === 0 && <span className="djp-trow-empty">空</span>}
+        {(main?.clips.length ?? 0) === 0 && <span className="djp-trow-empty">空</span>}
       </Row>
       {overlays.map((tr) => (
         <Row key={tr.id} name={tr.name ?? '画中画'}>
-          {tr.clips.map((c) => (
-            <div
-              key={c.id}
-              className="djp-track-block djp-pip-block"
-              style={{
-                position: 'absolute',
-                left: `${((c.atSeconds ?? 0) / total) * 100}%`,
-                width: `${(c.clipDuration / total) * 100}%`,
-              }}
-              title={`${c.src} · ${fmtSec(c.atSeconds ?? 0)}–${fmtSec((c.atSeconds ?? 0) + c.clipDuration)}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                onSeekClip(c.atSeconds ?? 0);
-              }}
-            >
-              <span className="djp-track-label">{c.src}</span>
-            </div>
-          ))}
+          {tr.clips.map((c) => {
+            const isD = drag?.lane === 'pip' && drag.id === c.id;
+            const at = drag && isD ? drag.previewAt : c.atSeconds ?? 0;
+            const dur = drag && isD ? drag.previewDur : c.clipDuration;
+            return (
+              <div
+                key={c.id}
+                className={`djp-track-block djp-pip-block ${isD ? 'djp-dragging' : ''}`}
+                style={{ position: 'absolute', left: pct(at), width: pct(dur) }}
+                title={`${c.src} · ${fmtSec(at)}–${fmtSec(at + dur)}`}
+                onMouseDown={(e) =>
+                  beginDrag(e, { kind: 'move', lane: 'pip', id: c.id, origAt: c.atSeconds ?? 0, origDur: c.clipDuration, origIn: c.inPoint })
+                }
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (justDragged.current) return;
+                  onSeekClip(c.atSeconds ?? 0);
+                }}
+              >
+                <span className="djp-track-label">{c.src}</span>
+                <div
+                  className="djp-handle djp-hl"
+                  title="裁剪头部"
+                  onMouseDown={(e) =>
+                    beginDrag(e, { kind: 'trimL', lane: 'pip', id: c.id, origAt: c.atSeconds ?? 0, origDur: c.clipDuration, origIn: c.inPoint })
+                  }
+                />
+                <div
+                  className="djp-handle djp-hr"
+                  title="裁剪尾部"
+                  onMouseDown={(e) =>
+                    beginDrag(e, { kind: 'trimR', lane: 'pip', id: c.id, origAt: c.atSeconds ?? 0, origDur: c.clipDuration, origIn: c.inPoint })
+                  }
+                />
+              </div>
+            );
+          })}
         </Row>
       ))}
       {t.audioTracks.map((tr) => (
         <Row key={tr.id} name={`♪ ${tr.name ?? '音频'}`}>
-          {tr.clips.map((c) => (
-            <div
-              key={c.id}
-              className="djp-track-block djp-audio-block"
-              style={{
-                position: 'absolute',
-                left: `${(c.atSeconds / total) * 100}%`,
-                width: `${(c.duration / total) * 100}%`,
-              }}
-              title={`${c.src} · ${fmtSec(c.atSeconds)}–${fmtSec(c.atSeconds + c.duration)}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                onSeekClip(c.atSeconds);
-              }}
-            >
-              <span className="djp-track-label">♪ {c.src}</span>
-            </div>
-          ))}
+          {tr.clips.map((c) => {
+            const isD = drag?.lane === 'audio' && drag.id === c.id;
+            const at = drag && isD ? drag.previewAt : c.atSeconds;
+            const dur = drag && isD ? drag.previewDur : c.duration;
+            return (
+              <div
+                key={c.id}
+                className={`djp-track-block djp-audio-block ${isD ? 'djp-dragging' : ''}`}
+                style={{ position: 'absolute', left: pct(at), width: pct(dur) }}
+                title={`${c.src} · ${fmtSec(at)}–${fmtSec(at + dur)}`}
+                onMouseDown={(e) =>
+                  beginDrag(e, { kind: 'move', lane: 'audio', id: c.id, origAt: c.atSeconds, origDur: c.duration, origIn: c.inPoint })
+                }
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (justDragged.current) return;
+                  onSeekClip(c.atSeconds);
+                }}
+              >
+                <span className="djp-track-label">♪ {c.src}</span>
+                <div
+                  className="djp-handle djp-hl"
+                  title="裁剪头部"
+                  onMouseDown={(e) =>
+                    beginDrag(e, { kind: 'trimL', lane: 'audio', id: c.id, origAt: c.atSeconds, origDur: c.duration, origIn: c.inPoint })
+                  }
+                />
+                <div
+                  className="djp-handle djp-hr"
+                  title="裁剪尾部"
+                  onMouseDown={(e) =>
+                    beginDrag(e, { kind: 'trimR', lane: 'audio', id: c.id, origAt: c.atSeconds, origDur: c.duration, origIn: c.inPoint })
+                  }
+                />
+              </div>
+            );
+          })}
         </Row>
       ))}
     </div>
@@ -353,7 +595,9 @@ export const Panel: React.FC = () => {
   const hist = useHistory(timeline, mutate);
   const o = ops(hist.commit);
   const [canvasOpen, setCanvasOpen] = useState(false);
+  const [histOpen, setHistOpen] = useState(false);
   const audioFileRef = useRef<HTMLInputElement>(null);
+  const playheadRef = useRef(0);
 
   // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y（输入框聚焦时不抢）
   useEffect(() => {
@@ -387,6 +631,22 @@ export const Panel: React.FC = () => {
     { label: '居中', box: { x: 0.35, y: 0.35, w: 0.3, h: 0.3 } },
     { label: '全屏', box: { x: 0, y: 0, w: 1, h: 1 } },
   ];
+
+  // 主轨上被播放头穿过的 clip → 在播放头处分割
+  const splitMainAtPlayhead = () => {
+    const at = Math.round(playheadRef.current * 100) / 100;
+    for (const tr0 of [t.videoTracks[0]]) {
+      if (!tr0) return;
+      let acc = 0;
+      for (const c of tr0.clips) {
+        if (at > acc + 0.05 && at < acc + c.clipDuration - 0.05) {
+          o.splitClip(c.id, at);
+          return;
+        }
+        acc += c.clipDuration;
+      }
+    }
+  };
 
   // 预览用时间线：素材地址转绝对 URL（不动事实源，导出仍发原始相对路径）
   const previewTimeline: Timeline = {
@@ -470,6 +730,7 @@ export const Panel: React.FC = () => {
           {pipClips.length ? ` · 画中画×${pipClips.length}` : ''}
           {audioClips.length ? ` · 音频×${audioClips.length}` : ''} · {t.overlays.length} 字幕
         </span>
+        <button className="djp-btn" title="版本历史（AI 修改自动存档，可恢复）" onClick={() => setHistOpen(true)}>历史</button>
         <button className="djp-btn" title="画布设置" onClick={() => setCanvasOpen(true)}>画布</button>
         <ExportControl t={t} />
       </div>
@@ -496,7 +757,7 @@ export const Panel: React.FC = () => {
         </div>
       )}
 
-      <TrackStrip t={t} onSeekClip={(start) => seekToSeconds(start, t.meta.fps)} />
+      <TrackStrip t={t} o={o} playheadRef={playheadRef} onSeekClip={(start) => seekToSeconds(start, t.meta.fps)} />
 
       <AssetsSection onAddClip={addAssetClip} onSetBgm={setBgm} />
 
@@ -504,6 +765,7 @@ export const Panel: React.FC = () => {
         <div className="djp-section-head">
           <span>片段（主轨道）</span>
           <span style={{ display: 'flex', gap: 6 }}>
+            <button className="djp-btn" title="在播放头处分割主轨片段" onClick={splitMainAtPlayhead}>✂ 分割</button>
             <button className="djp-btn" title="加画中画叠加轨" onClick={o.addPip}>画中画</button>
             <button className="djp-add" title="添加片段" onClick={o.addClip}>+</button>
           </span>
@@ -582,6 +844,7 @@ export const Panel: React.FC = () => {
             </select>
             <NumberField label="从" value={c.atSeconds ?? 0} onCommit={(v) => o.updateClip(c.id, { atSeconds: Math.max(0, v) })} />
             <NumberField label="时长" value={c.clipDuration} min={0.1} onCommit={(v) => o.updateClip(c.id, { clipDuration: v })} />
+            <button className="djp-btn" title="在播放头处分割" onClick={() => o.splitClip(c.id, Math.round(playheadRef.current * 100) / 100)}>✂</button>
             <button className="djp-del" title="删除画中画" onClick={() => o.removeClip(c.id)}>✕</button>
           </div>
         ))}
@@ -639,6 +902,7 @@ export const Panel: React.FC = () => {
                 <NumberField label="从" value={c.atSeconds} onCommit={(v) => o.updateAudioClip(c.id, { atSeconds: Math.max(0, v) })} />
                 <NumberField label="时长" value={c.duration} min={0.1} onCommit={(v) => o.updateAudioClip(c.id, { duration: v })} />
                 <NumberField label="音量" value={c.volume} step={0.1} onCommit={(v) => o.updateAudioClip(c.id, { volume: Math.min(1, Math.max(0, v)) })} />
+                <button className="djp-btn" title="在播放头处分割" onClick={() => o.splitClip(c.id, Math.round(playheadRef.current * 100) / 100)}>✂</button>
                 <button className="djp-del" title="删除音频片段" onClick={() => o.removeAudioClip(c.id)}>✕</button>
               </div>
             ))}
@@ -684,6 +948,16 @@ export const Panel: React.FC = () => {
           t={t}
           onApply={(meta) => hist.commit((cur) => ({ ...cur, meta: { ...cur.meta, ...meta } }))}
           onClose={() => setCanvasOpen(false)}
+        />
+      )}
+
+      {histOpen && (
+        <HistoryDialog
+          onClose={() => setHistOpen(false)}
+          onRestored={() => {
+            hist.clear();
+            void reload();
+          }}
         />
       )}
     </div>

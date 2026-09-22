@@ -75,6 +75,21 @@ const CSS = `
 .djp-card-head label.djp-field input[type='range'] { accent-color: var(--dsw-alias-brand-primary); }
 .djp-btn.djp-error { color: var(--dsw-alias-state-error-primary); }
 
+/* ---- 轨道交互：拖拽/裁剪/版本历史 ---- */
+.djp-track-block { position: relative; }
+.djp-handle { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 1; }
+.djp-handle.djp-hl { left: 0; border-radius: 4px 0 0 4px; }
+.djp-handle.djp-hr { right: 0; border-radius: 0 4px 4px 0; }
+.djp-handle:hover { background: rgba(255, 255, 255, 0.35); }
+.djp-pip-block, .djp-audio-block { cursor: grab; }
+.djp-dragging { opacity: 0.8; outline: 1px solid var(--dsw-alias-brand-primary); cursor: grabbing !important; z-index: 2; }
+.djp-hist-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow: auto; margin-top: 8px; }
+.djp-hist-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; }
+.djp-hist-meta { display: flex; gap: 8px; min-width: 0; align-items: center; }
+.djp-hist-time { font-size: 11px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.djp-hist-label { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.djp-error { color: var(--dsw-alias-state-error-primary); font-size: 12px; margin-top: 6px; }
+
 /* ---- 画布设置对话框 ---- */
 .djp-mask { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; }
 .djp-dialog { width: 300px; background: var(--dsw-alias-bg-layer-1); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }

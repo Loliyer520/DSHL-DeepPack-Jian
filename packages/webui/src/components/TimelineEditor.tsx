@@ -37,8 +37,8 @@ const NumberField: React.FC<{
   );
 };
 
-const ClipRow: React.FC<{ clip: Clip; index: number }> = ({ clip, index }) => {
-  const { updateClip, removeClip } = useStore();
+const ClipRow: React.FC<{ clip: Clip; index: number; splitAt?: number }> = ({ clip, index, splitAt }) => {
+  const { updateClip, removeClip, splitClip } = useStore();
   return (
     <div className="edit-card clip-card" data-index={index} draggable onDragStart={(e) => {
       e.dataTransfer.setData("text/clip-index", String(index));
@@ -57,6 +57,7 @@ const ClipRow: React.FC<{ clip: Clip; index: number }> = ({ clip, index }) => {
           <option value="none">无转场</option>
           <option value="fade">淡入</option>
         </select>
+        <button className="icon-circle danger" title="分割片段" onClick={() => splitAt !== undefined && splitClip(clip.id, splitAt)}>✂</button>
         <button className="icon-circle danger" title="删除片段" onClick={() => removeClip(clip.id)}>
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
             <path d="M2.5 2.5l8 8M10.5 2.5l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
@@ -206,9 +207,14 @@ export const TimelineEditor: React.FC = () => {
           </div>
           {mainClips.length === 0 && <div className="section-empty">主轨道空</div>}
           <div onDragOver={onDragOver} onDrop={onDrop}>
-            {mainClips.map((c, i) => (
-              <ClipRow key={c.id} clip={c} index={i} />
-            ))}
+            {(() => {
+              let acc = 0;
+              return mainClips.map((c, i) => {
+                const mid = acc + c.clipDuration / 2;
+                acc += c.clipDuration;
+                return <ClipRow key={c.id} clip={c} index={i} splitAt={Math.round(mid * 100) / 100} />;
+              });
+            })()}
           </div>
         </div>
 

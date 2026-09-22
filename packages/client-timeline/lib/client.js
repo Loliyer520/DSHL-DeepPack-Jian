@@ -20009,6 +20009,13 @@ function useHistory(timeline, mutate) {
 			redoStack.current = [];
 			force((x) => x + 1);
 		}, []),
+		snapshot: (0, react.useCallback)(() => {
+			if (!timeline) return;
+			undoStack.current.push(timeline);
+			if (undoStack.current.length > 50) undoStack.current.shift();
+			redoStack.current = [];
+			force((x) => x + 1);
+		}, [timeline]),
 		canUndo: undoStack.current.length > 0,
 		canRedo: redoStack.current.length > 0
 	};
@@ -20577,6 +20584,88 @@ const ExportControl = ({ t }) => {
 };
 
 //#endregion
+//#region src/client/HistoryDialog.tsx
+const HistoryDialog = ({ onClose, onRestored }) => {
+	const [snaps, setSnaps] = (0, react.useState)([]);
+	const [busy, setBusy] = (0, react.useState)(null);
+	const [err, setErr] = (0, react.useState)("");
+	(0, react.useEffect)(() => {
+		fetch(`${API_BASE}/api/history`).then((r) => r.json()).then((d) => setSnaps(d.snapshots ?? [])).catch(() => setErr("历史列表加载失败"));
+	}, []);
+	const restore = async (id) => {
+		setBusy(id);
+		setErr("");
+		try {
+			const r = await fetch(`${API_BASE}/api/history/${encodeURIComponent(id)}`, { method: "POST" });
+			const d = await r.json().catch(() => ({}));
+			if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
+			onRestored();
+			onClose();
+		} catch (e) {
+			setErr(e instanceof Error ? e.message : String(e));
+		} finally {
+			setBusy(null);
+		}
+	};
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+		className: "djp-mask",
+		onClick: onClose,
+		children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: "djp-dialog",
+			onClick: (e) => e.stopPropagation(),
+			children: [
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "djp-dialog-title",
+					children: "版本历史"
+				}),
+				err && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "djp-error",
+					children: err
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "djp-hist-list",
+					children: [snaps.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "djp-hint",
+						children: "还没有快照——AI 每次修改时间线都会自动存档。"
+					}), snaps.map((s) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "djp-hist-row",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							className: "djp-hist-meta",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "djp-hist-time",
+								children: new Date(s.at).toLocaleTimeString()
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "djp-hist-label",
+								title: s.label,
+								children: s.label || "(无标注)"
+							})]
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: "djp-btn",
+							disabled: busy !== null,
+							onClick: () => restore(s.id),
+							children: busy === s.id ? "恢复中…" : "恢复"
+						})]
+					}, s.id))]
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "djp-dialog-actions",
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "djp-btn",
+						onClick: onClose,
+						children: "关闭"
+					})
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "djp-hint",
+					style: { marginTop: 8 },
+					children: "最多保留 40 份；恢复前当前状态也会自动存一份，可来回切换。"
+				})
+			]
+		})
+	});
+};
+
+//#endregion
 //#region src/client/Panel.tsx
 const fmtSec = (s) => `${s.toFixed(1)}s`;
 function useTimelineSync() {
@@ -20749,6 +20838,68 @@ const ops = (mutate) => ({
 			} : c$2)
 		}))
 	})),
+	splitClip: (id, atSeconds) => mutate((t) => {
+		for (let ti = 0; ti < t.videoTracks.length; ti++) {
+			const tr = t.videoTracks[ti];
+			const idx = tr.clips.findIndex((c$2) => c$2.id === id);
+			if (idx === -1) continue;
+			const clip = tr.clips[idx];
+			let start = 0;
+			if (ti === 0) for (let i = 0; i < idx; i++) start += tr.clips[i].clipDuration;
+			else start = clip.atSeconds ?? 0;
+			const off = atSeconds - start;
+			if (!(off > .05) || off >= clip.clipDuration - .05) return t;
+			const left = {
+				...clip,
+				clipDuration: off
+			};
+			const right = {
+				...clip,
+				id: clipId(),
+				inPoint: clip.inPoint + off,
+				clipDuration: clip.clipDuration - off
+			};
+			if (clip.atSeconds !== void 0) right.atSeconds = clip.atSeconds + off;
+			const clips = [...tr.clips];
+			clips.splice(idx, 1, left, right);
+			return {
+				...t,
+				videoTracks: t.videoTracks.map((x, i) => i === ti ? {
+					...x,
+					clips
+				} : x)
+			};
+		}
+		for (let ti = 0; ti < t.audioTracks.length; ti++) {
+			const tr = t.audioTracks[ti];
+			const idx = tr.clips.findIndex((c$2) => c$2.id === id);
+			if (idx === -1) continue;
+			const clip = tr.clips[idx];
+			const off = atSeconds - clip.atSeconds;
+			if (!(off > .05) || off >= clip.duration - .05) return t;
+			const left = {
+				...clip,
+				duration: off
+			};
+			const right = {
+				...clip,
+				id: clipId(),
+				inPoint: clip.inPoint + off,
+				duration: clip.duration - off,
+				atSeconds: clip.atSeconds + off
+			};
+			const clips = [...tr.clips];
+			clips.splice(idx, 1, left, right);
+			return {
+				...t,
+				audioTracks: t.audioTracks.map((x, i) => i === ti ? {
+					...x,
+					clips
+				} : x)
+			};
+		}
+		return t;
+	}),
 	reorderClips: (order) => mutate((t) => {
 		const tr0 = t.videoTracks[0];
 		const map = new Map(tr0.clips.map((c$2) => [c$2.id, c$2]));
@@ -20801,35 +20952,141 @@ const NumberField = ({ label: label$2, value, step = .5, min = 0, onCommit }) =>
 		}
 	}, value)]
 });
-const TrackStrip = ({ t, onSeekClip }) => {
+const TrackStrip = ({ t, o, playheadRef, onSeekClip }) => {
 	const [playhead, setPlayhead] = (0, react.useState)(0);
 	const total = Math.max(.1, timelineDurationInFrames(t) / t.meta.fps);
+	const dragRef = (0, react.useRef)(null);
+	const justDragged = (0, react.useRef)(false);
+	const [, forceRender] = (0, react.useState)(0);
+	const ctxRef = (0, react.useRef)({
+		t,
+		o,
+		total
+	});
+	ctxRef.current = {
+		t,
+		o,
+		total
+	};
 	(0, react.useEffect)(() => {
 		let raf = 0;
 		const tick = () => {
 			const p = playerBus.ref;
-			if (p) setPlayhead(p.getCurrentFrame() / t.meta.fps);
+			if (p) {
+				const sec = p.getCurrentFrame() / t.meta.fps;
+				setPlayhead(sec);
+				playheadRef.current = sec;
+			}
 			raf = requestAnimationFrame(tick);
 		};
 		raf = requestAnimationFrame(tick);
 		return () => cancelAnimationFrame(raf);
-	}, [t.meta.fps]);
+	}, [t.meta.fps, playheadRef]);
+	(0, react.useEffect)(() => {
+		const snapV = (cur, v) => {
+			const SNAP = .12;
+			const tt = ctxRef.current.t;
+			const pts = [0, playheadRef.current];
+			if (cur.lane === "main") {
+				let a$2 = 0;
+				for (const c$2 of tt.videoTracks[0]?.clips ?? []) {
+					if (c$2.id !== cur.id) pts.push(a$2, a$2 + c$2.clipDuration);
+					a$2 += c$2.clipDuration;
+				}
+			} else if (cur.lane === "pip") {
+				for (const tr of tt.videoTracks.slice(1)) for (const c$2 of tr.clips) if (c$2.id !== cur.id) pts.push(c$2.atSeconds ?? 0, (c$2.atSeconds ?? 0) + c$2.clipDuration);
+			} else for (const tr of tt.audioTracks) for (const c$2 of tr.clips) if (c$2.id !== cur.id) pts.push(c$2.atSeconds, c$2.atSeconds + c$2.duration);
+			let best = v;
+			let bd = SNAP;
+			for (const p of pts) {
+				const dd = Math.abs(p - v);
+				if (dd < bd) {
+					bd = dd;
+					best = p;
+				}
+			}
+			return Math.round(best * 100) / 100;
+		};
+		const onMove = (e) => {
+			const cur = dragRef.current;
+			if (!cur) return;
+			const dsec = (e.clientX - cur.startX) * cur.secPerPx;
+			if (cur.kind === "move") cur.previewAt = Math.max(0, snapV(cur, cur.origAt + dsec));
+			else if (cur.kind === "trimL") {
+				let at = snapV(cur, cur.origAt + dsec);
+				at = Math.min(Math.max(0, at), cur.origAt + cur.origDur - .1);
+				cur.previewAt = at;
+				cur.previewDur = cur.origDur - (at - cur.origAt);
+			} else cur.previewDur = Math.max(cur.origAt + .1, snapV(cur, cur.origAt + cur.origDur + dsec)) - cur.origAt;
+			forceRender((x) => x + 1);
+		};
+		const onUp = () => {
+			const cur = dragRef.current;
+			dragRef.current = null;
+			if (cur) {
+				if (Math.abs(cur.previewAt - cur.origAt) > .001 || Math.abs(cur.previewDur - cur.origDur) > .001) {
+					justDragged.current = true;
+					window.setTimeout(() => {
+						justDragged.current = false;
+					}, 0);
+				}
+				const { o: oo } = ctxRef.current;
+				const at = cur.previewAt;
+				const dur = Math.max(.1, cur.previewDur);
+				if (cur.kind === "move") if (cur.lane === "pip") oo.updateClip(cur.id, { atSeconds: at });
+				else oo.updateAudioClip(cur.id, { atSeconds: at });
+				else if (cur.lane === "main") {
+					const patch = { clipDuration: dur };
+					if (cur.kind === "trimL" && cur.origIn !== void 0) patch.inPoint = Math.max(0, cur.origIn + (at - cur.origAt));
+					oo.updateClip(cur.id, patch);
+				} else if (cur.lane === "pip") {
+					const patch = { clipDuration: dur };
+					if (cur.kind === "trimL") {
+						patch.atSeconds = at;
+						if (cur.origIn !== void 0) patch.inPoint = Math.max(0, cur.origIn + (at - cur.origAt));
+					}
+					oo.updateClip(cur.id, patch);
+				} else {
+					const patch = { duration: dur };
+					if (cur.kind === "trimL") {
+						patch.atSeconds = at;
+						if (cur.origIn !== void 0) patch.inPoint = Math.max(0, cur.origIn + (at - cur.origAt));
+					}
+					oo.updateAudioClip(cur.id, patch);
+				}
+			}
+			forceRender((x) => x + 1);
+		};
+		window.addEventListener("mousemove", onMove);
+		window.addEventListener("mouseup", onUp);
+		return () => {
+			window.removeEventListener("mousemove", onMove);
+			window.removeEventListener("mouseup", onUp);
+		};
+	}, [playheadRef]);
+	const beginDrag = (e, init) => {
+		e.stopPropagation();
+		e.preventDefault();
+		const laneEl = e.currentTarget.closest(".djp-trow-lane");
+		if (!laneEl) return;
+		const rect = laneEl.getBoundingClientRect();
+		dragRef.current = {
+			...init,
+			startX: e.clientX,
+			secPerPx: total / Math.max(1, rect.width),
+			previewAt: init.origAt,
+			previewDur: init.origDur
+		};
+		forceRender((x) => x + 1);
+	};
 	const onSeek = (e) => {
 		const rect = e.currentTarget.getBoundingClientRect();
 		seekToSeconds(Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)) * total, t.meta.fps);
 	};
+	const drag = dragRef.current;
+	const pct = (v) => `${Math.max(0, v) / total * 100}%`;
 	const main = t.videoTracks[0];
 	const overlays = t.videoTracks.slice(1);
-	let acc = 0;
-	const mainBlocks = main.clips.map((c$2) => {
-		const start = acc;
-		acc += c$2.clipDuration;
-		return {
-			clip: c$2,
-			start,
-			widthPct: c$2.clipDuration / total * 100
-		};
-	});
 	const Row = ({ name, children }) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "djp-trow",
 		onClick: onSeek,
@@ -20844,67 +21101,190 @@ const TrackStrip = ({ t, onSeekClip }) => {
 			})]
 		})]
 	});
+	let acc = 0;
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "djp-tstrip",
 		children: [
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(Row, {
 				name: "视频",
-				children: [mainBlocks.map(({ clip, start, widthPct }) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					className: `djp-track-block ${clip.transition === "fade" ? "djp-fade" : ""}`,
-					style: { width: `${widthPct}%` },
-					title: `${clip.src} · ${fmtSec(start)}–${fmtSec(start + clip.clipDuration)}`,
+				children: [(main?.clips ?? []).map((c$2) => {
+					const isD = drag?.lane === "main" && drag.id === c$2.id;
+					const dur = drag && isD ? Math.max(.1, drag.previewDur) : c$2.clipDuration;
+					const start = acc;
+					acc += dur;
+					return {
+						clip: c$2,
+						start,
+						dur,
+						isD
+					};
+				}).map(({ clip, start, dur, isD }) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: `djp-track-block ${clip.transition === "fade" ? "djp-fade" : ""} ${isD ? "djp-dragging" : ""}`,
+					style: drag && isD ? {
+						position: "absolute",
+						left: pct(start),
+						width: pct(dur)
+					} : { width: pct(dur) },
+					title: `${clip.src} · ${fmtSec(start)}–${fmtSec(start + dur)}`,
 					onClick: (e) => {
 						e.stopPropagation();
+						if (justDragged.current) return;
 						onSeekClip(start);
 					},
-					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "djp-track-label",
-						children: clip.src
-					})
-				}, clip.id)), main.clips.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "djp-track-label",
+							children: clip.src
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "djp-handle djp-hl",
+							title: "裁剪头部",
+							onMouseDown: (e) => beginDrag(e, {
+								kind: "trimL",
+								lane: "main",
+								id: clip.id,
+								origAt: start,
+								origDur: clip.clipDuration,
+								origIn: clip.inPoint
+							})
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "djp-handle djp-hr",
+							title: "裁剪尾部",
+							onMouseDown: (e) => beginDrag(e, {
+								kind: "trimR",
+								lane: "main",
+								id: clip.id,
+								origAt: start,
+								origDur: clip.clipDuration,
+								origIn: clip.inPoint
+							})
+						})
+					]
+				}, clip.id)), (main?.clips.length ?? 0) === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 					className: "djp-trow-empty",
 					children: "空"
 				})]
 			}),
 			overlays.map((tr) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Row, {
 				name: tr.name ?? "画中画",
-				children: tr.clips.map((c$2) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					className: "djp-track-block djp-pip-block",
-					style: {
-						position: "absolute",
-						left: `${(c$2.atSeconds ?? 0) / total * 100}%`,
-						width: `${c$2.clipDuration / total * 100}%`
-					},
-					title: `${c$2.src} · ${fmtSec(c$2.atSeconds ?? 0)}–${fmtSec((c$2.atSeconds ?? 0) + c$2.clipDuration)}`,
-					onClick: (e) => {
-						e.stopPropagation();
-						onSeekClip(c$2.atSeconds ?? 0);
-					},
-					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "djp-track-label",
-						children: c$2.src
-					})
-				}, c$2.id))
+				children: tr.clips.map((c$2) => {
+					const isD = drag?.lane === "pip" && drag.id === c$2.id;
+					const at = drag && isD ? drag.previewAt : c$2.atSeconds ?? 0;
+					const dur = drag && isD ? drag.previewDur : c$2.clipDuration;
+					return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: `djp-track-block djp-pip-block ${isD ? "djp-dragging" : ""}`,
+						style: {
+							position: "absolute",
+							left: pct(at),
+							width: pct(dur)
+						},
+						title: `${c$2.src} · ${fmtSec(at)}–${fmtSec(at + dur)}`,
+						onMouseDown: (e) => beginDrag(e, {
+							kind: "move",
+							lane: "pip",
+							id: c$2.id,
+							origAt: c$2.atSeconds ?? 0,
+							origDur: c$2.clipDuration,
+							origIn: c$2.inPoint
+						}),
+						onClick: (e) => {
+							e.stopPropagation();
+							if (justDragged.current) return;
+							onSeekClip(c$2.atSeconds ?? 0);
+						},
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "djp-track-label",
+								children: c$2.src
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "djp-handle djp-hl",
+								title: "裁剪头部",
+								onMouseDown: (e) => beginDrag(e, {
+									kind: "trimL",
+									lane: "pip",
+									id: c$2.id,
+									origAt: c$2.atSeconds ?? 0,
+									origDur: c$2.clipDuration,
+									origIn: c$2.inPoint
+								})
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "djp-handle djp-hr",
+								title: "裁剪尾部",
+								onMouseDown: (e) => beginDrag(e, {
+									kind: "trimR",
+									lane: "pip",
+									id: c$2.id,
+									origAt: c$2.atSeconds ?? 0,
+									origDur: c$2.clipDuration,
+									origIn: c$2.inPoint
+								})
+							})
+						]
+					}, c$2.id);
+				})
 			}, tr.id)),
 			t.audioTracks.map((tr) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Row, {
 				name: `♪ ${tr.name ?? "音频"}`,
-				children: tr.clips.map((c$2) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					className: "djp-track-block djp-audio-block",
-					style: {
-						position: "absolute",
-						left: `${c$2.atSeconds / total * 100}%`,
-						width: `${c$2.duration / total * 100}%`
-					},
-					title: `${c$2.src} · ${fmtSec(c$2.atSeconds)}–${fmtSec(c$2.atSeconds + c$2.duration)}`,
-					onClick: (e) => {
-						e.stopPropagation();
-						onSeekClip(c$2.atSeconds);
-					},
-					children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-						className: "djp-track-label",
-						children: ["♪ ", c$2.src]
-					})
-				}, c$2.id))
+				children: tr.clips.map((c$2) => {
+					const isD = drag?.lane === "audio" && drag.id === c$2.id;
+					const at = drag && isD ? drag.previewAt : c$2.atSeconds;
+					const dur = drag && isD ? drag.previewDur : c$2.duration;
+					return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: `djp-track-block djp-audio-block ${isD ? "djp-dragging" : ""}`,
+						style: {
+							position: "absolute",
+							left: pct(at),
+							width: pct(dur)
+						},
+						title: `${c$2.src} · ${fmtSec(at)}–${fmtSec(at + dur)}`,
+						onMouseDown: (e) => beginDrag(e, {
+							kind: "move",
+							lane: "audio",
+							id: c$2.id,
+							origAt: c$2.atSeconds,
+							origDur: c$2.duration,
+							origIn: c$2.inPoint
+						}),
+						onClick: (e) => {
+							e.stopPropagation();
+							if (justDragged.current) return;
+							onSeekClip(c$2.atSeconds);
+						},
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "djp-track-label",
+								children: ["♪ ", c$2.src]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "djp-handle djp-hl",
+								title: "裁剪头部",
+								onMouseDown: (e) => beginDrag(e, {
+									kind: "trimL",
+									lane: "audio",
+									id: c$2.id,
+									origAt: c$2.atSeconds,
+									origDur: c$2.duration,
+									origIn: c$2.inPoint
+								})
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "djp-handle djp-hr",
+								title: "裁剪尾部",
+								onMouseDown: (e) => beginDrag(e, {
+									kind: "trimR",
+									lane: "audio",
+									id: c$2.id,
+									origAt: c$2.atSeconds,
+									origDur: c$2.duration,
+									origIn: c$2.inPoint
+								})
+							})
+						]
+					}, c$2.id);
+				})
 			}, tr.id))
 		]
 	});
@@ -20914,7 +21294,9 @@ const Panel = () => {
 	const hist = useHistory(timeline, mutate);
 	const o = ops(hist.commit);
 	const [canvasOpen, setCanvasOpen] = (0, react.useState)(false);
+	const [histOpen, setHistOpen] = (0, react.useState)(false);
 	const audioFileRef = (0, react.useRef)(null);
+	const playheadRef = (0, react.useRef)(0);
 	(0, react.useEffect)(() => {
 		const onKey = (e) => {
 			if (!(e.ctrlKey || e.metaKey)) return;
@@ -21002,6 +21384,20 @@ const Panel = () => {
 			}
 		}
 	];
+	const splitMainAtPlayhead = () => {
+		const at = Math.round(playheadRef.current * 100) / 100;
+		for (const tr0 of [t.videoTracks[0]]) {
+			if (!tr0) return;
+			let acc = 0;
+			for (const c$2 of tr0.clips) {
+				if (at > acc + .05 && at < acc + c$2.clipDuration - .05) {
+					o.splitClip(c$2.id, at);
+					return;
+				}
+				acc += c$2.clipDuration;
+			}
+		}
+	};
 	const previewTimeline = {
 		...t,
 		videoTracks: t.videoTracks.map((tr) => ({
@@ -21129,6 +21525,12 @@ const Panel = () => {
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						className: "djp-btn",
+						title: "版本历史（AI 修改自动存档，可恢复）",
+						onClick: () => setHistOpen(true),
+						children: "历史"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "djp-btn",
 						title: "画布设置",
 						onClick: () => setCanvasOpen(true),
 						children: "画布"
@@ -21161,6 +21563,8 @@ const Panel = () => {
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackStrip, {
 				t,
+				o,
+				playheadRef,
 				onSeekClip: (start) => seekToSeconds(start, t.meta.fps)
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AssetsSection, {
@@ -21177,17 +21581,26 @@ const Panel = () => {
 								display: "flex",
 								gap: 6
 							},
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								className: "djp-btn",
-								title: "加画中画叠加轨",
-								onClick: o.addPip,
-								children: "画中画"
-							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								className: "djp-add",
-								title: "添加片段",
-								onClick: o.addClip,
-								children: "+"
-							})]
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: "djp-btn",
+									title: "在播放头处分割主轨片段",
+									onClick: splitMainAtPlayhead,
+									children: "✂ 分割"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: "djp-btn",
+									title: "加画中画叠加轨",
+									onClick: o.addPip,
+									children: "画中画"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: "djp-add",
+									title: "添加片段",
+									onClick: o.addClip,
+									children: "+"
+								})
+							]
 						})]
 					}),
 					mainClips.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -21323,6 +21736,12 @@ const Panel = () => {
 								onCommit: (v) => o.updateClip(c$2.id, { clipDuration: v })
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "djp-btn",
+								title: "在播放头处分割",
+								onClick: () => o.splitClip(c$2.id, Math.round(playheadRef.current * 100) / 100),
+								children: "✂"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								className: "djp-del",
 								title: "删除画中画",
 								onClick: () => o.removeClip(c$2.id),
@@ -21424,6 +21843,12 @@ const Panel = () => {
 									onCommit: (v) => o.updateAudioClip(c$2.id, { volume: Math.min(1, Math.max(0, v)) })
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: "djp-btn",
+									title: "在播放头处分割",
+									onClick: () => o.splitClip(c$2.id, Math.round(playheadRef.current * 100) / 100),
+									children: "✂"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 									className: "djp-del",
 									title: "删除音频片段",
 									onClick: () => o.removeAudioClip(c$2.id),
@@ -21498,6 +21923,13 @@ const Panel = () => {
 					}
 				})),
 				onClose: () => setCanvasOpen(false)
+			}),
+			histOpen && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HistoryDialog, {
+				onClose: () => setHistOpen(false),
+				onRestored: () => {
+					hist.clear();
+					reload();
+				}
 			})
 		]
 	});
@@ -21579,6 +22011,21 @@ const CSS = `
 /* ---- 画中画/音频卡 ---- */
 .djp-card-head label.djp-field input[type='range'] { accent-color: var(--dsw-alias-brand-primary); }
 .djp-btn.djp-error { color: var(--dsw-alias-state-error-primary); }
+
+/* ---- 轨道交互：拖拽/裁剪/版本历史 ---- */
+.djp-track-block { position: relative; }
+.djp-handle { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 1; }
+.djp-handle.djp-hl { left: 0; border-radius: 4px 0 0 4px; }
+.djp-handle.djp-hr { right: 0; border-radius: 0 4px 4px 0; }
+.djp-handle:hover { background: rgba(255, 255, 255, 0.35); }
+.djp-pip-block, .djp-audio-block { cursor: grab; }
+.djp-dragging { opacity: 0.8; outline: 1px solid var(--dsw-alias-brand-primary); cursor: grabbing !important; z-index: 2; }
+.djp-hist-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow: auto; margin-top: 8px; }
+.djp-hist-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; }
+.djp-hist-meta { display: flex; gap: 8px; min-width: 0; align-items: center; }
+.djp-hist-time { font-size: 11px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.djp-hist-label { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.djp-error { color: var(--dsw-alias-state-error-primary); font-size: 12px; margin-top: 6px; }
 
 /* ---- 画布设置对话框 ---- */
 .djp-mask { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; }

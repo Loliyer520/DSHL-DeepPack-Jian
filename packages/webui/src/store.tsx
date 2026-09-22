@@ -20,6 +20,7 @@ interface Store {
   addAudio: (src: string, duration: number) => void;
   updateAudioTrack: (trackId: string, patch: { volume?: number; muted?: boolean }) => void;
   removeClip: (clipId: string, by?: string) => void;
+  splitClip: (clipId: string, atSeconds: number, by?: string) => void;
   updateClip: (clipId: string, patch: Partial<Clip> & Partial<AudioClip>, by?: string) => void;
   reorderClips: (order: string[], by?: string) => void;
   addOverlay: () => void;
@@ -179,6 +180,47 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [setTimeline, injectSystem],
   );
 
+  // 分割：与 5180 服务端 splitClip op 同语义（全局切点，主轨串行换算局部偏移）
+  const splitClipBy = useCallback(
+    (by: string, clipId: string, atSeconds: number) => {
+      setTimeline((t) => {
+        for (let ti = 0; ti < t.videoTracks.length; ti++) {
+          const tr = t.videoTracks[ti];
+          const idx = tr.clips.findIndex((c) => c.id === clipId);
+          if (idx === -1) continue;
+          const clip = tr.clips[idx];
+          let start = 0;
+          if (ti === 0) for (let i = 0; i < idx; i++) start += tr.clips[i].clipDuration;
+          else start = clip.atSeconds ?? 0;
+          const off = atSeconds - start;
+          if (!(off > 0.05) || off >= clip.clipDuration - 0.05) return t;
+          const left = { ...clip, clipDuration: off };
+          const right: Clip = { ...clip, id: nextId("c"), inPoint: clip.inPoint + off, clipDuration: clip.clipDuration - off };
+          if (clip.atSeconds !== undefined) right.atSeconds = clip.atSeconds + off;
+          const clips = [...tr.clips];
+          clips.splice(idx, 1, left, right);
+          return { ...t, videoTracks: t.videoTracks.map((x, i) => (i === ti ? { ...x, clips } : x)) };
+        }
+        for (let ti = 0; ti < t.audioTracks.length; ti++) {
+          const tr = t.audioTracks[ti];
+          const idx = tr.clips.findIndex((c) => c.id === clipId);
+          if (idx === -1) continue;
+          const clip = tr.clips[idx];
+          const off = atSeconds - clip.atSeconds;
+          if (!(off > 0.05) || off >= clip.duration - 0.05) return t;
+          const left = { ...clip, duration: off };
+          const right: AudioClip = { ...clip, id: nextId("ac"), inPoint: clip.inPoint + off, duration: clip.duration - off, atSeconds: clip.atSeconds + off };
+          const clips = [...tr.clips];
+          clips.splice(idx, 1, left, right);
+          return { ...t, audioTracks: t.audioTracks.map((x, i) => (i === ti ? { ...x, clips } : x)) };
+        }
+        return t;
+      });
+      injectSystem(by, `分割片段 ${clipId} @ ${fmtSec(atSeconds)}`);
+    },
+    [setTimeline, injectSystem],
+  );
+
   const updateClipBy = useCallback(
     (by: string, clipId: string, patch: Partial<Clip> & Partial<AudioClip>) => {
       setTimeline((t) => ({
@@ -293,6 +335,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           case "removeAudio":
             if (op.id) removeClipBy("AI 剪辑", op.id);
             break;
+          case "splitClip":
+            if (op.id && typeof op.atSeconds === "number") splitClipBy("AI 剪辑", op.id, op.atSeconds);
+            break;
           case "updateClip":
             if (op.id && op.patch) updateClipBy("AI 剪辑", op.id, op.patch);
             break;
@@ -352,7 +397,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       }
     },
-    [addClipBy, addPipBy, addAudioBy, removeClipBy, updateClipBy, reorderClipsBy, addOverlayBy, removeOverlayBy, updateOverlayBy, setTimeline, injectSystem],
+    [addClipBy, addPipBy, addAudioBy, removeClipBy, splitClipBy, updateClipBy, reorderClipsBy, addOverlayBy, removeOverlayBy, updateOverlayBy, setTimeline, injectSystem],
   );
 
   const value = useMemo<Store>(
@@ -444,13 +489,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         injectSystem("手动剪辑", `调整音频轨 ${trackId} · ${JSON.stringify(patch)}`);
       },
       removeClip: (clipId) => removeClipBy("手动剪辑", clipId),
+      splitClip: (clipId, atSeconds) => splitClipBy("手动剪辑", clipId, atSeconds),
       updateClip: (clipId, patch) => updateClipBy("手动剪辑", clipId, patch),
       reorderClips: (order, by = "手动剪辑") => reorderClipsBy(by, order),
       addOverlay: () => addOverlayBy("手动剪辑"),
       removeOverlay: (index) => removeOverlayBy("手动剪辑", index),
       updateOverlay: (index, patch) => updateOverlayBy("手动剪辑", index, patch),
     }),
-    [sessions, activeId, active, aiPending, mutateActive, applyOps, addClipBy, addPipBy, addAudioBy, removeClipBy, updateClipBy, reorderClipsBy, addOverlayBy, removeOverlayBy, updateOverlayBy],
+    [sessions, activeId, active, aiPending, mutateActive, applyOps, addClipBy, addPipBy, addAudioBy, removeClipBy, splitClipBy, updateClipBy, reorderClipsBy, addOverlayBy, removeOverlayBy, updateOverlayBy],
   );
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

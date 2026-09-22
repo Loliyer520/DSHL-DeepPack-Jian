@@ -44,5 +44,14 @@ export function useHistory(
     force((x) => x + 1);
   }, []);
 
-  return { commit, undo, redo, clear, canUndo: undoStack.current.length > 0, canRedo: redoStack.current.length > 0 };
+  // 只推栈不 mutate（拖拽开场用：拖拽过程走裸 mutate，结束时不再重复推栈）
+  const snapshot = useCallback(() => {
+    if (!timeline) return;
+    undoStack.current.push(timeline);
+    if (undoStack.current.length > 50) undoStack.current.shift();
+    redoStack.current = [];
+    force((x) => x + 1);
+  }, [timeline]);
+
+  return { commit, undo, redo, clear, snapshot, canUndo: undoStack.current.length > 0, canRedo: redoStack.current.length > 0 };
 }

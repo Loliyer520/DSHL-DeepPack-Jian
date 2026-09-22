@@ -173,7 +173,7 @@ const json = (res, code, obj) => {
 // 合法形：{op:"updateClip",...} / {type:"updateClip",...}；走样形：{"updateClip":{...}} 或 {"removeOverlay":0}
 const OPS_NEEDING_ID = new Set(["removeClip"]);
 const OPS_NEEDING_INDEX = new Set(["removeOverlay", "updateOverlay"]);
-const VALID_OPS = new Set(["addClip", "removeClip", "updateClip", "reorderClips", "addOverlay", "removeOverlay", "updateOverlay", "setMeta", "addAudio", "removeAudio", "updateAudioTrack"]);
+const VALID_OPS = new Set(["addClip", "removeClip", "updateClip", "reorderClips", "addOverlay", "removeOverlay", "updateOverlay", "setMeta", "addAudio", "removeAudio", "updateAudioTrack", "splitClip"]);
 
 // 画布 meta 消毒：fps 1-120 整数；宽/高 16-7680 且偶数对齐（h264 要求）
 function sanitizeMetaPatch(p) {
@@ -239,6 +239,7 @@ function normalizeOps(rawOps) {
           if (name === "addOverlay" && typeof op.text !== "string") throw new Error("缺少 text");
           if (name === "addAudio" && typeof op.src !== "string") throw new Error("addAudio 缺少 src");
           if (name === "updateAudioTrack" && (typeof op.id !== "string" || typeof op.patch !== "object")) throw new Error("updateAudioTrack 缺少 id/patch");
+          if (name === "splitClip" && (typeof op.id !== "string" || !Number.isFinite(Number(op.atSeconds)))) throw new Error("splitClip 缺少 id/atSeconds");
           accepted.push(sanitizeOp(op));
           return;
         }
@@ -329,8 +330,48 @@ function loadTimelineFile() {
 }
 function persistTimeline(t) {
   try {
+    fs.mkdirSync(path.dirname(timelinePath(currentProjectId())), { recursive: true });
     fs.writeFileSync(timelinePath(currentProjectId()), JSON.stringify(t, null, 2));
   } catch (e) { console.warn("timeline 持久化失败:", e.message); }
+}
+
+// ---- 版本历史：项目目录 history/ 下快照，AI ops 前自动存 ----
+function historyDir() {
+  return path.join(projectDir(currentProjectId()), "history");
+}
+
+function saveSnapshot(label) {
+  if (!lastTimeline) return null;
+  const dir = historyDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const id = `v${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+  const snap = { id, at: new Date().toISOString(), label: String(label ?? "").slice(0, 60), timeline: lastTimeline };
+  fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(snap, null, 2));
+  // 最多留 40 份，超出删最旧
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
+  while (files.length > 40) fs.rmSync(path.join(dir, files.shift()), { force: true });
+  return id;
+}
+
+function listSnapshots() {
+  try {
+    const dir = historyDir();
+    return fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => {
+        try {
+          const s = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+          return { id: s.id, at: s.at, label: s.label };
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => (a.at < b.at ? 1 : -1));
+  } catch {
+    return [];
+  }
 }
 lastTimeline = loadTimelineFile();
 
@@ -436,6 +477,59 @@ function applyOpsToTimeline(ops) {
         }
         break;
       }
+      case "splitClip": {
+        // 主轨 clip：atSeconds 为全局时间，换算成 clip 内局部偏移；叠加/音频 clip：atSeconds - clip.atSeconds
+        const at = Number(op.atSeconds);
+        const hitV = findVideoClip(op.id);
+        const hitA = hitV
+          ? null
+          : (() => {
+              for (const tr of t.audioTracks) {
+                const c = tr.clips.find((x) => x.id === op.id);
+                if (c) return { track: tr, clip: c };
+              }
+              return null;
+            })();
+        if (hitV) {
+          const { track, clip } = hitV;
+          let start = 0;
+          if (track === mainTrack()) {
+            for (const c of track.clips) {
+              if (c.id === clip.id) break;
+              start += c.clipDuration;
+            }
+          } else {
+            start = clip.atSeconds ?? 0;
+          }
+          const off = at - start;
+          if (!(off > 0.05) || off >= clip.clipDuration - 0.05) break; // 切点太靠边，忽略
+          const left = { ...clip, clipDuration: off };
+          const right = {
+            ...clip,
+            id: newClipId(),
+            inPoint: clip.inPoint + off,
+            clipDuration: clip.clipDuration - off,
+          };
+          if (clip.atSeconds !== undefined) right.atSeconds = (clip.atSeconds ?? 0) + off;
+          const idx = track.clips.findIndex((c) => c.id === clip.id);
+          track.clips.splice(idx, 1, left, right);
+        } else if (hitA) {
+          const { track, clip } = hitA;
+          const off = at - clip.atSeconds;
+          if (!(off > 0.05) || off >= clip.duration - 0.05) break;
+          const left = { ...clip, duration: off };
+          const right = {
+            ...clip,
+            id: newClipId(),
+            inPoint: clip.inPoint + off,
+            duration: clip.duration - off,
+            atSeconds: clip.atSeconds + off,
+          };
+          const idx = track.clips.findIndex((c) => c.id === clip.id);
+          track.clips.splice(idx, 1, left, right);
+        }
+        break;
+      }
       case "addOverlay":
         t.overlays.push({
           text: op.text,
@@ -489,8 +583,32 @@ const server = http.createServer(async (req, res) => {
     const body = JSON.parse(await readBody(req));
     const { accepted, rejected } = normalizeOps(body.ops);
     pendingOps.push(...accepted);
-    if (accepted.length) applyOpsToTimeline(accepted); // 服务端直接落时间线（事实源）
+    if (accepted.length) {
+      // AI 改时间线前自动快照（历史/ 可回溯）
+      saveSnapshot(`AI: ${accepted.map((o) => o.op).join(", ")}`);
+      applyOpsToTimeline(accepted); // 服务端直接落时间线（事实源）
+    }
     return json(res, 200, { accepted: accepted.length, rejected });
+  }
+
+  // 版本历史：列表 / 恢复（恢复前对当前状态保底快照，可来回切）
+  if (url.pathname === "/api/history" && req.method === "GET") {
+    return json(res, 200, { snapshots: listSnapshots() });
+  }
+  if (url.pathname?.startsWith("/api/history/") && req.method === "POST") {
+    const id = decodeURIComponent(url.pathname.slice("/api/history/".length));
+    const file = path.join(historyDir(), `${id}.json`);
+    if (!/^v[\w]+$/.test(id) || !fs.existsSync(file)) return json(res, 404, { error: "快照不存在" });
+    try {
+      const snap = JSON.parse(fs.readFileSync(file, "utf8"));
+      const norm = parseTimeline(snap.timeline);
+      saveSnapshot("恢复前自动快照");
+      lastTimeline = norm;
+      persistTimeline(norm);
+      return json(res, 200, { ok: true, restored: snap.id, label: snap.label });
+    } catch (e) {
+      return json(res, 400, { error: `快照恢复失败：${e.message}` });
+    }
   }
 
   // MCP server 读当前时间线

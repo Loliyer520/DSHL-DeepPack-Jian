@@ -49,6 +49,7 @@ const TOOLS = [
       'removeClip{id} / updateClip{id,patch} / reorderClips{order:[id...]} / ' +
       'addAudio{src,duration,atSeconds,volume?,track?} —— 音频轨加 clip，track 是轨名（同名复用，缺省新建） / ' +
       'removeAudio{id} / updateAudioTrack{id,patch:{volume?,muted?,name?}} / ' +
+      'splitClip{id,atSeconds} —— 在全局时间轴 atSeconds 处把片段一分为二（主轨/叠加/音频 clip 均可，切点太靠边会被忽略）/ ' +
       'addOverlay{text,startSeconds,endSeconds,position,fontSize,color} / removeOverlay{index} / updateOverlay{index,patch} / ' +
       'setMeta{patch:{fps?,width?,height?}}（调画布：帧率 1-120，宽高 16-7680 偶数）。\n' +
       "时间单位都是秒；transition 只接受 \"fade\" 或 \"none\"。总时长 = 主轨道串行与所有叠加/音频 clip 末尾的最大值。",
@@ -65,6 +66,7 @@ const TOOLS = [
               opSchema("reorderClips", { order: { type: "array", items: { type: "string" } } }, ["order"]),
               opSchema("addAudio", { src: { type: "string" }, inPoint: NUM, duration: { type: "number", exclusiveMinimum: 0 }, volume: { type: "number", minimum: 0, maximum: 1 }, atSeconds: NUM, track: { type: "string" } }, ["src", "duration"]),
               opSchema("removeAudio", { id: { type: "string" } }, ["id"]),
+              opSchema("splitClip", { id: { type: "string" }, atSeconds: { type: "number", description: "全局时间轴切点（秒）" } }, ["id", "atSeconds"]),
               opSchema("updateAudioTrack", { id: { type: "string" }, patch: { type: "object", properties: { volume: { type: "number", minimum: 0, maximum: 1 }, muted: { type: "boolean" }, name: { type: "string" } } } }, ["id", "patch"]),
               opSchema("addOverlay", { text: { type: "string" }, startSeconds: NUM, endSeconds: NUM, position: { enum: ["top", "center", "bottom"] }, fontSize: NUM, color: { type: "string" } }, ["text", "startSeconds", "endSeconds"]),
               opSchema("removeOverlay", { index: { type: "integer", minimum: 0 } }, ["index"]),
