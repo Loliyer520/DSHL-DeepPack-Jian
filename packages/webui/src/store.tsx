@@ -44,8 +44,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   const injectSystem = useCallback(
-    (text: string) => {
-      const msg: ChatMessage = { id: nextId("m"), role: "system", text, time: Date.now() };
+    (title: string, text: string) => {
+      const msg: ChatMessage = { id: nextId("m"), role: "system", title, text, time: Date.now() };
       mutateActive((s) => ({ ...s, messages: [...s.messages, msg] }));
     },
     [mutateActive],
@@ -70,7 +70,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           id,
           title: "新会话",
           updatedAt: Date.now(),
-          messages: [{ id: nextId("m"), role: "system", text: "会话已创建", time: Date.now() }],
+          messages: [{ id: nextId("m"), role: "system", title: "系统", text: "会话已创建", time: Date.now() }],
           timeline: { meta: { fps: 30, width: 1280, height: 720 }, clips: [], audio: null, overlays: [] },
         };
         setSessions((prev) => [session, ...prev]);
@@ -110,11 +110,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           volume: 1,
         };
         setTimeline((t) => ({ ...t, clips: [...t.clips, clip] }));
-        injectSystem(`➕ 你添加了一段素材：${clip.src}（${fmtSec(clip.clipDuration)}）`);
+        injectSystem("手动剪辑", `添加片段 ${clip.src} · 时长 ${fmtSec(clip.clipDuration)}`);
       },
       removeClip: (clipId) => {
         setTimeline((t) => ({ ...t, clips: t.clips.filter((c) => c.id !== clipId) }));
-        injectSystem(`➖ 你删除了片段 ${clipId}`);
+        injectSystem("手动剪辑", `删除片段 ${clipId}`);
       },
       updateClip: (clipId, patch) => {
         setTimeline((t) => ({
@@ -134,7 +134,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             return `${name[k] ?? k} → ${val}`;
           })
           .join("，");
-        injectSystem(`✂️ 你调整了片段 ${clipId}：${desc}`);
+        injectSystem("手动剪辑", `调整片段 ${clipId} · ${desc}`);
       },
       addOverlay: () => {
         const ov: Overlay = {
@@ -146,18 +146,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           color: "#ffffff",
         };
         setTimeline((t) => ({ ...t, overlays: [...t.overlays, ov] }));
-        injectSystem(`💬 你添加了一条字幕（${fmtSec(ov.startSeconds)}–${fmtSec(ov.endSeconds)}）`);
+        injectSystem("手动剪辑", `添加字幕（${fmtSec(ov.startSeconds)}–${fmtSec(ov.endSeconds)}）`);
       },
       removeOverlay: (index) => {
         setTimeline((t) => ({ ...t, overlays: t.overlays.filter((_, i) => i !== index) }));
-        injectSystem(`➖ 你删除了第 ${index + 1} 条字幕`);
+        injectSystem("手动剪辑", `删除第 ${index + 1} 条字幕`);
       },
       updateOverlay: (index, patch) => {
         setTimeline((t) => ({
           ...t,
           overlays: t.overlays.map((o, i) => (i === index ? { ...o, ...patch } : o)),
         }));
-        if (patch.text !== undefined) injectSystem(`✏️ 你把第 ${index + 1} 条字幕改为「${patch.text}」`);
+        if (patch.text !== undefined) injectSystem("手动剪辑", `第 ${index + 1} 条字幕改为「${patch.text}」`);
       },
     }),
     [sessions, activeId, active, setTimeline, injectSystem, mutateActive],

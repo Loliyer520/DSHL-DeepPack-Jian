@@ -8,6 +8,8 @@ export interface ChatMessage {
   id: string;
   role: MessageRole;
   text: string;
+  // system 消息照 dsh ContextInjectionRow：标题（主色暗淡）+ 摘要（三级灰）
+  title?: string;
   time: number;
 }
 
@@ -84,6 +86,7 @@ export const demoSessions: Session[] = [
       {
         id: "m-3",
         role: "system",
+        title: "系统",
         text: "会话已创建",
         time: Date.now() - 1000 * 60 * 60,
       },

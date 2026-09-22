@@ -121,7 +121,7 @@
   color: var(--label-tertiary);
 }
 
-/* ===== 中间对话区 ===== */
+/* ===== 中间对话区（照抄 dsh ui-chat） ===== */
 .center-col {
   min-width: 0;
   display: flex;
@@ -158,7 +158,8 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 16px 24px;
+  /* dsh：两侧 = composer clearance + 16px */
+  padding: 16px 32px;
 }
 
 .chat-column {
@@ -170,116 +171,201 @@
   gap: 16px;
 }
 
-.msg-row {
+/* 用户气泡：右列堆叠，deepseek-50 底 + 深色字 + 22px 圆角（Figma 659:38813） */
+.user-row {
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
 }
 
-.msg-row.user {
-  justify-content: flex-end;
-}
-
-.msg-row.assistant {
-  justify-content: flex-start;
-}
-
-.msg-bubble {
-  max-width: 82%;
-  padding: 10px 14px;
-  border-radius: 10px;
-  font-size: 14px;
-  line-height: 1.65;
-}
-
-.msg-row.user .msg-bubble {
-  background: var(--ds-500);
-  color: #fff;
-  border-bottom-right-radius: 4px;
-}
-
-.msg-row.assistant .msg-bubble {
-  background: var(--sidebar-fill);
-  border: 0.5px solid var(--border-l2);
-  border-bottom-left-radius: 4px;
-}
-
-.msg-meta {
-  margin-top: 6px;
-  font-size: 11px;
-  opacity: 0.65;
-}
-
-/* 系统注入消息：居中灰条（操作日志） */
-.msg-system {
-  align-self: center;
+.user-stack {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  max-width: 92%;
-  padding: 4px 12px;
-  border-radius: 999px;
-  background: var(--fill-hover);
-  color: var(--label-secondary);
-  font-size: 12px;
-}
-
-.msg-system .msg-time {
-  font-size: 10px;
-  color: var(--label-tertiary);
-  font-variant-numeric: tabular-nums;
-}
-
-/* 输入卡 */
-.composer-wrap {
-  flex: none;
-  padding: 10px 24px 18px;
-}
-
-.composer {
-  max-width: var(--chat-content-width);
-  margin: 0 auto;
-  display: flex;
+  flex-direction: column;
   align-items: flex-end;
   gap: 8px;
-  padding: 10px 12px;
-  border: 0.5px solid var(--border-l3);
-  border-radius: 12px;
-  background: var(--bg-base);
-  box-shadow: 0 2px 12px rgba(15, 17, 21, 0.06);
+  min-width: 0;
+  max-width: min(calc(var(--chat-content-width) * 0.702), 82%);
 }
 
-.composer:focus-within {
-  border-color: var(--ds-400);
+.bubble {
+  max-width: 100%;
+  background: var(--bubble);
+  border-radius: 22px;
+  padding: 10px 16px;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--label-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.composer textarea {
-  flex: 1;
+/* 助手消息：无气泡，正文直排 */
+.assistant-text {
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--label-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 系统注入行：ContextInjectionRow 风格——24px 朴素行，图标 + 标题 + 圆点 + 灰摘要 */
+.ctx-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 2px 0;
+  font-size: 13px;
+  line-height: 24px;
+}
+
+.ctx-leading {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  color: var(--label-secondary);
+}
+
+.ctx-title {
+  flex: none;
+  color: var(--label-primary-dimmed);
+}
+
+.ctx-sep {
+  flex: none;
+  width: 2px;
+  height: 2px;
+  margin: 0 8px;
+  border-radius: 1px;
+  background: var(--label-caption);
+}
+
+.ctx-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--label-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 输入卡：照抄 dsh InputBar——22px 胶囊卡 + 工具行 + 圆形发送键 */
+.composer-root {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 16px 12px;
+}
+
+.composer-card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: var(--chat-content-width);
+  padding-top: 8px;
+  border: 0.5px solid var(--border-l2);
+  border-radius: 22px;
+  background: var(--input-major);
+  box-shadow: var(--elevation-soft);
+  font-size: 14px;
+  line-height: 24px;
+}
+
+.composer-scroll {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-right: 4px;
+}
+
+.composer-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 36px;
+  padding: 4px 8px 0 14px;
   border: none;
   outline: none;
   resize: none;
   background: transparent;
+  font-family: var(--font-family);
+  font-size: inherit;
+  line-height: inherit;
   color: var(--label-primary);
-  font-size: 14px;
-  line-height: 1.5;
+  caret-color: var(--ds-500);
 }
 
-.send-btn {
+.composer-input::placeholder {
+  color: var(--label-caption);
+}
+
+.composer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 8px 6px;
+}
+
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.composer-trailing {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tool-circle {
+  display: grid;
+  place-items: center;
   flex: none;
-  height: 32px;
-  padding: 0 16px;
+  width: 28px;
+  height: 28px;
   border: none;
-  border-radius: 8px;
-  background: var(--ds-500);
-  color: #fff;
-  font-size: 13px;
+  border-radius: 999px;
+  background: var(--sidebar-fill);
+  color: var(--label-primary);
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-in-out);
 }
 
-.send-btn:hover:not(:disabled) {
-  background: var(--ds-600);
+.tool-circle:hover:not(:disabled) {
+  background: var(--interactive-bg-hover);
 }
 
-.send-btn:disabled {
+.tool-circle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 发送键：34px 圆形品牌蓝，白色上箭头，空文本 0.4（figma 34:10465） */
+.send-circle {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 999px;
+  background: var(--button-info-fill);
+  color: #fff;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) ease;
+}
+
+.send-circle:hover:not(:disabled) {
+  background: var(--button-info-hover);
+}
+
+.send-circle:disabled {
   opacity: 0.4;
   cursor: default;
 }
