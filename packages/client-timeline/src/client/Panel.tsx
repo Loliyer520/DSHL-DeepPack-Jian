@@ -273,6 +273,41 @@ const NumberField: React.FC<{
   </label>
 );
 
+// 滤镜预设（v3）：选即应用，选「无滤镜」清空
+const FILTER_PRESETS: { label: string; filter: Exclude<Clip['filter'], undefined> }[] = [
+  { label: '提亮', filter: { brightness: 1.15 } },
+  { label: '黑白', filter: { grayscale: 1 } },
+  { label: '复古', filter: { sepia: 0.6 } },
+  { label: '暖调', filter: { sepia: 0.3, saturate: 1.2 } },
+  { label: '冷调', filter: { hueRotate: 200, saturate: 1.1 } },
+  { label: '高饱和', filter: { saturate: 1.6 } },
+  { label: '高对比', filter: { contrast: 1.3 } },
+  { label: '柔焦', filter: { blur: 4 } },
+];
+
+// 滤镜下拉：值用 JSON 序列化对齐预设，空值 = 无滤镜
+const FilterSelect: React.FC<{ value: Clip['filter']; onCommit: (f: Clip['filter']) => void }> = ({ value, onCommit }) => (
+  <select
+    className="djp-select"
+    value={value ? JSON.stringify(value) : ''}
+    onChange={(e) => {
+      const v = e.target.value;
+      if (!v) {
+        onCommit(undefined);
+        return;
+      }
+      const p = FILTER_PRESETS.find((x) => JSON.stringify(x.filter) === v);
+      if (p) onCommit(p.filter);
+    }}
+    title="滤镜"
+  >
+    <option value="">无滤镜</option>
+    {FILTER_PRESETS.map((p) => (
+      <option key={p.label} value={JSON.stringify(p.filter)}>{p.label}</option>
+    ))}
+  </select>
+);
+
 // 多轨轨道条（交互版）：主轨块裁剪拖柄；叠加/音频块拖拽移动 + 裁剪；吸附到 0/播放头/同轨邻块边缘
 // 拖拽过程只改本地预览，松手才 commit（一次进历史栈，不刷屏）
 interface DragState {
@@ -810,6 +845,14 @@ export const Panel: React.FC = () => {
                   step={0.1}
                   onCommit={(v) => o.updateClip(c.id, { volume: Math.min(1, v) })}
                 />
+                <NumberField
+                  label="速度"
+                  value={c.speed ?? 1}
+                  step={0.25}
+                  min={0.1}
+                  onCommit={(v) => o.updateClip(c.id, { speed: Math.min(10, Math.max(0.1, v)) })}
+                />
+                <FilterSelect value={c.filter} onCommit={(f) => o.updateClip(c.id, { filter: f })} />
               </div>
             </div>
           ))}
@@ -844,6 +887,8 @@ export const Panel: React.FC = () => {
             </select>
             <NumberField label="从" value={c.atSeconds ?? 0} onCommit={(v) => o.updateClip(c.id, { atSeconds: Math.max(0, v) })} />
             <NumberField label="时长" value={c.clipDuration} min={0.1} onCommit={(v) => o.updateClip(c.id, { clipDuration: v })} />
+            <NumberField label="速度" value={c.speed ?? 1} step={0.25} min={0.1} onCommit={(v) => o.updateClip(c.id, { speed: Math.min(10, Math.max(0.1, v)) })} />
+            <FilterSelect value={c.filter} onCommit={(f) => o.updateClip(c.id, { filter: f })} />
             <button className="djp-btn" title="在播放头处分割" onClick={() => o.splitClip(c.id, Math.round(playheadRef.current * 100) / 100)}>✂</button>
             <button className="djp-del" title="删除画中画" onClick={() => o.removeClip(c.id)}>✕</button>
           </div>
@@ -902,6 +947,7 @@ export const Panel: React.FC = () => {
                 <NumberField label="从" value={c.atSeconds} onCommit={(v) => o.updateAudioClip(c.id, { atSeconds: Math.max(0, v) })} />
                 <NumberField label="时长" value={c.duration} min={0.1} onCommit={(v) => o.updateAudioClip(c.id, { duration: v })} />
                 <NumberField label="音量" value={c.volume} step={0.1} onCommit={(v) => o.updateAudioClip(c.id, { volume: Math.min(1, Math.max(0, v)) })} />
+                <NumberField label="速度" value={c.speed ?? 1} step={0.25} min={0.1} onCommit={(v) => o.updateAudioClip(c.id, { speed: Math.min(10, Math.max(0.1, v)) })} />
                 <button className="djp-btn" title="在播放头处分割" onClick={() => o.splitClip(c.id, Math.round(playheadRef.current * 100) / 100)}>✂</button>
                 <button className="djp-del" title="删除音频片段" onClick={() => o.removeAudioClip(c.id)}>✕</button>
               </div>

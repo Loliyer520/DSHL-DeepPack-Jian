@@ -56,8 +56,8 @@ export const demoTimeline: Timeline = {
       id: "v1",
       name: "主轨道",
       clips: [
-        { id: "c1", type: "video", src: "a.mp4", inPoint: 0.5, clipDuration: 4, transition: "fade", volume: 1 },
-        { id: "c2", type: "video", src: "a.mp4", inPoint: 6, clipDuration: 4, transition: "none", volume: 1 },
+        { id: "c1", type: "video", src: "a.mp4", inPoint: 0.5, clipDuration: 4, transition: "fade", volume: 1, speed: 1 },
+        { id: "c2", type: "video", src: "a.mp4", inPoint: 6, clipDuration: 4, transition: "none", volume: 1, speed: 1 },
       ],
     },
   ],
@@ -116,8 +116,8 @@ export const demoSessions: Session[] = [
           id: "v1",
           name: "主轨道",
           clips: [
-            { id: "x1", type: "video", src: "a.mp4", inPoint: 3, clipDuration: 3, transition: "none", volume: 1 },
-            { id: "x2", type: "video", src: "a.mp4", inPoint: 2, clipDuration: 2, transition: "fade", volume: 1 },
+            { id: "x1", type: "video", src: "a.mp4", inPoint: 3, clipDuration: 3, transition: "none", volume: 1, speed: 1 },
+            { id: "x2", type: "video", src: "a.mp4", inPoint: 2, clipDuration: 2, transition: "fade", volume: 1, speed: 1 },
           ],
         },
       ],

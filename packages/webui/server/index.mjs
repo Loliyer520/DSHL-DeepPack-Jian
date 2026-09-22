@@ -191,7 +191,57 @@ function fixTransition(v) {
   if (typeof v === "string" && v.toLowerCase().startsWith("fade")) return "fade";
   return undefined;
 }
+// v3 净化：非法值丢弃而不是入库（坏值会让 parseTimeline 拒载、项目变砖）
+const SPEC_FILTER = { brightness: [0, 3], contrast: [0, 3], saturate: [0, 3], blur: [0, 20], grayscale: [0, 1], sepia: [0, 1], hueRotate: [0, 360] };
+const sanitizeFilter = (f) => {
+  if (!f || typeof f !== "object") return undefined;
+  const out = {};
+  for (const [k, [lo, hi]] of Object.entries(SPEC_FILTER)) {
+    const v = Number(f[k]);
+    if (Number.isFinite(v)) out[k] = Math.min(hi, Math.max(lo, v));
+  }
+  return Object.keys(out).length ? out : undefined;
+};
+const sanitizeAnimations = (a) => {
+  if (!a || typeof a !== "object") return undefined;
+  const kfOk = (arr) => Array.isArray(arr) && arr.length > 0 && arr.every((k) => k && Number.isFinite(Number(k.t)) && Number.isFinite(Number(k.v)));
+  const out = {};
+  for (const ch of ["x", "y", "scale", "opacity", "rotation", "volume"]) {
+    if (kfOk(a[ch])) out[ch] = a[ch].map((k) => ({ t: Number(k.t), v: Number(k.v) }));
+  }
+  return Object.keys(out).length ? out : undefined;
+};
+const sanitizeSpeed = (v) => {
+  const s = Number(v);
+  return Number.isFinite(s) ? Math.min(10, Math.max(0.1, s)) : undefined;
+};
+// 分割后右半段的关键帧时间轴平移（左半段不变，越界帧由求值器牗住）
+const shiftAnims = (anims, off) => {
+  if (!anims || typeof anims !== "object") return undefined;
+  const out = {};
+  for (const ch of Object.keys(anims)) {
+    if (!Array.isArray(anims[ch])) continue;
+    out[ch] = anims[ch].map((k) => ({ t: Math.max(0, Number(k.t) - off), v: Number(k.v) }));
+  }
+  return Object.keys(out).length ? out : undefined;
+};
+
 function sanitizeOp(op) {
+  if (op.op === "updateClip" && op.patch && typeof op.patch === "object") {
+    if (op.patch.speed !== undefined) {
+      const s = sanitizeSpeed(op.patch.speed);
+      if (s !== undefined) op.patch.speed = s;
+      else delete op.patch.speed;
+    }
+    if (op.patch.filter !== undefined) {
+      if (op.patch.filter && typeof op.patch.filter === "object" && !Array.isArray(op.patch.filter)) op.patch.filter = sanitizeFilter(op.patch.filter) ?? {};
+      else delete op.patch.filter;
+    }
+    if (op.patch.animations !== undefined) {
+      if (op.patch.animations && typeof op.patch.animations === "object" && !Array.isArray(op.patch.animations)) op.patch.animations = sanitizeAnimations(op.patch.animations) ?? {};
+      else delete op.patch.animations;
+    }
+  }
   if (op.op === "setMeta") {
     const patch = sanitizeMetaPatch(op.patch ?? op);
     if (!Object.keys(patch).length) throw new Error("setMeta 缺少有效的 fps/width/height");
@@ -404,6 +454,12 @@ function applyOpsToTimeline(ops) {
           transition: op.transition === "fade" ? "fade" : "none",
           volume: clampNum(op.volume, 1, 0, 1),
         };
+        const sp = sanitizeSpeed(op.speed);
+        if (sp !== undefined && sp !== 1) clip.speed = sp;
+        const flt = sanitizeFilter(op.filter);
+        if (flt) clip.filter = flt;
+        const anim = sanitizeAnimations(op.animations);
+        if (anim) clip.animations = anim;
         if (isOverlay) {
           clip.atSeconds = clampNum(op.atSeconds, 0, 0);
           if (op.box && typeof op.box === "object") {
@@ -434,6 +490,16 @@ function applyOpsToTimeline(ops) {
       case "updateClip": {
         const hit = findVideoClip(op.id);
         if (hit) Object.assign(hit.clip, op.patch);
+        else {
+          // 音频 clip 回退：AI 给音频设变速/包络/音量走同一 op
+          for (const tr of t.audioTracks) {
+            const ac = tr.clips.find((x) => x.id === op.id);
+            if (ac) {
+              Object.assign(ac, op.patch);
+              break;
+            }
+          }
+        }
         break;
       }
       case "reorderClips": {
@@ -451,14 +517,19 @@ function applyOpsToTimeline(ops) {
           tr = { id: `a${t.audioTracks.length + 1}`, name, volume: clampNum(op.trackVolume, 1, 0, 1), muted: false, clips: [] };
           t.audioTracks.push(tr);
         }
-        tr.clips.push({
+        const aclip = {
           id: newClipId(),
           src: typeof op.src === "string" ? op.src : "a.mp3",
           inPoint: clampNum(op.inPoint, 0, 0),
           duration: clampNum(op.duration, 3, 0.1),
           volume: clampNum(op.volume, 1, 0, 1),
           atSeconds: clampNum(op.atSeconds, 0, 0),
-        });
+        };
+        const asp = sanitizeSpeed(op.speed);
+        if (asp !== undefined && asp !== 1) aclip.speed = asp;
+        const aanim = sanitizeAnimations(op.animations);
+        if (aanim) aclip.animations = aanim;
+        tr.clips.push(aclip);
         break;
       }
       case "removeAudio": {
@@ -511,6 +582,7 @@ function applyOpsToTimeline(ops) {
             clipDuration: clip.clipDuration - off,
           };
           if (clip.atSeconds !== undefined) right.atSeconds = (clip.atSeconds ?? 0) + off;
+          if (clip.animations) right.animations = shiftAnims(clip.animations, off); // 右半段关键帧时间轴平移
           const idx = track.clips.findIndex((c) => c.id === clip.id);
           track.clips.splice(idx, 1, left, right);
         } else if (hitA) {
@@ -525,6 +597,7 @@ function applyOpsToTimeline(ops) {
             duration: clip.duration - off,
             atSeconds: clip.atSeconds + off,
           };
+          if (clip.animations) right.animations = shiftAnims(clip.animations, off);
           const idx = track.clips.findIndex((c) => c.id === clip.id);
           track.clips.splice(idx, 1, left, right);
         }

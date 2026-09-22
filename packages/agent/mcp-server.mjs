@@ -25,6 +25,32 @@ const PATCH = {
       },
       description: "叠加轨专用：画中画盒子（0-1 分数矩形）",
     },
+    speed: { type: "number", minimum: 0.1, maximum: 10, description: "恒定变速：2=快放一倍，0.5=慢放；clipDuration 仍是成片占时" },
+    filter: {
+      type: "object",
+      properties: {
+        brightness: { type: "number", minimum: 0, maximum: 3 },
+        contrast: { type: "number", minimum: 0, maximum: 3 },
+        saturate: { type: "number", minimum: 0, maximum: 3 },
+        blur: { type: "number", minimum: 0, maximum: 20, description: "px" },
+        grayscale: { type: "number", minimum: 0, maximum: 1 },
+        sepia: { type: "number", minimum: 0, maximum: 1 },
+        hueRotate: { type: "number", minimum: 0, maximum: 360, description: "度" },
+      },
+      description: "基础滤镜，省略的通道不调；设 {} 清空滤镜",
+    },
+    animations: {
+      type: "object",
+      properties: {
+        x: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM }, required: ["t", "v"] }, description: "画布分数偏移（0=原位）" },
+        y: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM }, required: ["t", "v"] } },
+        scale: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM }, required: ["t", "v"] }, description: "1=原大" },
+        opacity: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM }, required: ["t", "v"] }, description: "0-1" },
+        rotation: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM }, required: ["t", "v"] }, description: "度" },
+        volume: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM }, required: ["t", "v"] }, description: "音量包络 0-1，乘在 clip.volume 上" },
+      },
+      description: "关键帧动画：t=clip 内相对秒，v=值，线性插值；设 {} 清空动画",
+    },
     text: { type: "string" },
     startSeconds: NUM,
     endSeconds: NUM,
@@ -50,6 +76,7 @@ const TOOLS = [
       'addAudio{src,duration,atSeconds,volume?,track?} —— 音频轨加 clip，track 是轨名（同名复用，缺省新建） / ' +
       'removeAudio{id} / updateAudioTrack{id,patch:{volume?,muted?,name?}} / ' +
       'splitClip{id,atSeconds} —— 在全局时间轴 atSeconds 处把片段一分为二（主轨/叠加/音频 clip 均可，切点太靠边会被忽略）/ ' +
+      'v3 能力：updateClip 的 patch 可设 speed（0.1-10 恒定变速，2=快放一倍，clipDuration 仍是成片占时）、filter（{brightness?,contrast?,saturate?,blur?,grayscale?,sepia?,hueRotate?}，设 {} 清空）、animations（关键帧 {x?,y?,scale?,opacity?,rotation?,volume?}: [{t,v}]，t 为 clip 内相对秒线性插值；x/y 是画布分数偏移，scale 1=原大，opacity/volume 0-1，rotation 度；设 {} 清空；给音频 clip 设 volume 包络即音量包络）/ ' +
       'addOverlay{text,startSeconds,endSeconds,position,fontSize,color} / removeOverlay{index} / updateOverlay{index,patch} / ' +
       'setMeta{patch:{fps?,width?,height?}}（调画布：帧率 1-120，宽高 16-7680 偶数）。\n' +
       "时间单位都是秒；transition 只接受 \"fade\" 或 \"none\"。总时长 = 主轨道串行与所有叠加/音频 clip 末尾的最大值。",
@@ -60,11 +87,11 @@ const TOOLS = [
           type: "array",
           items: {
             oneOf: [
-              opSchema("addClip", { src: { type: "string" }, inPoint: NUM, clipDuration: { type: "number", exclusiveMinimum: 0 }, transition: { enum: ["none", "fade"] }, volume: { type: "number", minimum: 0, maximum: 1 }, track: { type: "string" }, atSeconds: NUM, box: { type: "object" } }),
+              opSchema("addClip", { src: { type: "string" }, inPoint: NUM, clipDuration: { type: "number", exclusiveMinimum: 0 }, transition: { enum: ["none", "fade"] }, volume: { type: "number", minimum: 0, maximum: 1 }, track: { type: "string" }, atSeconds: NUM, box: { type: "object" }, speed: { type: "number", minimum: 0.1, maximum: 10, description: "恒定变速：2=快放一倍；clipDuration 仍是成片占时" }, filter: { type: "object", description: "基础滤镜 {brightness,contrast,saturate,blur,grayscale,sepia,hueRotate}" }, animations: { type: "object", description: "关键帧 {x,y,scale,opacity,rotation,volume}: [{t,v}]，t=clip 内相对秒，线性插值" } }),
               opSchema("removeClip", { id: { type: "string" } }, ["id"]),
               opSchema("updateClip", { id: { type: "string" }, patch: PATCH }, ["id", "patch"]),
               opSchema("reorderClips", { order: { type: "array", items: { type: "string" } } }, ["order"]),
-              opSchema("addAudio", { src: { type: "string" }, inPoint: NUM, duration: { type: "number", exclusiveMinimum: 0 }, volume: { type: "number", minimum: 0, maximum: 1 }, atSeconds: NUM, track: { type: "string" } }, ["src", "duration"]),
+              opSchema("addAudio", { src: { type: "string" }, inPoint: NUM, duration: { type: "number", exclusiveMinimum: 0 }, volume: { type: "number", minimum: 0, maximum: 1 }, atSeconds: NUM, track: { type: "string" }, speed: { type: "number", minimum: 0.1, maximum: 10 }, animations: { type: "object", description: "音量包络 {volume:[{t,v}]}，t=clip 内相对秒" } }, ["src", "duration"]),
               opSchema("removeAudio", { id: { type: "string" } }, ["id"]),
               opSchema("splitClip", { id: { type: "string" }, atSeconds: { type: "number", description: "全局时间轴切点（秒）" } }, ["id", "atSeconds"]),
               opSchema("updateAudioTrack", { id: { type: "string" }, patch: { type: "object", properties: { volume: { type: "number", minimum: 0, maximum: 1 }, muted: { type: "boolean" }, name: { type: "string" } } } }, ["id", "patch"]),

@@ -107,6 +107,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           transition: "none",
           volume: 1,
           ...partial,
+          speed: partial?.speed ?? 1,
         };
         return {
           ...t,
@@ -132,6 +133,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           volume: 1,
           atSeconds: 0,
           ...partial,
+          speed: partial?.speed ?? 1,
         };
         if (t.videoTracks[1]) {
           return {
@@ -150,7 +152,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const addAudioBy = useCallback(
     (by: string, src: string, duration: number, atSeconds = 0, track = "音频") => {
       setTimeline((t) => {
-        const clip: AudioClip = { id: nextId("ac"), src, inPoint: 0, duration, volume: 1, atSeconds };
+        const clip: AudioClip = { id: nextId("ac"), src, inPoint: 0, duration, volume: 1, atSeconds, speed: 1 };
         if (t.audioTracks[0]) {
           return {
             ...t,

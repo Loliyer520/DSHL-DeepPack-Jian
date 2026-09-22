@@ -19680,6 +19680,27 @@ var z = /* @__PURE__ */ Object.freeze({
 //#endregion
 //#region ../engine/src/schema.ts
 const transitionSchema = z.enum(["none", "fade"]).default("none");
+const keyframeSchema = z.object({
+	t: z.number().min(0),
+	v: z.number()
+});
+const animationsSchema = z.object({
+	x: z.array(keyframeSchema).optional(),
+	y: z.array(keyframeSchema).optional(),
+	scale: z.array(keyframeSchema).optional(),
+	opacity: z.array(keyframeSchema).optional(),
+	rotation: z.array(keyframeSchema).optional(),
+	volume: z.array(keyframeSchema).optional()
+});
+const filterSchema = z.object({
+	brightness: z.number().min(0).max(3).optional(),
+	contrast: z.number().min(0).max(3).optional(),
+	saturate: z.number().min(0).max(3).optional(),
+	blur: z.number().min(0).max(20).optional(),
+	grayscale: z.number().min(0).max(1).optional(),
+	sepia: z.number().min(0).max(1).optional(),
+	hueRotate: z.number().min(0).max(360).optional()
+});
 const clipSchema = z.object({
 	id: z.string(),
 	type: z.enum(["video", "image"]),
@@ -19694,7 +19715,10 @@ const clipSchema = z.object({
 		y: z.number().min(0).max(1),
 		w: z.number().min(.01).max(1),
 		h: z.number().min(.01).max(1)
-	}).optional()
+	}).optional(),
+	speed: z.number().min(.1).max(10).default(1),
+	filter: filterSchema.optional(),
+	animations: animationsSchema.optional()
 });
 const videoTrackSchema = z.object({
 	id: z.string(),
@@ -19707,7 +19731,9 @@ const audioClipSchema = z.object({
 	inPoint: z.number().min(0).default(0),
 	duration: z.number().positive(),
 	volume: z.number().min(0).max(1).default(1),
-	atSeconds: z.number().min(0).default(0)
+	atSeconds: z.number().min(0).default(0),
+	speed: z.number().min(.1).max(10).default(1),
+	animations: animationsSchema.optional()
 });
 const audioTrackV2Schema = z.object({
 	id: z.string(),
@@ -20952,6 +20978,67 @@ const NumberField = ({ label: label$2, value, step = .5, min = 0, onCommit }) =>
 		}
 	}, value)]
 });
+const FILTER_PRESETS = [
+	{
+		label: "提亮",
+		filter: { brightness: 1.15 }
+	},
+	{
+		label: "黑白",
+		filter: { grayscale: 1 }
+	},
+	{
+		label: "复古",
+		filter: { sepia: .6 }
+	},
+	{
+		label: "暖调",
+		filter: {
+			sepia: .3,
+			saturate: 1.2
+		}
+	},
+	{
+		label: "冷调",
+		filter: {
+			hueRotate: 200,
+			saturate: 1.1
+		}
+	},
+	{
+		label: "高饱和",
+		filter: { saturate: 1.6 }
+	},
+	{
+		label: "高对比",
+		filter: { contrast: 1.3 }
+	},
+	{
+		label: "柔焦",
+		filter: { blur: 4 }
+	}
+];
+const FilterSelect = ({ value, onCommit }) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+	className: "djp-select",
+	value: value ? JSON.stringify(value) : "",
+	onChange: (e) => {
+		const v = e.target.value;
+		if (!v) {
+			onCommit(void 0);
+			return;
+		}
+		const p = FILTER_PRESETS.find((x) => JSON.stringify(x.filter) === v);
+		if (p) onCommit(p.filter);
+	},
+	title: "滤镜",
+	children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+		value: "",
+		children: "无滤镜"
+	}), FILTER_PRESETS.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+		value: JSON.stringify(p.filter),
+		children: p.label
+	}, p.label))]
+});
 const TrackStrip = ({ t, o, playheadRef, onSeekClip }) => {
 	const [playhead, setPlayhead] = (0, react.useState)(0);
 	const total = Math.max(.1, timelineDurationInFrames(t) / t.meta.fps);
@@ -21678,6 +21765,17 @@ const Panel = () => {
 										value: c$2.volume,
 										step: .1,
 										onCommit: (v) => o.updateClip(c$2.id, { volume: Math.min(1, v) })
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+										label: "速度",
+										value: c$2.speed ?? 1,
+										step: .25,
+										min: .1,
+										onCommit: (v) => o.updateClip(c$2.id, { speed: Math.min(10, Math.max(.1, v)) })
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(FilterSelect, {
+										value: c$2.filter,
+										onCommit: (f) => o.updateClip(c$2.id, { filter: f })
 									})
 								]
 							})]
@@ -21734,6 +21832,17 @@ const Panel = () => {
 								value: c$2.clipDuration,
 								min: .1,
 								onCommit: (v) => o.updateClip(c$2.id, { clipDuration: v })
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+								label: "速度",
+								value: c$2.speed ?? 1,
+								step: .25,
+								min: .1,
+								onCommit: (v) => o.updateClip(c$2.id, { speed: Math.min(10, Math.max(.1, v)) })
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(FilterSelect, {
+								value: c$2.filter,
+								onCommit: (f) => o.updateClip(c$2.id, { filter: f })
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								className: "djp-btn",
@@ -21841,6 +21950,13 @@ const Panel = () => {
 									value: c$2.volume,
 									step: .1,
 									onCommit: (v) => o.updateAudioClip(c$2.id, { volume: Math.min(1, Math.max(0, v)) })
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+									label: "速度",
+									value: c$2.speed ?? 1,
+									step: .25,
+									min: .1,
+									onCommit: (v) => o.updateAudioClip(c$2.id, { speed: Math.min(10, Math.max(.1, v)) })
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 									className: "djp-btn",

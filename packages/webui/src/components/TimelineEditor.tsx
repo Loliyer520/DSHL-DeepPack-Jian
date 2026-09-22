@@ -37,6 +37,18 @@ const NumberField: React.FC<{
   );
 };
 
+// 滤镜预设（与面板 FilterSelect 同集）
+const FILTER_PRESETS: Array<{ label: string; filter: Exclude<Clip["filter"], undefined> }> = [
+  { label: "提亮", filter: { brightness: 1.15 } },
+  { label: "黑白", filter: { grayscale: 1 } },
+  { label: "复古", filter: { sepia: 0.6 } },
+  { label: "暖调", filter: { sepia: 0.3, saturate: 1.2 } },
+  { label: "冷调", filter: { hueRotate: 200, saturate: 1.1 } },
+  { label: "高饱和", filter: { saturate: 1.6 } },
+  { label: "高对比", filter: { contrast: 1.3 } },
+  { label: "柔焦", filter: { blur: 4 } },
+];
+
 const ClipRow: React.FC<{ clip: Clip; index: number; splitAt?: number }> = ({ clip, index, splitAt }) => {
   const { updateClip, removeClip, splitClip } = useStore();
   return (
@@ -79,6 +91,32 @@ const ClipRow: React.FC<{ clip: Clip; index: number; splitAt?: number }> = ({ cl
           min={0}
           onCommit={(v) => updateClip(clip.id, { volume: Math.min(1, v) })}
         />
+        <NumberField
+          label="速度"
+          value={clip.speed ?? 1}
+          step={0.25}
+          min={0.1}
+          onCommit={(v) => updateClip(clip.id, { speed: Math.min(10, Math.max(0.1, v)) })}
+        />
+        <select
+          className="chip-select"
+          value={clip.filter ? JSON.stringify(clip.filter) : ""}
+          title="滤镜"
+          onChange={(e) => {
+            const v = e.target.value;
+            if (!v) {
+              updateClip(clip.id, { filter: undefined });
+              return;
+            }
+            const p = FILTER_PRESETS.find((x) => JSON.stringify(x.filter) === v);
+            if (p) updateClip(clip.id, { filter: p.filter });
+          }}
+        >
+          <option value="">无滤镜</option>
+          {FILTER_PRESETS.map((p) => (
+            <option key={p.label} value={JSON.stringify(p.filter)}>{p.label}</option>
+          ))}
+        </select>
       </div>
     </div>
   );

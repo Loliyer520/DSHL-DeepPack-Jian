@@ -14,6 +14,36 @@ import { z } from "zod";
 
 export const transitionSchema = z.enum(["none", "fade"]).default("none");
 
+// ---------- v3：关键帧 / 滤镜 / 变速（全 additive，旧 JSON 照收） ----------
+// 关键帧：t = clip 内相对秒（成片时间轴），v = 属性值；相邻帧间线性插值，区间外鉗端点
+export const keyframeSchema = z.object({
+  t: z.number().min(0),
+  v: z.number(),
+});
+
+// 动画通道：x/y 为画布分数偏移（0=原位），scale 1=原大，opacity 0-1，rotation 度，volume 0-1 乘在 clip.volume 上
+export const animationsSchema = z.object({
+  x: z.array(keyframeSchema).optional(),
+  y: z.array(keyframeSchema).optional(),
+  scale: z.array(keyframeSchema).optional(),
+  opacity: z.array(keyframeSchema).optional(),
+  rotation: z.array(keyframeSchema).optional(),
+  volume: z.array(keyframeSchema).optional(),
+});
+
+// 基础滤镜（CSS filter 子集）：省略 = 不调
+export const filterSchema = z.object({
+  brightness: z.number().min(0).max(3).optional(), // 1=原
+  contrast: z.number().min(0).max(3).optional(),
+  saturate: z.number().min(0).max(3).optional(),
+  blur: z.number().min(0).max(20).optional(), // px
+  grayscale: z.number().min(0).max(1).optional(),
+  sepia: z.number().min(0).max(1).optional(),
+  hueRotate: z.number().min(0).max(360).optional(), // 度
+});
+
+// 恒定变速：clipDuration 仍是成片占时；素材消耗 = 占时 × speed（2x = 快放，素材内走两倍）
+
 // 主轨道/叠加轨通用的片段字段
 export const clipSchema = z.object({
   id: z.string(),
@@ -34,6 +64,10 @@ export const clipSchema = z.object({
       h: z.number().min(0.01).max(1),
     })
     .optional(),
+  // v3：变速 / 滤镜 / 关键帧动画
+  speed: z.number().min(0.1).max(10).default(1),
+  filter: filterSchema.optional(),
+  animations: animationsSchema.optional(),
 });
 
 export const videoTrackSchema = z.object({
@@ -50,6 +84,9 @@ export const audioClipSchema = z.object({
   duration: z.number().positive(),
   volume: z.number().min(0).max(1).default(1),
   atSeconds: z.number().min(0).default(0),
+  // v3：变速（duration 仍是占时）+ 音量包络
+  speed: z.number().min(0.1).max(10).default(1),
+  animations: animationsSchema.optional(),
 });
 
 export const audioTrackV2Schema = z.object({
@@ -102,6 +139,9 @@ export const timelineSchema = z.object({
 });
 
 export type Transition = z.infer<typeof transitionSchema>;
+export type Keyframe = z.infer<typeof keyframeSchema>;
+export type Animations = z.infer<typeof animationsSchema>;
+export type Filter = z.infer<typeof filterSchema>;
 export type Clip = z.infer<typeof clipSchema>;
 export type VideoTrack = z.infer<typeof videoTrackSchema>;
 export type AudioClip = z.infer<typeof audioClipSchema>;
@@ -116,6 +156,25 @@ export const clipBox = (c: Clip) => c.box ?? DEFAULT_BOX;
 
 let trackSeq = 0;
 const autoId = (p: string) => `${p}${Date.now().toString(36)}${(trackSeq++).toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+
+// 关键帧求值：相邻帧线性插值，区间外鉗端点。空/单点退化常值。
+export const evalKeyframes = (kfs: Keyframe[] | undefined, sec: number): number | undefined => {
+  if (!kfs || kfs.length === 0) return undefined;
+  if (kfs.length === 1) return kfs[0].v;
+  const sorted = [...kfs].sort((a, b) => a.t - b.t);
+  if (sec <= sorted[0].t) return sorted[0].v;
+  const last = sorted[sorted.length - 1];
+  if (sec >= last.t) return last.v;
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const a = sorted[i];
+    const b = sorted[i + 1];
+    if (sec >= a.t && sec <= b.t) {
+      const f = (sec - a.t) / (b.t - a.t);
+      return a.v + (b.v - a.v) * f;
+    }
+  }
+  return last.v;
+};
 
 // v1 → v2 迁移 + 不变量维护（至少一条视频轨）
 function normalize(input: z.infer<typeof timelineInputSchema>): Timeline {
@@ -145,6 +204,7 @@ function normalize(input: z.infer<typeof timelineInputSchema>): Timeline {
             duration: Math.max(0.1, mainDur - startAt),
             volume: 1,
             atSeconds: startAt,
+            speed: 1,
           },
         ],
       },
