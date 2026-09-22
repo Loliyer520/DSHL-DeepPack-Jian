@@ -15,7 +15,6 @@ const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist
 const PORT = Number(process.env.PORT || 5180);
 const DJIAN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const PATCH = path.join(DJIAN, "packages/agent/djian.cordis.yml");
-const DSH_BIN = path.join(DJIAN, "node_modules/.bin/dsh");
 
 // ---- 密钥与模型路由 ----
 function loadKashicEnv() {
@@ -45,11 +44,10 @@ async function getHarness() {
   if (harnessStarting) return harnessStarting;
   harnessStarting = (async () => {
     const h = new DeepSeekHarness({
-      launch: {
-        command: DSH_BIN,
-        args: ["--profile", "sdk", "--patch", PATCH],
-        cwd: DJIAN,
-      },
+      // sdk-client 0.1.5+ 新 API：profile/patches 顶层字段（旧式 launch:{command,args} 会被静默忽略）
+      profile: "sdk",
+      patches: [PATCH],
+      processCwd: DJIAN,
       provider: "deepseek-official",
       model: MODEL,
       maxTokens: 8192,
