@@ -499,6 +499,32 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 导出按钮：strip 内小型胶囊，品牌蓝描边风格（照 dsh 次级按钮） */
+.export-btn {
+  flex: none;
+  height: 22px;
+  padding: 0 10px;
+  border: 0.5px solid var(--border-l3);
+  border-radius: 5px;
+  background: var(--button-elevated-fill);
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--label-primary);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color var(--dur-fast) ease;
+}
+.export-btn:hover:not(:disabled) {
+  background: var(--button-floating-hover);
+}
+.export-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.export-error {
+  color: var(--label-red, #d3405a);
+}
+
 .panel-body {
   padding: 12px;
 }

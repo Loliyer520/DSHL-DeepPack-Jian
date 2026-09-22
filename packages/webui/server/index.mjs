@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DeepSeekHarness } from "@deepseek-ai/dsh-sdk-client";
+import { renderVideo } from "../../engine/dist/render.js";
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
 const PORT = Number(process.env.PORT || 5180);
@@ -62,6 +63,7 @@ async function getHarness() {
 // ---- MCP 工具回传收集 ----
 let pendingOps = []; // run 期间由 MCP server POST 进来，run 结束后 drain
 let lastTimeline = null; // 前端随 /api/chat 上报的最近时间线（供 get_timeline 工具读）
+let exportJob = null; // 导出任务：{ status: rendering|done|error, progress, outFile, result?, error? }
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -175,6 +177,59 @@ const server = http.createServer(async (req, res) => {
   // MCP server 读当前时间线
   if (url.pathname === "/api/internal/timeline") {
     return json(res, 200, lastTimeline ?? { meta: { fps: 30, width: 1280, height: 720 }, clips: [], overlays: [] });
+  }
+
+  // ---- 导出 mp4（低配机器单飞行任务）----
+  if (url.pathname === "/api/export" && req.method === "POST") {
+    if (exportJob?.status === "rendering") return json(res, 409, { error: "已有导出任务进行中，请稍候" });
+    const body = JSON.parse(await readBody(req));
+    if (!body?.timeline?.clips?.length) return json(res, 400, { error: "时间线为空，没有可导出的内容" });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const outFile = path.join(DJIAN, "out", `djian-${stamp}.mp4`);
+    exportJob = { status: "rendering", progress: { rendered: 0, total: 0, percent: 0, stage: "preparing" }, outFile };
+    renderVideo({
+      timeline: body.timeline,
+      outFile,
+      // 与前端预览同源：vite public 目录，时间线 src 相对它解析
+      assetsDir: path.join(DJIAN, "packages/webui/public"),
+      onProgress: (p) => {
+        if (exportJob?.status !== "rendering") return;
+        exportJob.progress = {
+          rendered: p.rendered,
+          total: p.total,
+          percent: p.total > 0 ? Math.round((p.rendered / p.total) * 100) : 0,
+          stage: p.stage,
+        };
+      },
+    })
+      .then((r) => {
+        exportJob = {
+          ...exportJob,
+          status: "done",
+          result: { ...r, sizeBytes: fs.statSync(outFile).size, fileName: path.basename(outFile) },
+        };
+      })
+      .catch((e) => {
+        exportJob = { ...exportJob, status: "error", error: e.message };
+      });
+    return json(res, 202, { started: true });
+  }
+
+  if (url.pathname === "/api/export/status") {
+    return json(res, 200, exportJob ?? { status: "idle" });
+  }
+
+  if (url.pathname === "/api/export/download") {
+    if (exportJob?.status !== "done" || !fs.existsSync(exportJob.outFile)) {
+      return json(res, 404, { error: "暂无已完成的导出" });
+    }
+    res.writeHead(200, {
+      "Content-Type": "video/mp4",
+      "Content-Length": fs.statSync(exportJob.outFile).size,
+      "Content-Disposition": `attachment; filename="${exportJob.result.fileName}"`,
+    });
+    fs.createReadStream(exportJob.outFile).pipe(res);
+    return;
   }
 
   if (url.pathname === "/api/chat" && req.method === "POST") {
