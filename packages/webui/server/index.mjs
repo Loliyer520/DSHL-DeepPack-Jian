@@ -146,6 +146,21 @@ function readBody(req) {
   });
 }
 
+// 二进制上传用（素材库），上限 512MB
+function readBodyRaw(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (c) => {
+      chunks.push(c);
+      size += c.length;
+      if (size > 512 * 1024 * 1024) req.destroy();
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
 const json = (res, code, obj) => {
   const h = { "Content-Type": "application/json" };
   if (res._aco) h["Access-Control-Allow-Origin"] = res._aco;
@@ -157,7 +172,17 @@ const json = (res, code, obj) => {
 // 合法形：{op:"updateClip",...} / {type:"updateClip",...}；走样形：{"updateClip":{...}} 或 {"removeOverlay":0}
 const OPS_NEEDING_ID = new Set(["removeClip"]);
 const OPS_NEEDING_INDEX = new Set(["removeOverlay", "updateOverlay"]);
-const VALID_OPS = new Set(["addClip", "removeClip", "updateClip", "reorderClips", "addOverlay", "removeOverlay", "updateOverlay"]);
+const VALID_OPS = new Set(["addClip", "removeClip", "updateClip", "reorderClips", "addOverlay", "removeOverlay", "updateOverlay", "setMeta"]);
+
+// 画布 meta 消毒：fps 1-120 整数；宽/高 16-7680 且偶数对齐（h264 要求）
+function sanitizeMetaPatch(p) {
+  const out = {};
+  if (!p || typeof p !== "object") return out;
+  if (Number.isInteger(p.fps)) out.fps = Math.min(120, Math.max(1, p.fps));
+  if (Number.isFinite(p.width)) out.width = Math.min(7680, Math.max(16, Math.round(p.width / 2) * 2));
+  if (Number.isFinite(p.height)) out.height = Math.min(7680, Math.max(16, Math.round(p.height / 2) * 2));
+  return out;
+}
 
 // transition 消毒：fade-in/fadein→fade，其它非法值剔除
 function fixTransition(v) {
@@ -166,6 +191,11 @@ function fixTransition(v) {
   return undefined;
 }
 function sanitizeOp(op) {
+  if (op.op === "setMeta") {
+    const patch = sanitizeMetaPatch(op.patch ?? op);
+    if (!Object.keys(patch).length) throw new Error("setMeta 缺少有效的 fps/width/height");
+    op.patch = patch;
+  }
   if (op.patch && op.patch.transition !== undefined) {
     const t = fixTransition(op.patch.transition);
     if (t === undefined) delete op.patch.transition;
@@ -218,17 +248,82 @@ function normalizeOps(rawOps) {
   return { accepted, rejected };
 }
 
-// ---- 时间线持久化（~/.djian/timeline.json 是唯一事实源）+ 服务端直接应用 ops ----
-const TIMELINE_FILE = path.join(process.env.HOME || "/root", ".djian", "timeline.json");
+// ---- 项目制持久化（~/.djian/projects/<id>/ 是唯一事实源）+ 服务端直接应用 ops ----
+const DJIAN_HOME = path.join(process.env.HOME || "/root", ".djian");
+const PROJECTS_DIR = path.join(DJIAN_HOME, "projects");
+const CURRENT_FILE = path.join(DJIAN_HOME, "current");
+const LEGACY_TIMELINE = path.join(DJIAN_HOME, "timeline.json");
 const EMPTY_TIMELINE = { meta: { fps: 30, width: 1280, height: 720 }, clips: [], audio: null, overlays: [] };
 
+const sanitizeId = (s) => String(s ?? "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40);
+const newProjectId = () => "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const projectDir = (id) => path.join(PROJECTS_DIR, id);
+const timelinePath = (id) => path.join(projectDir(id), "timeline.json");
+const assetsPath = (id) => path.join(projectDir(id), "assets");
+const thumbsPath = (id) => path.join(projectDir(id), ".thumbs");
+
+function readProjectMeta(id) {
+  try { return JSON.parse(fs.readFileSync(path.join(projectDir(id), "project.json"), "utf8")); } catch { return null; }
+}
+function writeProjectMeta(id, meta) {
+  fs.mkdirSync(projectDir(id), { recursive: true });
+  fs.writeFileSync(path.join(projectDir(id), "project.json"), JSON.stringify(meta, null, 2));
+}
+function listProjects() {
+  try {
+    return fs.readdirSync(PROJECTS_DIR, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => {
+        const meta = readProjectMeta(d.name) ?? {};
+        let tmeta = null;
+        try { tmeta = JSON.parse(fs.readFileSync(timelinePath(d.name), "utf8")).meta ?? null; } catch {}
+        return { id: d.name, name: meta.name ?? d.name, createdAt: meta.createdAt ?? null, meta: tmeta };
+      })
+      .sort((a, b) => String(a.createdAt ?? "").localeCompare(String(b.createdAt ?? "")));
+  } catch { return []; }
+}
+function createProject(name, meta) {
+  const id = newProjectId();
+  fs.mkdirSync(assetsPath(id), { recursive: true });
+  writeProjectMeta(id, { name: name || "未命名项目", createdAt: new Date().toISOString() });
+  const t = structuredClone(EMPTY_TIMELINE);
+  Object.assign(t.meta, sanitizeMetaPatch(meta));
+  fs.writeFileSync(timelinePath(id), JSON.stringify(t, null, 2));
+  return id;
+}
+function setCurrentProject(id) {
+  fs.mkdirSync(DJIAN_HOME, { recursive: true });
+  fs.writeFileSync(CURRENT_FILE, id);
+}
+function currentProjectId() {
+  let id = null;
+  try { id = sanitizeId(fs.readFileSync(CURRENT_FILE, "utf8").trim()); } catch {}
+  if (id && fs.existsSync(projectDir(id))) return id;
+  const projects = listProjects();
+  if (projects.length) { setCurrentProject(projects[0].id); return projects[0].id; }
+  // 迁移：旧全局 timeline.json → default 项目，顺手把 public 里的散装素材搬进来
+  const nid = createProject("默认项目");
+  try {
+    const legacy = JSON.parse(fs.readFileSync(LEGACY_TIMELINE, "utf8"));
+    if (legacy?.meta && Array.isArray(legacy.clips)) fs.writeFileSync(timelinePath(nid), JSON.stringify(legacy, null, 2));
+  } catch {}
+  try {
+    const pub = path.join(DJIAN, "packages/webui/public");
+    for (const f of fs.readdirSync(pub)) {
+      if (/\.(mp4|mov|webm|mkv|png|jpe?g|webp|gif|mp3|wav|aac|ogg|m4a)$/i.test(f)) {
+        fs.copyFileSync(path.join(pub, f), path.join(assetsPath(nid), f));
+      }
+    }
+  } catch {}
+  setCurrentProject(nid);
+  return nid;
+}
 function loadTimelineFile() {
-  try { return JSON.parse(fs.readFileSync(TIMELINE_FILE, "utf8")); } catch { return null; }
+  try { return JSON.parse(fs.readFileSync(timelinePath(currentProjectId()), "utf8")); } catch { return null; }
 }
 function persistTimeline(t) {
   try {
-    fs.mkdirSync(path.dirname(TIMELINE_FILE), { recursive: true });
-    fs.writeFileSync(TIMELINE_FILE, JSON.stringify(t, null, 2));
+    fs.writeFileSync(timelinePath(currentProjectId()), JSON.stringify(t, null, 2));
   } catch (e) { console.warn("timeline 持久化失败:", e.message); }
 }
 lastTimeline = loadTimelineFile();
@@ -279,6 +374,9 @@ function applyOpsToTimeline(ops) {
         break;
       case "updateOverlay":
         t.overlays = t.overlays.map((o, i) => (i === op.index ? { ...o, ...op.patch } : o));
+        break;
+      case "setMeta":
+        Object.assign(t.meta, sanitizeMetaPatch(op.patch ?? op));
         break;
     }
   }
@@ -335,6 +433,143 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ok: true });
   }
 
+  // ---- 项目管理 ----
+  if (url.pathname === "/api/projects" && req.method === "GET") {
+    return json(res, 200, { current: currentProjectId(), projects: listProjects() });
+  }
+  if (url.pathname === "/api/projects" && req.method === "POST") {
+    const body = JSON.parse(await readBody(req));
+    const name = String(body?.name ?? "").trim().slice(0, 60) || "未命名项目";
+    const id = createProject(name, body?.meta);
+    return json(res, 200, { ok: true, id, name });
+  }
+  const projMatch = url.pathname.match(/^\/api\/projects\/([a-zA-Z0-9_-]+)$/);
+  if (projMatch && req.method === "PATCH") {
+    const id = sanitizeId(projMatch[1]);
+    const meta = readProjectMeta(id);
+    if (!meta) return json(res, 404, { error: "项目不存在" });
+    const body = JSON.parse(await readBody(req));
+    if (typeof body?.name === "string" && body.name.trim()) meta.name = body.name.trim().slice(0, 60);
+    writeProjectMeta(id, meta);
+    return json(res, 200, { ok: true });
+  }
+  if (projMatch && req.method === "DELETE") {
+    const id = sanitizeId(projMatch[1]);
+    const all = listProjects();
+    if (!all.some((p) => p.id === id)) return json(res, 404, { error: "项目不存在" });
+    if (all.length <= 1) return json(res, 400, { error: "至少保留一个项目" });
+    if (id === currentProjectId()) return json(res, 400, { error: "不能删除当前项目，请先切换" });
+    fs.rmSync(projectDir(id), { recursive: true, force: true });
+    return json(res, 200, { ok: true });
+  }
+  if (url.pathname === "/api/current" && req.method === "POST") {
+    const body = JSON.parse(await readBody(req));
+    const id = sanitizeId(body?.id);
+    if (!fs.existsSync(timelinePath(id))) return json(res, 404, { error: "项目不存在" });
+    setCurrentProject(id);
+    lastTimeline = loadTimelineFile();
+    return json(res, 200, { ok: true, current: id });
+  }
+
+  // ---- 素材库（当前项目 assets/）----
+  const ASSET_EXT = { video: /\.(mp4|mov|webm|mkv|avi)$/i, image: /\.(png|jpe?g|webp|gif)$/i, audio: /\.(mp3|wav|aac|ogg|m4a)$/i };
+  const assetType = (name) => (ASSET_EXT.video.test(name) ? "video" : ASSET_EXT.image.test(name) ? "image" : ASSET_EXT.audio.test(name) ? "audio" : null);
+  const sanitizeAssetName = (s) => path.basename(String(s ?? "")).replace(/[^a-zA-Z0-9._\-一-鿿]/g, "_").slice(0, 80);
+  const probeDuration = (file) => {
+    try {
+      const out = execFileSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", file], { timeout: 8000 }).toString().trim();
+      const d = Number(out);
+      return Number.isFinite(d) && d > 0 ? Math.round(d * 100) / 100 : null;
+    } catch { return null; }
+  };
+  const assetMetaFile = (name) => path.join(thumbsPath(currentProjectId()), name + ".json");
+  const readAssetMeta = (name) => { try { return JSON.parse(fs.readFileSync(assetMetaFile(name), "utf8")); } catch { return {}; } };
+
+  if (url.pathname === "/api/assets" && req.method === "GET") {
+    const dir = assetsPath(currentProjectId());
+    let names = [];
+    try { names = fs.readdirSync(dir).filter((f) => assetType(f)); } catch {}
+    const items = names.map((name) => {
+      const full = path.join(dir, name);
+      const meta = readAssetMeta(name);
+      let duration = meta.duration ?? null;
+      if (duration == null && assetType(name) !== "image") {
+        duration = probeDuration(full);
+        if (duration != null) {
+          try { fs.mkdirSync(thumbsPath(currentProjectId()), { recursive: true }); fs.writeFileSync(assetMetaFile(name), JSON.stringify({ duration })); } catch {}
+        }
+      }
+      return {
+        name,
+        type: assetType(name),
+        size: fs.statSync(full).size,
+        duration,
+        thumb: assetType(name) === "audio" ? null : `/api/assets/${encodeURIComponent(name)}/thumb`,
+      };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+    return json(res, 200, { assets: items });
+  }
+  if (url.pathname === "/api/assets" && req.method === "POST") {
+    const raw = await readBodyRaw(req);
+    if (!raw.length) return json(res, 400, { error: "空文件" });
+    let name = sanitizeAssetName(url.searchParams.get("name"));
+    if (!name || !assetType(name)) return json(res, 400, { error: "文件名或格式不支持（视频/图片/音频）" });
+    const dir = assetsPath(currentProjectId());
+    fs.mkdirSync(dir, { recursive: true });
+    // 重名自动加 -1 -2 后缀
+    const ext = path.extname(name), stem = name.slice(0, -ext.length);
+    let n = 0, finalName = name;
+    while (fs.existsSync(path.join(dir, finalName))) finalName = `${stem}-${++n}${ext}`;
+    fs.writeFileSync(path.join(dir, finalName), raw);
+    const duration = assetType(finalName) === "image" ? null : probeDuration(path.join(dir, finalName));
+    if (duration != null) {
+      try { fs.mkdirSync(thumbsPath(currentProjectId()), { recursive: true }); fs.writeFileSync(assetMetaFile(finalName), JSON.stringify({ duration })); } catch {}
+    }
+    return json(res, 200, { ok: true, name: finalName, type: assetType(finalName), duration });
+  }
+  const assetMatch = url.pathname.match(/^\/api\/assets\/([^/]+)$/);
+  if (assetMatch && req.method === "DELETE") {
+    const name = sanitizeAssetName(decodeURIComponent(assetMatch[1]));
+    const full = path.join(assetsPath(currentProjectId()), name);
+    if (!fs.existsSync(full)) return json(res, 404, { error: "素材不存在" });
+    fs.rmSync(full, { force: true });
+    fs.rm(path.join(thumbsPath(currentProjectId()), name + ".jpg"), { force: true }, () => {});
+    fs.rm(assetMetaFile(name), { force: true }, () => {});
+    return json(res, 200, { ok: true });
+  }
+  const thumbMatch = url.pathname.match(/^\/api\/assets\/([^/]+)\/thumb$/);
+  if (thumbMatch && req.method === "GET") {
+    const name = sanitizeAssetName(decodeURIComponent(thumbMatch[1]));
+    const full = path.join(assetsPath(currentProjectId()), name);
+    if (!fs.existsSync(full) || assetType(name) === "audio") return json(res, 404, { error: "无缩略图" });
+    const tdir = thumbsPath(currentProjectId());
+    const thumb = path.join(tdir, name + ".jpg");
+    if (!fs.existsSync(thumb)) {
+      try {
+        fs.mkdirSync(tdir, { recursive: true });
+        const args = assetType(name) === "video"
+          ? ["-v", "error", "-ss", "0.5", "-i", full, "-frames:v", "1", "-vf", "scale=192:-2", "-y", thumb]
+          : ["-v", "error", "-i", full, "-frames:v", "1", "-vf", "scale=192:-2", "-y", thumb];
+        execFileSync("ffmpeg", args, { timeout: 15000 });
+      } catch (e) { return json(res, 500, { error: `缩略图生成失败：${e.message}` }); }
+    }
+    res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "no-cache", ...(res._aco ? { "Access-Control-Allow-Origin": res._aco } : {}) });
+    return fs.createReadStream(thumb).pipe(res);
+  }
+  // 素材文件本体（供官方壳里的预览播放器跨域拉流）
+  if (url.pathname.startsWith("/project-assets/") && req.method === "GET") {
+    const name = sanitizeAssetName(decodeURIComponent(url.pathname.slice("/project-assets/".length)));
+    const full = path.join(assetsPath(currentProjectId()), name);
+    if (!fs.existsSync(full)) { res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }).end("not found"); return; }
+    res.writeHead(200, {
+      "Content-Type": MIME[path.extname(full)] || "application/octet-stream",
+      "Content-Length": fs.statSync(full).size,
+      "Cache-Control": "no-cache",
+      ...(res._aco ? { "Access-Control-Allow-Origin": res._aco } : {}),
+    });
+    return fs.createReadStream(full).pipe(res);
+  }
+
   // MCP server 取合成后单帧（供 get_frame 工具；PNG base64 回传）
   if (url.pathname === "/api/internal/frame" && req.method === "POST") {
     const body = JSON.parse(await readBody(req));
@@ -344,7 +579,7 @@ const server = http.createServer(async (req, res) => {
     if (!Number.isFinite(seconds) || seconds < 0) return json(res, 400, { error: "seconds 必须是非负数字" });
     const outFile = path.join(DJIAN, "out", "frames", `frame-${Date.now()}.png`);
     try {
-      const r = await renderFrame({ timeline, timeSeconds: seconds, outFile });
+      const r = await renderFrame({ timeline, timeSeconds: seconds, outFile, assetsDir: assetsPath(currentProjectId()) });
       const png = fs.readFileSync(outFile);
       const stats = analyzeFrame(outFile);
       fs.rm(outFile, { force: true }, () => {});
@@ -365,14 +600,30 @@ const server = http.createServer(async (req, res) => {
     if (exportJob?.status === "rendering") return json(res, 409, { error: "已有导出任务进行中，请稍候" });
     const body = JSON.parse(await readBody(req));
     if (!body?.timeline?.clips?.length) return json(res, 400, { error: "时间线为空，没有可导出的内容" });
+    // 导出参数：scale 缩放分辨率（0.5/1/2，宽高偶数对齐）；quality 质量档 → crf
+    const scale = [0.5, 1, 2].includes(Number(body.scale)) ? Number(body.scale) : 1;
+    const CRF = { draft: 28, standard: 20, high: 16 };
+    const crf = CRF[body?.quality] ?? undefined;
+    let timelineOut = body.timeline;
+    if (scale !== 1) {
+      timelineOut = structuredClone(timelineOut);
+      timelineOut.meta = {
+        ...timelineOut.meta,
+        width: Math.max(16, Math.round((timelineOut.meta.width * scale) / 2) * 2),
+        height: Math.max(16, Math.round((timelineOut.meta.height * scale) / 2) * 2),
+      };
+    }
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const outFile = path.join(DJIAN, "out", `djian-${stamp}.mp4`);
     exportJob = { status: "rendering", progress: { rendered: 0, total: 0, percent: 0, stage: "preparing" }, outFile };
+    const renderAssets = assetsPath(currentProjectId());
+    fs.mkdirSync(renderAssets, { recursive: true });
     renderVideo({
-      timeline: body.timeline,
+      timeline: timelineOut,
       outFile,
-      // 与前端预览同源：vite public 目录，时间线 src 相对它解析
-      assetsDir: path.join(DJIAN, "packages/webui/public"),
+      // 素材根 = 当前项目 assets/（与预览同源）
+      assetsDir: renderAssets,
+      ...(crf != null ? { crf } : {}),
       onProgress: (p) => {
         if (exportJob?.status !== "rendering") return;
         exportJob.progress = {
@@ -449,6 +700,17 @@ const server = http.createServer(async (req, res) => {
   }
   const hasExt = path.extname(url.pathname) !== "";
   if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    // 带扩展名的缺失路径再查一次当前项目素材目录（时间线 src 裸文件名兼容）
+    const inAssets = hasExt ? path.join(assetsPath(currentProjectId()), path.basename(url.pathname)) : null;
+    if (inAssets && fs.existsSync(inAssets) && !fs.statSync(inAssets).isDirectory()) {
+      res.writeHead(200, {
+        "Content-Type": MIME[path.extname(inAssets)] || "application/octet-stream",
+        "Cache-Control": "no-cache",
+        ...(res._aco ? { "Access-Control-Allow-Origin": res._aco } : {}),
+      });
+      fs.createReadStream(inAssets).pipe(res);
+      return;
+    }
     if (hasExt) {
       res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }).end("not found");
       return;

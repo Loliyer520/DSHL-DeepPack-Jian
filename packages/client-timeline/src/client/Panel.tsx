@@ -8,19 +8,14 @@ import {
 } from '../../../engine/src/schema';
 import { PreviewVideo } from './PreviewVideo';
 import { playerBus, seekToSeconds } from './bus';
-import {
-  API_BASE,
-  assetUrl,
-  exportDownloadUrl,
-  getExportStatus,
-  getTimeline,
-  putTimeline,
-  startExport,
-} from './api';
+import { assetUrl, getTimeline, putTimeline, type AssetInfo } from './api';
+import { useHistory } from './useHistory';
+import { ProjectBar } from './ProjectBar';
+import { CanvasDialog } from './CanvasDialog';
+import { AssetsSection } from './AssetsSection';
+import { ExportControl } from './ExportControl';
 
 const fmtSec = (s: number) => `${s.toFixed(1)}s`;
-const fmtSize = (n: number) =>
-  n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;
 
 // ---------- 时间线同步：2s 轮询服务端（干净时），本地编辑防抖 600ms 写回 ----------
 function useTimelineSync() {
@@ -80,7 +75,19 @@ function useTimelineSync() {
     });
   }, []);
 
-  return { timeline, mutate };
+  // 项目切换后强制重拉（绕过 dirty 与缓存比较）
+  const reload = useCallback(async () => {
+    try {
+      const t = await getTimeline<Timeline>();
+      serverJson.current = JSON.stringify(t);
+      dirty.current = false;
+      setTimeline(t);
+    } catch {
+      // 静默
+    }
+  }, []);
+
+  return { timeline, mutate, reload };
 }
 
 // ---------- 剪辑原语（语义与 webui store / 服务端 ops 一致） ----------
@@ -94,7 +101,16 @@ const ops = (mutate: Mutate) => ({
       ...t,
       clips: [
         ...t.clips,
-        { id: clipId(), type: 'video', src: 'a.mp4', inPoint: 0, clipDuration: 3, transition: 'none', volume: 1 },
+        {
+          id: clipId(),
+          type: 'video' as const,
+          // 默认沿用末片段素材，空时间线退回 a.mp4
+          src: t.clips[t.clips.length - 1]?.src ?? 'a.mp4',
+          inPoint: 0,
+          clipDuration: 3,
+          transition: 'none' as const,
+          volume: 1,
+        },
       ],
     })),
   removeClip: (id: string) => mutate((t) => ({ ...t, clips: t.clips.filter((c) => c.id !== id) })),
@@ -199,26 +215,26 @@ const TrackStrip: React.FC<{ t: Timeline; onSeekClip: (start: number) => void }>
   );
 };
 
-type ExportUi =
-  | { phase: 'idle' }
-  | { phase: 'rendering'; percent: number }
-  | { phase: 'done'; fileName: string; sizeBytes: number }
-  | { phase: 'error'; message: string };
-
 // ---------- 主面板 ----------
 export const Panel: React.FC = () => {
-  const { timeline, mutate } = useTimelineSync();
-  const o = ops(mutate);
-  const [exp, setExp] = useState<ExportUi>({ phase: 'idle' });
-  const pollRef = useRef<number | null>(null);
+  const { timeline, mutate, reload } = useTimelineSync();
+  const hist = useHistory(timeline, mutate);
+  const o = ops(hist.commit);
+  const [canvasOpen, setCanvasOpen] = useState(false);
 
-  const stopPolling = () => {
-    if (pollRef.current !== null) {
-      window.clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  };
-  useEffect(() => stopPolling, []);
+  // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y（输入框聚焦时不抢）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); hist.undo(); }
+      else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); hist.redo(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [hist.undo, hist.redo]);
 
   if (!timeline) {
     return <div className="djp-root"><div className="djp-empty">连接剪辑引擎中…（5180）</div></div>;
@@ -234,30 +250,25 @@ export const Panel: React.FC = () => {
     audio: t.audio ? { ...t.audio, src: assetUrl(t.audio.src) } : t.audio,
   };
 
-  const startExportFlow = async () => {
-    setExp({ phase: 'rendering', percent: 0 });
-    try {
-      await startExport(t);
-      stopPolling();
-      pollRef.current = window.setInterval(async () => {
-        try {
-          const s = await getExportStatus();
-          if (s.status === 'rendering') setExp({ phase: 'rendering', percent: s.progress?.percent ?? 0 });
-          else if (s.status === 'done') {
-            stopPolling();
-            setExp({ phase: 'done', fileName: s.result.fileName, sizeBytes: s.result.sizeBytes });
-          } else if (s.status === 'error') {
-            stopPolling();
-            setExp({ phase: 'error', message: s.error ?? '渲染失败' });
-          }
-        } catch {
-          // 网络抖动等下一轮
-        }
-      }, 1000);
-    } catch (e) {
-      setExp({ phase: 'error', message: e instanceof Error ? e.message : String(e) });
-    }
-  };
+  // 素材库动作：视频/图片加为片段，音频设为配乐
+  const addAssetClip = (a: AssetInfo) =>
+    hist.commit((cur) => ({
+      ...cur,
+      clips: [
+        ...cur.clips,
+        {
+          id: clipId(),
+          type: a.type === 'image' ? ('image' as const) : ('video' as const),
+          src: a.name,
+          inPoint: 0,
+          clipDuration: a.type === 'image' ? 3 : a.duration ?? 3,
+          transition: 'none' as const,
+          volume: 1,
+        },
+      ],
+    }));
+  const setBgm = (name: string) =>
+    hist.commit((cur) => ({ ...cur, audio: { src: name, volume: 1, startAtSeconds: 0 } }));
 
   const onDragOver = (e: React.DragEvent) => {
     if (e.dataTransfer.types.includes('text/clip-index')) {
@@ -280,31 +291,17 @@ export const Panel: React.FC = () => {
 
   return (
     <div className="djp-root">
+      <ProjectBar onSwitched={() => { hist.clear(); void reload(); }} />
       <div className="djp-head">
         <span className="djp-title">剪辑</span>
+        <button className="djp-iconbtn" title="撤销（Ctrl+Z）" disabled={!hist.canUndo} onClick={hist.undo}>↺</button>
+        <button className="djp-iconbtn" title="重做（Ctrl+Shift+Z）" disabled={!hist.canRedo} onClick={hist.redo}>↻</button>
         <span className="djp-meta">
           {t.meta.width}×{t.meta.height} · {t.meta.fps}fps · {totalSec.toFixed(1)}s · {t.clips.length} 段 ·{' '}
           {t.overlays.length} 字幕
         </span>
-        {exp.phase === 'idle' && (
-          <button className="djp-export" onClick={startExportFlow}>导出</button>
-        )}
-        {exp.phase === 'rendering' && (
-          <button className="djp-export" disabled>导出中 {exp.percent}%</button>
-        )}
-        {exp.phase === 'done' && (
-          <a
-            className="djp-export"
-            href={exportDownloadUrl}
-            download={exp.fileName}
-            title={`${exp.fileName} · ${fmtSize(exp.sizeBytes)}`}
-          >
-            下载 mp4
-          </a>
-        )}
-        {exp.phase === 'error' && (
-          <button className="djp-export djp-error" onClick={startExportFlow} title={exp.message}>失败重试</button>
-        )}
+        <button className="djp-btn" title="画布设置" onClick={() => setCanvasOpen(true)}>画布</button>
+        <ExportControl t={t} />
       </div>
 
       {t.clips.length === 0 ? (
@@ -330,6 +327,8 @@ export const Panel: React.FC = () => {
       )}
 
       <TrackStrip t={t} onSeekClip={(start) => seekToSeconds(start, t.meta.fps)} />
+
+      <AssetsSection onAddClip={addAssetClip} onSetBgm={setBgm} />
 
       <div className="djp-section">
         <div className="djp-section-head">
@@ -414,6 +413,14 @@ export const Panel: React.FC = () => {
       </div>
 
       <div className="djp-hint">AI 在对话里剪辑（MCP 工具落 5180 事实源）后，这里 2 秒内自动同步。</div>
+
+      {canvasOpen && (
+        <CanvasDialog
+          t={t}
+          onApply={(meta) => hist.commit((cur) => ({ ...cur, meta: { ...cur.meta, ...meta } }))}
+          onClose={() => setCanvasOpen(false)}
+        />
+      )}
     </div>
   );
 };

@@ -19826,26 +19826,675 @@ async function putTimeline(t) {
 	});
 	if (!r.ok) throw new Error(`HTTP ${r.status}`);
 }
-async function startExport(timeline) {
+async function getExportStatus() {
+	return (await fetch(`${API_BASE}/api/export/status`)).json();
+}
+const exportDownloadUrl = `${API_BASE}/api/export/download`;
+async function startExportWith(timeline, opts) {
 	const r = await fetch(`${API_BASE}/api/export`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ timeline })
+		body: JSON.stringify({
+			timeline,
+			scale: opts.scale ?? 1,
+			quality: opts.quality ?? "standard"
+		})
 	});
 	if (r.status !== 202) {
 		const d = await r.json().catch(() => ({}));
 		throw new Error(d.error ?? `HTTP ${r.status}`);
 	}
 }
-async function getExportStatus() {
-	return (await fetch(`${API_BASE}/api/export/status`)).json();
+async function listProjects() {
+	const r = await fetch(`${API_BASE}/api/projects`);
+	if (!r.ok) throw new Error(`HTTP ${r.status}`);
+	return r.json();
 }
-const exportDownloadUrl = `${API_BASE}/api/export/download`;
+async function createProject(name, meta) {
+	const r = await fetch(`${API_BASE}/api/projects`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			name,
+			meta
+		})
+	});
+	if (!r.ok) throw new Error(`HTTP ${r.status}`);
+	return r.json();
+}
+async function switchProject(id) {
+	const r = await fetch(`${API_BASE}/api/current`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ id })
+	});
+	if (!r.ok) throw new Error(`HTTP ${r.status}`);
+}
+async function listAssets() {
+	const r = await fetch(`${API_BASE}/api/assets`);
+	if (!r.ok) throw new Error(`HTTP ${r.status}`);
+	return (await r.json()).assets ?? [];
+}
+async function uploadAsset(file) {
+	const r = await fetch(`${API_BASE}/api/assets?name=${encodeURIComponent(file.name)}`, {
+		method: "POST",
+		headers: { "Content-Type": "application/octet-stream" },
+		body: file
+	});
+	const d = await r.json().catch(() => ({}));
+	if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
+	return d;
+}
+async function deleteAsset(name) {
+	const r = await fetch(`${API_BASE}/api/assets/${encodeURIComponent(name)}`, { method: "DELETE" });
+	if (!r.ok) throw new Error(`HTTP ${r.status}`);
+}
+const assetThumbUrl = (name) => `${API_BASE}/api/assets/${encodeURIComponent(name)}/thumb`;
+
+//#endregion
+//#region src/client/useHistory.ts
+function useHistory(timeline, mutate) {
+	const undoStack = (0, react.useRef)([]);
+	const redoStack = (0, react.useRef)([]);
+	const [, force] = (0, react.useState)(0);
+	return {
+		commit: (0, react.useCallback)((fn) => {
+			if (!timeline) return;
+			undoStack.current.push(timeline);
+			if (undoStack.current.length > 50) undoStack.current.shift();
+			redoStack.current = [];
+			mutate(fn);
+			force((x) => x + 1);
+		}, [timeline, mutate]),
+		undo: (0, react.useCallback)(() => {
+			const prev = undoStack.current.pop();
+			if (!prev || !timeline) return;
+			redoStack.current.push(timeline);
+			mutate(() => prev);
+			force((x) => x + 1);
+		}, [timeline, mutate]),
+		redo: (0, react.useCallback)(() => {
+			const next = redoStack.current.pop();
+			if (!next || !timeline) return;
+			undoStack.current.push(timeline);
+			mutate(() => next);
+			force((x) => x + 1);
+		}, [timeline, mutate]),
+		clear: (0, react.useCallback)(() => {
+			undoStack.current = [];
+			redoStack.current = [];
+			force((x) => x + 1);
+		}, []),
+		canUndo: undoStack.current.length > 0,
+		canRedo: redoStack.current.length > 0
+	};
+}
+
+//#endregion
+//#region src/client/ProjectBar.tsx
+const CANVAS_PRESETS = [
+	{
+		key: "1080p",
+		label: "1080p 横屏",
+		meta: {
+			width: 1920,
+			height: 1080,
+			fps: 30
+		}
+	},
+	{
+		key: "720p",
+		label: "720p 横屏",
+		meta: {
+			width: 1280,
+			height: 720,
+			fps: 30
+		}
+	},
+	{
+		key: "vertical",
+		label: "竖屏 9:16",
+		meta: {
+			width: 1080,
+			height: 1920,
+			fps: 30
+		}
+	},
+	{
+		key: "square",
+		label: "方形 1:1",
+		meta: {
+			width: 1080,
+			height: 1080,
+			fps: 30
+		}
+	},
+	{
+		key: "4k",
+		label: "4K 横屏",
+		meta: {
+			width: 3840,
+			height: 2160,
+			fps: 30
+		}
+	}
+];
+const ProjectBar = ({ onSwitched }) => {
+	const [projects, setProjects] = (0, react.useState)([]);
+	const [current, setCurrent] = (0, react.useState)("");
+	const [creating, setCreating] = (0, react.useState)(false);
+	const [name, setName] = (0, react.useState)("");
+	const [preset, setPreset] = (0, react.useState)("1080p");
+	const [busy, setBusy] = (0, react.useState)(false);
+	const refresh = async () => {
+		try {
+			const r = await listProjects();
+			setProjects(r.projects);
+			setCurrent(r.current);
+		} catch {}
+	};
+	(0, react.useEffect)(() => {
+		refresh();
+	}, []);
+	const onSwitch = async (id) => {
+		if (!id || id === current || busy) return;
+		setBusy(true);
+		try {
+			await switchProject(id);
+			setCurrent(id);
+			onSwitched();
+		} catch {} finally {
+			setBusy(false);
+		}
+	};
+	const onCreate = async () => {
+		if (busy) return;
+		setBusy(true);
+		try {
+			const p = CANVAS_PRESETS.find((x) => x.key === preset) ?? CANVAS_PRESETS[0];
+			await switchProject((await createProject(name.trim() || "未命名项目", p.meta)).id);
+			setCreating(false);
+			setName("");
+			await refresh();
+			onSwitched();
+		} catch {} finally {
+			setBusy(false);
+		}
+	};
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "djp-projbar",
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: "djp-proj-label",
+				children: "项目"
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
+				className: "djp-select djp-proj-select",
+				value: current,
+				disabled: busy,
+				onChange: (e) => void onSwitch(e.target.value),
+				children: projects.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("option", {
+					value: p.id,
+					children: [p.name, p.meta ? `（${p.meta.width}×${p.meta.height}）` : ""]
+				}, p.id))
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				className: "djp-add",
+				title: "新建项目",
+				onClick: () => setCreating((v) => !v),
+				children: "+"
+			}),
+			creating && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "djp-pop djp-proj-new",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+						type: "text",
+						placeholder: "项目名称",
+						value: name,
+						autoFocus: true,
+						onChange: (e) => setName(e.target.value),
+						onKeyDown: (e) => {
+							if (e.key === "Enter") onCreate();
+							if (e.key === "Escape") setCreating(false);
+						}
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
+						className: "djp-select",
+						value: preset,
+						onChange: (e) => setPreset(e.target.value),
+						children: CANVAS_PRESETS.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("option", {
+							value: p.key,
+							children: [
+								p.label,
+								"（",
+								p.meta.width,
+								"×",
+								p.meta.height,
+								"@",
+								p.meta.fps,
+								"）"
+							]
+						}, p.key))
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "djp-export",
+						disabled: busy,
+						onClick: () => void onCreate(),
+						children: "创建"
+					})
+				]
+			})
+		]
+	});
+};
+
+//#endregion
+//#region src/client/CanvasDialog.tsx
+const CanvasDialog = ({ t, onApply, onClose }) => {
+	const [width, setWidth] = (0, react.useState)(t.meta.width);
+	const [height, setHeight] = (0, react.useState)(t.meta.height);
+	const [fps, setFps] = (0, react.useState)(t.meta.fps);
+	const applyPreset = (key) => {
+		const p = CANVAS_PRESETS.find((x) => x.key === key);
+		if (!p) return;
+		setWidth(p.meta.width);
+		setHeight(p.meta.height);
+		setFps(p.meta.fps);
+	};
+	const valid = Number.isFinite(width) && Number.isFinite(height) && Number.isFinite(fps) && width >= 16 && height >= 16 && fps >= 1 && fps <= 120;
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+		className: "djp-mask",
+		onClick: onClose,
+		children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: "djp-dialog",
+			onClick: (e) => e.stopPropagation(),
+			children: [
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "djp-dialog-title",
+					children: "画布设置"
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "djp-preset-grid",
+					children: CANVAS_PRESETS.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+						className: `djp-preset ${width === p.meta.width && height === p.meta.height && fps === p.meta.fps ? "djp-on" : ""}`,
+						onClick: () => applyPreset(p.key),
+						children: [p.label, /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
+							p.meta.width,
+							"×",
+							p.meta.height,
+							"@",
+							p.meta.fps
+						] })]
+					}, p.key))
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "djp-fields",
+					style: { marginTop: 10 },
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+							className: "djp-field",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "宽" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+								type: "number",
+								value: width,
+								min: 16,
+								step: 2,
+								onChange: (e) => setWidth(Number(e.target.value))
+							})]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+							className: "djp-field",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "高" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+								type: "number",
+								value: height,
+								min: 16,
+								step: 2,
+								onChange: (e) => setHeight(Number(e.target.value))
+							})]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+							className: "djp-field",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "fps" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+								type: "number",
+								value: fps,
+								min: 1,
+								max: 120,
+								onChange: (e) => setFps(Number(e.target.value))
+							})]
+						})
+					]
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "djp-dialog-actions",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "djp-btn",
+						onClick: onClose,
+						children: "取消"
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "djp-export",
+						disabled: !valid,
+						onClick: () => {
+							onApply({
+								width,
+								height,
+								fps
+							});
+							onClose();
+						},
+						children: "应用"
+					})]
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "djp-hint",
+					style: { marginTop: 8 },
+					children: "只影响之后：改画布不会改动已有片段内容；宽高会被对齐到偶数。"
+				})
+			]
+		})
+	});
+};
+
+//#endregion
+//#region src/client/AssetsSection.tsx
+const fmtSize$1 = (n) => n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)}MB` : `${Math.round(n / 1024)}KB`;
+const fmtDur = (d) => d == null ? "" : `${d.toFixed(1)}s`;
+const AssetsSection = ({ onAddClip, onSetBgm }) => {
+	const [assets, setAssets] = (0, react.useState)([]);
+	const [collapsed, setCollapsed] = (0, react.useState)(false);
+	const [busy, setBusy] = (0, react.useState)(false);
+	const [error$1, setError] = (0, react.useState)("");
+	const fileRef = (0, react.useRef)(null);
+	const refresh = async () => {
+		try {
+			setAssets(await listAssets());
+			setError("");
+		} catch {}
+	};
+	(0, react.useEffect)(() => {
+		refresh();
+		const timer = window.setInterval(() => void refresh(), 5e3);
+		return () => window.clearInterval(timer);
+	}, []);
+	const onFiles = async (files) => {
+		if (!files?.length || busy) return;
+		setBusy(true);
+		setError("");
+		try {
+			for (const f of Array.from(files)) await uploadAsset(f);
+			await refresh();
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+		} finally {
+			setBusy(false);
+			if (fileRef.current) fileRef.current.value = "";
+		}
+	};
+	const onDelete = async (name) => {
+		if (!window.confirm(`删除素材「${name}」？时间线里引用它的片段会失效。`)) return;
+		try {
+			await deleteAsset(name);
+			await refresh();
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+		}
+	};
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "djp-section",
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "djp-section-head",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+					style: {
+						cursor: "pointer",
+						userSelect: "none"
+					},
+					onClick: () => setCollapsed((v) => !v),
+					title: collapsed ? "展开" : "收起",
+					children: [
+						collapsed ? "▸" : "▾",
+						" 素材库（",
+						assets.length,
+						"）"
+					]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+					style: {
+						display: "flex",
+						gap: 6
+					},
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+						ref: fileRef,
+						type: "file",
+						multiple: true,
+						accept: "video/*,image/*,audio/*",
+						style: { display: "none" },
+						onChange: (e) => void onFiles(e.target.files)
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "djp-btn",
+						disabled: busy,
+						onClick: () => fileRef.current?.click(),
+						title: "上传视频/图片/音频到当前项目素材文件夹",
+						children: busy ? "上传中…" : "上传"
+					})]
+				})]
+			}),
+			error$1 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "djp-hint",
+				style: { color: "var(--dsw-alias-state-error-primary)" },
+				children: error$1
+			}),
+			!collapsed && (assets.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "djp-hint",
+				children: "空素材库——点「上传」把素材放进当前项目"
+			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "djp-assets",
+				children: assets.map((a$2) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "djp-asset",
+					title: `${a$2.name} · ${fmtSize$1(a$2.size)}${a$2.duration ? ` · ${fmtDur(a$2.duration)}` : ""}`,
+					children: [
+						a$2.thumb ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
+							className: "djp-asset-thumb",
+							src: assetThumbUrl(a$2.name),
+							alt: a$2.name,
+							loading: "lazy"
+						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "djp-asset-thumb djp-asset-audio",
+							children: "♪"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "djp-asset-name",
+							children: a$2.name
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "djp-asset-acts",
+							children: [a$2.type !== "audio" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								title: "加为片段",
+								onClick: () => onAddClip(a$2),
+								children: "＋片段"
+							}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								title: "设为配乐",
+								onClick: () => onSetBgm(a$2.name),
+								children: "♪配乐"
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								title: "删除素材",
+								onClick: () => void onDelete(a$2.name),
+								children: "✕"
+							})]
+						})
+					]
+				}, a$2.name))
+			}))
+		]
+	});
+};
+
+//#endregion
+//#region src/client/ExportControl.tsx
+const fmtSize = (n) => n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;
+const ExportControl = ({ t }) => {
+	const [exp, setExp] = (0, react.useState)({ phase: "idle" });
+	const [open, setOpen] = (0, react.useState)(false);
+	const [scale, setScale] = (0, react.useState)(1);
+	const [quality, setQuality] = (0, react.useState)("standard");
+	const pollRef = (0, react.useRef)(null);
+	const stopPolling = () => {
+		if (pollRef.current !== null) {
+			window.clearInterval(pollRef.current);
+			pollRef.current = null;
+		}
+	};
+	(0, react.useEffect)(() => stopPolling, []);
+	const start = async () => {
+		setOpen(false);
+		setExp({
+			phase: "rendering",
+			percent: 0
+		});
+		try {
+			await startExportWith(t, {
+				scale,
+				quality
+			});
+			stopPolling();
+			pollRef.current = window.setInterval(async () => {
+				try {
+					const s = await getExportStatus();
+					if (s.status === "rendering") setExp({
+						phase: "rendering",
+						percent: s.progress?.percent ?? 0
+					});
+					else if (s.status === "done") {
+						stopPolling();
+						setExp({
+							phase: "done",
+							fileName: s.result.fileName,
+							sizeBytes: s.result.sizeBytes
+						});
+					} else if (s.status === "error") {
+						stopPolling();
+						setExp({
+							phase: "error",
+							message: s.error ?? "渲染失败"
+						});
+					}
+				} catch {}
+			}, 1e3);
+		} catch (e) {
+			setExp({
+				phase: "error",
+				message: e instanceof Error ? e.message : String(e)
+			});
+		}
+	};
+	if (exp.phase === "rendering") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+		className: "djp-export",
+		disabled: true,
+		children: [
+			"导出中 ",
+			exp.percent,
+			"%"
+		]
+	});
+	if (exp.phase === "done") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("a", {
+		className: "djp-export",
+		href: exportDownloadUrl,
+		download: exp.fileName,
+		title: `${exp.fileName} · ${fmtSize(exp.sizeBytes)}`,
+		onClick: () => window.setTimeout(() => setExp({ phase: "idle" }), 4e3),
+		children: "下载 mp4"
+	});
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+		className: "djp-expwrap",
+		children: [
+			exp.phase === "error" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				className: "djp-export djp-error",
+				onClick: () => setOpen(true),
+				title: exp.message,
+				children: "失败重试"
+			}),
+			exp.phase !== "error" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				className: "djp-export",
+				onClick: () => setOpen((v) => !v),
+				children: "导出"
+			}),
+			open && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "djp-pop djp-exppop",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+						className: "djp-field",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "分辨率" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+							className: "djp-select",
+							value: scale,
+							onChange: (e) => setScale(Number(e.target.value)),
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("option", {
+									value: 1,
+									children: [
+										"原始（",
+										t.meta.width,
+										"×",
+										t.meta.height,
+										"）"
+									]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("option", {
+									value: .5,
+									children: [
+										"50%（",
+										Math.round(t.meta.width * .5 / 2) * 2,
+										"×",
+										Math.round(t.meta.height * .5 / 2) * 2,
+										"）"
+									]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("option", {
+									value: 2,
+									children: [
+										"200%（",
+										t.meta.width * 2,
+										"×",
+										t.meta.height * 2,
+										"）"
+									]
+								})
+							]
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+						className: "djp-field",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "质量" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+							className: "djp-select",
+							value: quality,
+							onChange: (e) => setQuality(e.target.value),
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+									value: "draft",
+									children: "草稿（快、小）"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+									value: "standard",
+									children: "标准"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+									value: "high",
+									children: "高（慢、大）"
+								})
+							]
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "djp-export",
+						style: { alignSelf: "flex-end" },
+						onClick: () => void start(),
+						children: "开始导出"
+					})
+				]
+			})
+		]
+	});
+};
 
 //#endregion
 //#region src/client/Panel.tsx
 const fmtSec = (s) => `${s.toFixed(1)}s`;
-const fmtSize = (n) => n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;
 function useTimelineSync() {
 	const [timeline, setTimeline] = (0, react.useState)(null);
 	const serverJson = (0, react.useRef)("");
@@ -19892,6 +20541,14 @@ function useTimelineSync() {
 				}, 600);
 				return next;
 			});
+		}, []),
+		reload: (0, react.useCallback)(async () => {
+			try {
+				const t = await getTimeline();
+				serverJson.current = JSON.stringify(t);
+				dirty.current = false;
+				setTimeline(t);
+			} catch {}
 		}, [])
 	};
 }
@@ -19902,7 +20559,7 @@ const ops = (mutate) => ({
 		clips: [...t.clips, {
 			id: clipId(),
 			type: "video",
-			src: "a.mp4",
+			src: t.clips[t.clips.length - 1]?.src ?? "a.mp4",
 			inPoint: 0,
 			clipDuration: 3,
 			transition: "none",
@@ -20016,17 +20673,27 @@ const TrackStrip = ({ t, onSeekClip }) => {
 	});
 };
 const Panel = () => {
-	const { timeline, mutate } = useTimelineSync();
-	const o = ops(mutate);
-	const [exp, setExp] = (0, react.useState)({ phase: "idle" });
-	const pollRef = (0, react.useRef)(null);
-	const stopPolling = () => {
-		if (pollRef.current !== null) {
-			window.clearInterval(pollRef.current);
-			pollRef.current = null;
-		}
-	};
-	(0, react.useEffect)(() => stopPolling, []);
+	const { timeline, mutate, reload } = useTimelineSync();
+	const hist = useHistory(timeline, mutate);
+	const o = ops(hist.commit);
+	const [canvasOpen, setCanvasOpen] = (0, react.useState)(false);
+	(0, react.useEffect)(() => {
+		const onKey = (e) => {
+			if (!(e.ctrlKey || e.metaKey)) return;
+			const el = e.target;
+			if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
+			const k = e.key.toLowerCase();
+			if (k === "z" && !e.shiftKey) {
+				e.preventDefault();
+				hist.undo();
+			} else if (k === "z" && e.shiftKey || k === "y") {
+				e.preventDefault();
+				hist.redo();
+			}
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [hist.undo, hist.redo]);
 	if (!timeline) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 		className: "djp-root",
 		children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -20048,44 +20715,26 @@ const Panel = () => {
 			src: assetUrl(t.audio.src)
 		} : t.audio
 	};
-	const startExportFlow = async () => {
-		setExp({
-			phase: "rendering",
-			percent: 0
-		});
-		try {
-			await startExport(t);
-			stopPolling();
-			pollRef.current = window.setInterval(async () => {
-				try {
-					const s = await getExportStatus();
-					if (s.status === "rendering") setExp({
-						phase: "rendering",
-						percent: s.progress?.percent ?? 0
-					});
-					else if (s.status === "done") {
-						stopPolling();
-						setExp({
-							phase: "done",
-							fileName: s.result.fileName,
-							sizeBytes: s.result.sizeBytes
-						});
-					} else if (s.status === "error") {
-						stopPolling();
-						setExp({
-							phase: "error",
-							message: s.error ?? "渲染失败"
-						});
-					}
-				} catch {}
-			}, 1e3);
-		} catch (e) {
-			setExp({
-				phase: "error",
-				message: e instanceof Error ? e.message : String(e)
-			});
+	const addAssetClip = (a$2) => hist.commit((cur) => ({
+		...cur,
+		clips: [...cur.clips, {
+			id: clipId(),
+			type: a$2.type === "image" ? "image" : "video",
+			src: a$2.name,
+			inPoint: 0,
+			clipDuration: a$2.type === "image" ? 3 : a$2.duration ?? 3,
+			transition: "none",
+			volume: 1
+		}]
+	}));
+	const setBgm = (name) => hist.commit((cur) => ({
+		...cur,
+		audio: {
+			src: name,
+			volume: 1,
+			startAtSeconds: 0
 		}
-	};
+	}));
 	const onDragOver = (e) => {
 		if (e.dataTransfer.types.includes("text/clip-index")) {
 			e.preventDefault();
@@ -20107,12 +20756,30 @@ const Panel = () => {
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "djp-root",
 		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectBar, { onSwitched: () => {
+				hist.clear();
+				reload();
+			} }),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "djp-head",
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "djp-title",
 						children: "剪辑"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "djp-iconbtn",
+						title: "撤销（Ctrl+Z）",
+						disabled: !hist.canUndo,
+						onClick: hist.undo,
+						children: "↺"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "djp-iconbtn",
+						title: "重做（Ctrl+Shift+Z）",
+						disabled: !hist.canRedo,
+						onClick: hist.redo,
+						children: "↻"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 						className: "djp-meta",
@@ -20132,33 +20799,13 @@ const Panel = () => {
 							" 字幕"
 						]
 					}),
-					exp.phase === "idle" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						className: "djp-export",
-						onClick: startExportFlow,
-						children: "导出"
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "djp-btn",
+						title: "画布设置",
+						onClick: () => setCanvasOpen(true),
+						children: "画布"
 					}),
-					exp.phase === "rendering" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-						className: "djp-export",
-						disabled: true,
-						children: [
-							"导出中 ",
-							exp.percent,
-							"%"
-						]
-					}),
-					exp.phase === "done" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("a", {
-						className: "djp-export",
-						href: exportDownloadUrl,
-						download: exp.fileName,
-						title: `${exp.fileName} · ${fmtSize(exp.sizeBytes)}`,
-						children: "下载 mp4"
-					}),
-					exp.phase === "error" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						className: "djp-export djp-error",
-						onClick: startExportFlow,
-						title: exp.message,
-						children: "失败重试"
-					})
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ExportControl, { t })
 				]
 			}),
 			t.clips.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -20187,6 +20834,10 @@ const Panel = () => {
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackStrip, {
 				t,
 				onSeekClip: (start) => seekToSeconds(start, t.meta.fps)
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AssetsSection, {
+				onAddClip: addAssetClip,
+				onSetBgm: setBgm
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "djp-section",
@@ -20335,6 +20986,17 @@ const Panel = () => {
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "djp-hint",
 				children: "AI 在对话里剪辑（MCP 工具落 5180 事实源）后，这里 2 秒内自动同步。"
+			}),
+			canvasOpen && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(CanvasDialog, {
+				t,
+				onApply: (meta) => hist.commit((cur) => ({
+					...cur,
+					meta: {
+						...cur.meta,
+						...meta
+					}
+				})),
+				onClose: () => setCanvasOpen(false)
 			})
 		]
 	});
@@ -20385,6 +21047,43 @@ const CSS = `
 .djp-overlay-row input[type='text'] { flex: 1; min-width: 0; height: 26px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 6px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 12px; padding: 0 8px; box-sizing: border-box; }
 .djp-range { font-size: 11px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
 .djp-hint { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+
+/* ---- 项目栏 / 通用按钮 ---- */
+.djp-projbar { position: relative; display: flex; align-items: center; gap: 6px; }
+.djp-proj-label { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+.djp-proj-select { flex: 1; min-width: 0; height: 26px; font-size: 12px; }
+.djp-btn { border: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-radius: 7px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.djp-btn:disabled { opacity: 0.5; cursor: default; }
+.djp-iconbtn { border: none; background: none; color: var(--dsw-alias-label-tertiary); cursor: pointer; font-size: 15px; padding: 2px 4px; border-radius: 6px; line-height: 1; }
+.djp-iconbtn:hover:not(:disabled) { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); }
+.djp-iconbtn:disabled { opacity: 0.35; cursor: default; }
+
+/* ---- 弹层（项目新建 / 导出参数）---- */
+.djp-pop { position: absolute; top: 30px; right: 0; z-index: 30; display: flex; flex-direction: column; gap: 8px; background: var(--dsw-alias-bg-layer-1); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; padding: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.18); min-width: 220px; }
+.djp-proj-new input { height: 28px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 6px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 12px; padding: 0 8px; }
+.djp-proj-new .djp-export { align-self: flex-end; }
+.djp-expwrap { position: relative; }
+.djp-exppop { top: 30px; }
+
+/* ---- 画布设置对话框 ---- */
+.djp-mask { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; }
+.djp-dialog { width: 300px; background: var(--dsw-alias-bg-layer-1); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.djp-dialog-title { font-weight: 600; font-size: 13px; }
+.djp-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.djp-preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.djp-preset { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; border: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-radius: 8px; padding: 7px 9px; font-size: 12px; cursor: pointer; }
+.djp-preset span { font-size: 10px; color: var(--dsw-alias-label-tertiary); }
+.djp-preset.djp-on { border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-overlay); }
+
+/* ---- 素材库 ---- */
+.djp-assets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.djp-asset { position: relative; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 8px; overflow: hidden; background: var(--dsw-alias-bg-layer-2); }
+.djp-asset-thumb { width: 100%; aspect-ratio: 16/10; object-fit: cover; display: block; background: #000; }
+.djp-asset-audio { display: flex; align-items: center; justify-content: center; font-size: 22px; color: var(--dsw-alias-label-tertiary); }
+.djp-asset-name { font-size: 10px; color: var(--dsw-alias-label-tertiary); padding: 4px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.djp-asset-acts { position: absolute; top: 4px; right: 4px; display: none; gap: 4px; }
+.djp-asset:hover .djp-asset-acts { display: flex; }
+.djp-asset-acts button { border: none; border-radius: 6px; padding: 3px 7px; font-size: 11px; cursor: pointer; background: rgba(0,0,0,0.62); color: #fff; }
 `;
 
 //#endregion

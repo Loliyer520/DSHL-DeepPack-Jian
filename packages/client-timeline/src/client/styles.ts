@@ -43,4 +43,41 @@ const CSS = `
 .djp-overlay-row input[type='text'] { flex: 1; min-width: 0; height: 26px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 6px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 12px; padding: 0 8px; box-sizing: border-box; }
 .djp-range { font-size: 11px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
 .djp-hint { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+
+/* ---- 项目栏 / 通用按钮 ---- */
+.djp-projbar { position: relative; display: flex; align-items: center; gap: 6px; }
+.djp-proj-label { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+.djp-proj-select { flex: 1; min-width: 0; height: 26px; font-size: 12px; }
+.djp-btn { border: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-radius: 7px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.djp-btn:disabled { opacity: 0.5; cursor: default; }
+.djp-iconbtn { border: none; background: none; color: var(--dsw-alias-label-tertiary); cursor: pointer; font-size: 15px; padding: 2px 4px; border-radius: 6px; line-height: 1; }
+.djp-iconbtn:hover:not(:disabled) { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); }
+.djp-iconbtn:disabled { opacity: 0.35; cursor: default; }
+
+/* ---- 弹层（项目新建 / 导出参数）---- */
+.djp-pop { position: absolute; top: 30px; right: 0; z-index: 30; display: flex; flex-direction: column; gap: 8px; background: var(--dsw-alias-bg-layer-1); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; padding: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.18); min-width: 220px; }
+.djp-proj-new input { height: 28px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 6px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 12px; padding: 0 8px; }
+.djp-proj-new .djp-export { align-self: flex-end; }
+.djp-expwrap { position: relative; }
+.djp-exppop { top: 30px; }
+
+/* ---- 画布设置对话框 ---- */
+.djp-mask { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; }
+.djp-dialog { width: 300px; background: var(--dsw-alias-bg-layer-1); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.djp-dialog-title { font-weight: 600; font-size: 13px; }
+.djp-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.djp-preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.djp-preset { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; border: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-radius: 8px; padding: 7px 9px; font-size: 12px; cursor: pointer; }
+.djp-preset span { font-size: 10px; color: var(--dsw-alias-label-tertiary); }
+.djp-preset.djp-on { border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-overlay); }
+
+/* ---- 素材库 ---- */
+.djp-assets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.djp-asset { position: relative; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 8px; overflow: hidden; background: var(--dsw-alias-bg-layer-2); }
+.djp-asset-thumb { width: 100%; aspect-ratio: 16/10; object-fit: cover; display: block; background: #000; }
+.djp-asset-audio { display: flex; align-items: center; justify-content: center; font-size: 22px; color: var(--dsw-alias-label-tertiary); }
+.djp-asset-name { font-size: 10px; color: var(--dsw-alias-label-tertiary); padding: 4px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.djp-asset-acts { position: absolute; top: 4px; right: 4px; display: none; gap: 4px; }
+.djp-asset:hover .djp-asset-acts { display: flex; }
+.djp-asset-acts button { border: none; border-radius: 6px; padding: 3px 7px; font-size: 11px; cursor: pointer; background: rgba(0,0,0,0.62); color: #fff; }
 `;

@@ -14,6 +14,7 @@ export interface RenderOptions {
   // 素材根目录：时间线里所有 src 相对它解析（会映射为 Remotion publicDir）
   assetsDir: string;
   concurrency?: number; // 渲染并发，低配机器调小（默认按 CPU 核数一半）
+  crf?: number; // h264 质量档：越小越清晰越大（草稿 28 / 标准 20 / 高 16）
   onProgress?: (p: { rendered: number; total: number; stage: string }) => void;
 }
 
@@ -63,6 +64,7 @@ export async function renderVideo(opts: RenderOptions): Promise<{ outFile: strin
     outputLocation: opts.outFile,
     inputProps: { timeline },
     concurrency,
+    ...(opts.crf != null ? { crf: opts.crf } : {}),
     chromiumOptions,
     onProgress: (p) => {
       opts.onProgress?.({

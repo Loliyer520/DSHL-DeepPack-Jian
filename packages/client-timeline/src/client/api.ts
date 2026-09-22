@@ -44,3 +44,93 @@ export async function getExportStatus(): Promise<ExportStatus> {
 }
 
 export const exportDownloadUrl = `${API_BASE}/api/export/download`;
+
+// ---- 导出参数版 ----
+export async function startExportWith(timeline: unknown, opts: { scale?: number; quality?: string }): Promise<void> {
+  const r = await fetch(`${API_BASE}/api/export`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ timeline, scale: opts.scale ?? 1, quality: opts.quality ?? 'standard' }),
+  });
+  if (r.status !== 202) {
+    const d = (await r.json().catch(() => ({}))) as { error?: string };
+    throw new Error(d.error ?? `HTTP ${r.status}`);
+  }
+}
+
+// ---- 项目管理 ----
+export interface ProjectInfo {
+  id: string;
+  name: string;
+  createdAt: string | null;
+  meta: { fps: number; width: number; height: number } | null;
+}
+
+export async function listProjects(): Promise<{ current: string; projects: ProjectInfo[] }> {
+  const r = await fetch(`${API_BASE}/api/projects`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+export async function createProject(name: string, meta?: { fps?: number; width?: number; height?: number }): Promise<{ id: string; name: string }> {
+  const r = await fetch(`${API_BASE}/api/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, meta }),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+export async function switchProject(id: string): Promise<void> {
+  const r = await fetch(`${API_BASE}/api/current`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+}
+
+export async function renameProject(id: string, name: string): Promise<void> {
+  const r = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+}
+
+// ---- 素材库 ----
+export interface AssetInfo {
+  name: string;
+  type: 'video' | 'image' | 'audio';
+  size: number;
+  duration: number | null;
+  thumb: string | null;
+}
+
+export async function listAssets(): Promise<AssetInfo[]> {
+  const r = await fetch(`${API_BASE}/api/assets`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return (await r.json()).assets ?? [];
+}
+
+export async function uploadAsset(file: File): Promise<AssetInfo> {
+  const r = await fetch(`${API_BASE}/api/assets?name=${encodeURIComponent(file.name)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: file,
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((d as { error?: string }).error ?? `HTTP ${r.status}`);
+  return d as AssetInfo;
+}
+
+export async function deleteAsset(name: string): Promise<void> {
+  const r = await fetch(`${API_BASE}/api/assets/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+}
+
+export const assetThumbUrl = (name: string) => `${API_BASE}/api/assets/${encodeURIComponent(name)}/thumb`;
+// 素材本体地址（预览播放器用）
+export const assetMediaUrl = (name: string) => `${API_BASE}/project-assets/${encodeURIComponent(name)}`;

@@ -35,7 +35,8 @@ const TOOLS = [
     description:
       "对当前视频时间线应用一批剪辑操作。ops 数组按顺序执行。每个元素必须是 {\"op\":\"操作名\", ...参数} 形式，op 字段必填且必须是以下之一：\n" +
       'addClip{src,inPoint,clipDuration,transition,volume} / removeClip{id} / updateClip{id,patch} / reorderClips{order:[id...]} / ' +
-      'addOverlay{text,startSeconds,endSeconds,position,fontSize,color} / removeOverlay{index} / updateOverlay{index,patch}。\n' +
+      'addOverlay{text,startSeconds,endSeconds,position,fontSize,color} / removeOverlay{index} / updateOverlay{index,patch} / ' +
+      'setMeta{patch:{fps?,width?,height?}}（调画布：帧率 1-120，宽高 16-7680 偶数）。\n' +
       "patch 可含：inPoint/clipDuration/transition/volume（改片段）或 text/startSeconds/endSeconds/position/fontSize/color（改字幕）。\n" +
       "时间单位都是秒；transition 只接受 \"fade\" 或 \"none\"。",
     inputSchema: {
@@ -52,6 +53,7 @@ const TOOLS = [
               opSchema("addOverlay", { text: { type: "string" }, startSeconds: NUM, endSeconds: NUM, position: { enum: ["top", "center", "bottom"] }, fontSize: NUM, color: { type: "string" } }, ["text", "startSeconds", "endSeconds"]),
               opSchema("removeOverlay", { index: { type: "integer", minimum: 0 } }, ["index"]),
               opSchema("updateOverlay", { index: { type: "integer", minimum: 0 }, patch: PATCH }, ["index", "patch"]),
+              opSchema("setMeta", { patch: { type: "object", properties: { fps: { type: "integer", minimum: 1, maximum: 120 }, width: { type: "number" }, height: { type: "number" } }, required: [] } }, ["patch"]),
             ],
           },
         },
@@ -62,6 +64,39 @@ const TOOLS = [
   {
     name: "get_timeline",
     description: "读取当前时间线的最新 JSON（meta/clips/overlays）。修改前后都可以调用以确认状态。",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "project_list",
+    description: "列出所有剪辑项目（id/名称/画布参数），并标明当前活跃项目。",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "project_create",
+    description: "新建剪辑项目。可指定名称与画布预设（1080p/720p/竖屏 9:16/方形 1:1/4K）或自定义宽高帧率。创建后不会自动切换，需要时用 project_switch。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "项目名称" },
+        preset: { enum: ["1080p", "720p", "vertical", "square", "4k"], description: "画布预设（与自定义参数二选一）" },
+        width: { type: "number" },
+        height: { type: "number" },
+        fps: { type: "integer", minimum: 1, maximum: 120 },
+      },
+    },
+  },
+  {
+    name: "project_switch",
+    description: "切换当前活跃剪辑项目。之后 get_timeline / apply_timeline_ops / get_frame 都作用于该项目。",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string", description: "项目 id（project_list 返回）" } },
+      required: ["id"],
+    },
+  },
+  {
+    name: "asset_list",
+    description: "列出当前项目素材库里的素材（文件名/类型/大小/时长）。addClip 的 src 用素材文件名。",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -98,6 +133,19 @@ async function fetchTimeline() {
   const res = await fetch(`${WEBUI}/api/internal/timeline`, { signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new Error(`webui HTTP ${res.status}`);
   return res.json();
+}
+
+// 通用 GET/POST JSON（项目/素材工具用）
+async function apiJson(pathname, body) {
+  const res = await fetch(`${WEBUI}${pathname}`, {
+    method: body === undefined ? "GET" : "POST",
+    headers: body === undefined ? {} : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `webui HTTP ${res.status}`);
+  return data;
 }
 
 async function fetchFrame(seconds) {
@@ -160,6 +208,30 @@ rl.on("line", async (line) => {
         if (name === "get_timeline") {
           const t = await fetchTimeline();
           return reply({ content: [{ type: "text", text: JSON.stringify(t) }] });
+        }
+        if (name === "project_list") {
+          const r = await apiJson("/api/projects");
+          return reply({ content: [{ type: "text", text: JSON.stringify(r) }] });
+        }
+        if (name === "project_create") {
+          const PRESETS = {
+            "1080p": { width: 1920, height: 1080, fps: 30 },
+            "720p": { width: 1280, height: 720, fps: 30 },
+            vertical: { width: 1080, height: 1920, fps: 30 },
+            square: { width: 1080, height: 1080, fps: 30 },
+            "4k": { width: 3840, height: 2160, fps: 30 },
+          };
+          const meta = PRESETS[args.preset] ?? { width: args.width, height: args.height, fps: args.fps };
+          const r = await apiJson("/api/projects", { name: args.name, meta });
+          return reply({ content: [{ type: "text", text: `已创建项目「${r.name}」（id: ${r.id}）。用 project_switch 切换过去。` }] });
+        }
+        if (name === "project_switch") {
+          const r = await apiJson("/api/current", { id: args.id });
+          return reply({ content: [{ type: "text", text: r.ok ? `已切换到项目 ${r.current}。` : "切换失败" }], isError: !r.ok });
+        }
+        if (name === "asset_list") {
+          const r = await apiJson("/api/assets");
+          return reply({ content: [{ type: "text", text: JSON.stringify(r.assets ?? []) }] });
         }
         if (name === "get_frame") {
           const seconds = Number(args.seconds);
