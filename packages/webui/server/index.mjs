@@ -259,16 +259,29 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 静态文件（SPA 回退 index.html）
+  // 静态文件（SPA 回退 index.html——仅对无扩展名的导航路径；
+  // 带扩展名的资源缺失必须 404，否则旧缓存 index.html 引用已重建的旧 hash 资源时会拿到 HTML 当 JS，直接白屏）
   let filePath = path.join(DIST, url.pathname === "/" ? "index.html" : url.pathname);
   if (!filePath.startsWith(DIST)) {
     res.writeHead(403).end();
     return;
   }
+  const hasExt = path.extname(url.pathname) !== "";
   if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    if (hasExt) {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }).end("not found");
+      return;
+    }
     filePath = path.join(DIST, "index.html");
   }
-  res.writeHead(200, { "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream" });
+  // 缓存策略：html 每次重验证（拿新 hash 引用）；hash 指纹资源 immutable 长缓存
+  const isHtml = path.extname(filePath) === ".html";
+  const isFingerprinted = url.pathname.startsWith("/assets/");
+  const cacheControl = isHtml ? "no-cache" : isFingerprinted ? "public, max-age=31536000, immutable" : "no-cache";
+  res.writeHead(200, {
+    "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream",
+    "Cache-Control": cacheControl,
+  });
   fs.createReadStream(filePath).pipe(res);
 });
 
