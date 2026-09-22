@@ -1,0 +1,14 @@
+
+> @djian/webui@0.1.0 build
+> tsc -b && vite build
+
+vite v6.0.7 building for production...
+transforming...
+✓ 43 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.40 kB │ gzip:   0.31 kB
+dist/assets/index-Bt00KCCa.css   14.08 kB │ gzip:   3.55 kB
+dist/assets/index-cIBaPDzF.js   495.01 kB │ gzip: 153.04 kB
+✓ built in 2.06s
+BUILD_DONE exit=0

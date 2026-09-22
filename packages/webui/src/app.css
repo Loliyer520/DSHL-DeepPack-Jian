@@ -679,6 +679,116 @@
   color: rgb(200, 50, 50);
 }
 
+/* ===== 轨道条（预览下方，与 Player 联动） ===== */
+.track-strip {
+  position: relative;
+  display: flex;
+  height: 36px;
+  margin-top: 8px;
+  border: 0.5px solid var(--border-l2);
+  border-radius: 8px;
+  background: var(--sidebar-fill);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.track-block {
+  position: relative;
+  height: 100%;
+  border-right: 0.5px solid var(--border-l2);
+  background: var(--ds-50);
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+[data-theme="dark"] .track-block {
+  background: rgba(65, 118, 230, 0.18);
+}
+
+.track-block.has-fade {
+  background-image: linear-gradient(135deg, rgba(65, 118, 230, 0.22), transparent 40%);
+}
+
+.track-block-label {
+  font-size: 11px;
+  color: var(--label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--business-primary);
+  pointer-events: none;
+}
+
+.playhead::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--business-primary);
+}
+
+/* AI 工作中：dsh turnStatus 品牌蓝微光扫过 */
+.turn-status {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  font-size: 14px;
+  line-height: 22px;
+  white-space: nowrap;
+  background: linear-gradient(
+    90deg,
+    var(--ds-500) 0%,
+    var(--ds-500) 40%,
+    var(--ds-200) 50%,
+    var(--ds-500) 60%,
+    var(--ds-500) 100%
+  );
+  background-position: 100% 0;
+  background-size: 250% 100%;
+  background-clip: text;
+  color: transparent;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: dsh-turn-status-shimmer 1.8s linear infinite;
+}
+
+@keyframes dsh-turn-status-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -150% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-status { animation: none; }
+}
+
+/* 拖拽把手 */
+.drag-handle {
+  flex: none;
+  color: var(--label-caption);
+  font-size: 10px;
+  letter-spacing: -2px;
+  cursor: grab;
+  user-select: none;
+}
+
+.clip-card:active .drag-handle {
+  cursor: grabbing;
+}
+
 /* ===== 通用 ===== */
 .icon-btn {
   flex: none;

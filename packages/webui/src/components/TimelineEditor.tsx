@@ -39,8 +39,12 @@ const NumberField: React.FC<{
 const ClipRow: React.FC<{ clip: Clip; index: number }> = ({ clip, index }) => {
   const { updateClip, removeClip } = useStore();
   return (
-    <div className="edit-card">
+    <div className="edit-card clip-card" data-index={index} draggable onDragStart={(e) => {
+      e.dataTransfer.setData("text/clip-index", String(index));
+      e.dataTransfer.effectAllowed = "move";
+    }}>
       <div className="edit-card-head">
+        <span className="drag-handle" title="拖拽排序">⋮⋮</span>
         <span className="edit-card-title">
           #{index + 1} {clip.src}
         </span>
@@ -79,8 +83,28 @@ const ClipRow: React.FC<{ clip: Clip; index: number }> = ({ clip, index }) => {
 };
 
 export const TimelineEditor: React.FC = () => {
-  const { active, addClip, addOverlay, removeOverlay, updateOverlay } = useStore();
+  const { active, addClip, addOverlay, removeOverlay, updateOverlay, reorderClips } = useStore();
   const t = active.timeline;
+
+  // 拖拽排序：dragover 高亮目标，drop 后计算新顺序走 store（会注入系统消息）
+  const onDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes("text/clip-index")) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+    }
+  };
+  const onDrop = (e: React.DragEvent) => {
+    const from = Number(e.dataTransfer.getData("text/clip-index"));
+    if (!Number.isInteger(from)) return;
+    e.preventDefault();
+    const target = (e.target as HTMLElement).closest(".clip-card");
+    const to = target ? Number((target as HTMLElement).dataset.index) : t.clips.length - 1;
+    if (!Number.isInteger(to) || from === to) return;
+    const order = t.clips.map((c) => c.id);
+    const [moved] = order.splice(from, 1);
+    order.splice(to, 0, moved);
+    reorderClips(order);
+  };
 
   return (
     <section className="panel-section editor">
@@ -99,9 +123,11 @@ export const TimelineEditor: React.FC = () => {
             </button>
           </div>
           {t.clips.length === 0 && <div className="section-empty">空时间线</div>}
-          {t.clips.map((c, i) => (
-            <ClipRow key={c.id} clip={c} index={i} />
-          ))}
+          <div onDragOver={onDragOver} onDrop={onDrop}>
+            {t.clips.map((c, i) => (
+              <ClipRow key={c.id} clip={c} index={i} />
+            ))}
+          </div>
         </div>
 
         <div className="editor-section">

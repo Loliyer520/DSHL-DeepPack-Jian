@@ -1,0 +1,13 @@
+
+> @djian/webui@0.1.0 build
+> tsc -b && vite build
+
+src/components/PreviewPanel.tsx(31,21): error TS7006: Parameter 'r' implicitly has an 'any' type.
+npm error Lifecycle script `build` failed with error:
+npm error code 1
+npm error path /my/own/djian/packages/webui
+npm error workspace @djian/webui@0.1.0
+npm error location /my/own/djian/packages/webui
+npm error command failed
+npm error command sh -c tsc -b && vite build
+BUILD_DONE exit=1

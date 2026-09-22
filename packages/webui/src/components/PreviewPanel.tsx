@@ -1,8 +1,10 @@
 import React from "react";
-import { Player } from "@remotion/player";
+import { Player, type PlayerRef } from "@remotion/player";
 import { TimelineVideo } from "../../../engine/src/TimelineVideo";
 import { timelineDurationInFrames } from "../../../engine/src/schema";
 import { useStore } from "../store";
+import { playerBus } from "../playerBus";
+import { TrackStrip } from "./TrackStrip";
 
 // 右上：预览面板（dsh 右栏壳风格——strip 标题行 + 内容体）
 export const PreviewPanel: React.FC = () => {
@@ -26,6 +28,9 @@ export const PreviewPanel: React.FC = () => {
           ) : (
             <Player
               key={`${t.meta.fps}-${t.meta.width}-${t.meta.height}`}
+              ref={(r: PlayerRef | null) => {
+                playerBus.ref = r;
+              }}
               component={TimelineVideo}
               inputProps={{ timeline: t }}
               durationInFrames={durationInFrames}
@@ -37,6 +42,7 @@ export const PreviewPanel: React.FC = () => {
             />
           )}
         </div>
+        <TrackStrip />
       </div>
     </section>
   );

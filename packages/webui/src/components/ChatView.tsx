@@ -41,14 +41,14 @@ const MessageRow: React.FC<{ msg: ChatMessage }> = ({ msg }) => {
 };
 
 export const ChatView: React.FC = () => {
-  const { active, sendUserMessage } = useStore();
+  const { active, aiPending, sendUserMessage } = useStore();
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [active.messages.length, active.id]);
+  }, [active.messages.length, active.id, aiPending]);
 
   const send = () => {
     const text = draft.trim();
@@ -64,6 +64,8 @@ export const ChatView: React.FC = () => {
           {active.messages.map((m) => (
             <MessageRow key={m.id} msg={m} />
           ))}
+          {/* AI 工作中：dsh turnStatus 品牌蓝微光扫过 */}
+          {aiPending && <div className="turn-status">正在剪辑…</div>}
         </div>
       </div>
       {/* 输入卡照抄 dsh InputBar：22px 胶囊卡 + 底部工具行 + 34px 圆形发送键 */}
