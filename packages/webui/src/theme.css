@@ -35,12 +35,17 @@
   --n-400: rgb(173, 178, 184);
   --n-600: rgb(129, 133, 140);
   --n-850: rgb(44, 44, 46);
+  --n-75: rgb(241, 243, 245);
+  --n-750: rgb(67, 69, 74);
   --bubble: var(--ds-50);
   --input-major: var(--n-00);
   --label-caption: var(--n-400);
   --label-primary-dimmed: var(--n-950);
   --button-info-fill: var(--ds-500);
   --button-info-hover: var(--ds-600);
+  --button-elevated-fill: var(--n-00);
+  --button-floating-hover: var(--n-75);
+  --business-primary: var(--ds-500);
   --interactive-bg-hover: rgba(38, 49, 72, 0.06);
   --elevation-soft: 0 2px 12px rgba(15, 17, 21, 0.06);
 
@@ -71,6 +76,9 @@
   --label-primary-dimmed: var(--n-100);
   --button-info-fill: var(--ds-400);
   --button-info-hover: var(--ds-500);
+  --button-elevated-fill: var(--n-750);
+  --button-floating-hover: var(--n-800);
+  --business-primary: var(--ds-400);
   --interactive-bg-hover: rgba(255, 255, 255, 0.08);
   --elevation-soft: 0 2px 12px rgba(0, 0, 0, 0.4);
 }

@@ -21,7 +21,7 @@
   }
 }
 
-/* ===== 左侧会话抽屉 ===== */
+/* ===== 左侧会话抽屉（照抄 dsh SidebarRoot + Rows） ===== */
 .drawer {
   min-width: 0;
   overflow: hidden;
@@ -34,90 +34,172 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 10px 8px;
-  gap: 8px;
+  padding: 6px 12px;
+  box-sizing: border-box;
+  font-size: 14px;
 }
 
-.drawer-head {
+/* 品牌行：figma I133:7632——60px 高，wordmark 墨色，右侧 28px 圆形 toggle */
+.logo-row {
+  flex: none;
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 8px;
+  height: 60px;
+  padding: 8px 0 8px 4px;
+  margin-bottom: 8px;
+  box-sizing: border-box;
 }
 
-.new-session-btn {
-  flex: 1;
+.brand-identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  min-width: 0;
+}
+
+.brand-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+
+.brand-name {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 24px;
+  letter-spacing: 0.04em;
+  color: var(--label-primary);
+}
+
+.icon-circle {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--label-secondary);
+}
+
+.icon-circle:hover {
+  background: var(--interactive-bg-hover);
+}
+
+/* 新会话条：figma 133:7634——38px 高，12px 圆角，0.5px 边，elevated 底 */
+.new-session-bar {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 34px;
+  height: 38px;
+  padding: 8px 16px;
+  margin: 0 2px 12px;
+  box-sizing: border-box;
   border: 0.5px solid var(--border-l3);
-  border-radius: 8px;
-  background: var(--bg-base);
+  border-radius: 12px;
+  background: var(--button-elevated-fill);
   color: var(--label-primary);
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-in-out);
 }
 
-.new-session-btn:hover {
-  background: var(--fill-hover);
-}
-
-.new-session-btn .plus {
-  color: var(--ds-500);
-  font-weight: 600;
+.new-session-bar:hover {
+  background: var(--button-floating-hover);
 }
 
 .session-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.session-item {
+/* 会话行：figma session cell——32px 高，8px 圆角，16px 状态槽 + 标题，150ms 渐入 */
+.session-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--label-primary);
-  font-size: 13px;
-  text-align: left;
+  height: 32px;
+  border-radius: 8px;
+  padding: 0 8px;
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-in-out);
+  user-select: none;
+  color: var(--label-primary);
+  animation: row-in 150ms var(--ease-in-out);
 }
 
-.session-item:hover {
-  background: var(--fill-hover);
+@keyframes row-in {
+  from { opacity: 0; }
 }
 
-.session-item.active {
-  background: var(--fill-active);
+.session-row:hover {
+  background: var(--interactive-bg-hover);
 }
 
-.session-title {
+.session-row.selected {
+  background: var(--interactive-bg-hover);
+}
+
+.row-slot {
+  flex: none;
+  width: 16px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--label-tertiary);
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--label-caption);
+}
+
+.status-dot.active {
+  background: var(--business-primary);
+}
+
+.row-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0 6px 0 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 14px;
+  line-height: 20px;
 }
 
-.session-time {
+.row-time {
   flex: none;
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 17px;
   color: var(--label-tertiary);
-  font-variant-numeric: tabular-nums;
 }
 
 .drawer-foot {
-  padding: 6px 10px;
-  font-size: 11px;
+  flex: none;
+  padding: 8px 10px 4px;
+  font-size: 12px;
+  line-height: 17px;
   color: var(--label-tertiary);
 }
 
