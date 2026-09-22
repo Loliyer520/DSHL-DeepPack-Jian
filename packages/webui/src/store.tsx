@@ -269,6 +269,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message: text,
+            sessionId: activeId,
             timeline: snapshot.timeline,
             history: snapshot.messages.slice(-8).map((m) => ({ role: m.role, text: m.text })),
           }),

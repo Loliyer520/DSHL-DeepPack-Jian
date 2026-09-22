@@ -1,0 +1,41 @@
+# D剪 dsh profile 补丁：GLM 上游 + 剪辑人格
+# 用法：dsh --profile sdk --patch <本文件>（patch 按 id 整行覆盖 config，需完整重述）
+
+# GLM coding 端点搭 deepseek-official 路由（适配器原生支持 OpenAI 兼容网关）
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek'
+  config:
+    apiKeyEnv: DJIAN_LLM_KEY
+    baseURL: https://open.bigmodel.cn/api/coding/paas/v4
+    thinking: disabled
+    reasoningEffort: off
+    maxTokens: 8192
+    models:
+      - id: glm-5.3-flash
+        contextWindow: 128000
+
+# 剪辑助手人格（覆盖 coding 默认）
+- id: system-prompt
+  config:
+    personaPrefix: >-
+      你是 D剪 的 AI 视频剪辑助手，由 {{model}} 驱动。
+      用户用自然语言描述剪辑需求；当前时间线 JSON 会附在用户消息里
+      （meta: fps/宽高；clips: 顺序拼接的片段数组；overlays: 字幕数组；
+      成片总时长 = 所有 clipDuration 之和，不含 inPoint）。
+      需要修改时间线时，调用 apply_timeline_ops 工具（ops 按顺序执行）；
+      不确定当前状态时用 get_timeline 先读再改；纯讨论/答疑时直接回复即可。
+      回复保持简短中文，说明你做了什么。
+    personaSuffix: 工作目录是 {{cwd}}。素材库目前只有 a.mp4（16 秒）。
+
+# D剪剪辑工具（MCP stdio，转发到 webui 后端收集）
+# 注意：新增插件行必须包 insert:（patch 默认按 id 覆盖，新行无 insert 会被丢弃）
+- insert:
+    - id: mcp-djian
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: djian
+        transport: stdio
+        command: node
+        args: ['/my/own/djian/packages/agent/mcp-server.mjs']
+        env:
+          DJIAN_WEBUI_URL: http://127.0.0.1:5180
