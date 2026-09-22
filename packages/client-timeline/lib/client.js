@@ -19680,9 +19680,18 @@ var z = /* @__PURE__ */ Object.freeze({
 //#endregion
 //#region ../engine/src/schema.ts
 const transitionSchema = z.enum(["none", "fade"]).default("none");
+const easingSchema = z.enum([
+	"linear",
+	"in",
+	"out",
+	"inOut",
+	"bounce",
+	"elastic"
+]);
 const keyframeSchema = z.object({
 	t: z.number().min(0),
-	v: z.number()
+	v: z.number(),
+	e: easingSchema.optional()
 });
 const animationsSchema = z.object({
 	x: z.array(keyframeSchema).optional(),
@@ -19796,6 +19805,164 @@ const timelineDurationInFrames = (t) => {
 		for (const c$2 of tr.clips) frames = Math.max(frames, SEC$1(fps, c$2.atSeconds + c$2.duration));
 	}
 	return Math.max(1, frames);
+};
+
+//#endregion
+//#region ../engine/src/presets.ts
+const kf = (t, v, e) => ({
+	t,
+	v,
+	...e ? { e } : {}
+});
+const ANIMATION_PRESETS = {
+	fadeIn: {
+		label: "淡入",
+		group: "入场",
+		expand: (d) => ({ opacity: [kf(0, 0, "out"), kf(Math.min(.8, d * .3), 1)] })
+	},
+	slideInLeft: {
+		label: "左滑入",
+		group: "入场",
+		expand: (d) => ({
+			x: [kf(0, -.5, "out"), kf(Math.min(.7, d * .25), 0)],
+			opacity: [kf(0, 0), kf(Math.min(.4, d * .15), 1)]
+		})
+	},
+	slideInRight: {
+		label: "右滑入",
+		group: "入场",
+		expand: (d) => ({
+			x: [kf(0, .5, "out"), kf(Math.min(.7, d * .25), 0)],
+			opacity: [kf(0, 0), kf(Math.min(.4, d * .15), 1)]
+		})
+	},
+	slideInUp: {
+		label: "上滑入",
+		group: "入场",
+		expand: (d) => ({
+			y: [kf(0, .5, "out"), kf(Math.min(.7, d * .25), 0)],
+			opacity: [kf(0, 0), kf(Math.min(.4, d * .15), 1)]
+		})
+	},
+	zoomIn: {
+		label: "放大入场",
+		group: "入场",
+		expand: (d) => ({
+			scale: [kf(0, .3, "out"), kf(Math.min(.8, d * .3), 1)],
+			opacity: [kf(0, 0), kf(Math.min(.4, d * .15), 1)]
+		})
+	},
+	bounceIn: {
+		label: "弹跳入场",
+		group: "入场",
+		expand: (d) => ({
+			scale: [kf(0, .2, "bounce"), kf(Math.min(.9, d * .35), 1)],
+			opacity: [kf(0, 0), kf(Math.min(.3, d * .1), 1)]
+		})
+	},
+	spinIn: {
+		label: "旋转入场",
+		group: "入场",
+		expand: (d) => ({
+			rotation: [kf(0, -180, "out"), kf(Math.min(.9, d * .3), 0)],
+			scale: [kf(0, .4, "out"), kf(Math.min(.9, d * .3), 1)],
+			opacity: [kf(0, 0), kf(Math.min(.4, d * .15), 1)]
+		})
+	},
+	fadeOut: {
+		label: "淡出",
+		group: "出场",
+		expand: (d) => ({ opacity: [kf(Math.max(0, d - Math.min(.8, d * .3)), 1, "in"), kf(d, 0)] })
+	},
+	slideOutLeft: {
+		label: "左滑出",
+		group: "出场",
+		expand: (d) => ({
+			x: [kf(Math.max(0, d - Math.min(.7, d * .25)), 0, "in"), kf(d, -.5)],
+			opacity: [kf(Math.max(0, d - Math.min(.4, d * .15)), 1), kf(d, 0)]
+		})
+	},
+	slideOutRight: {
+		label: "右滑出",
+		group: "出场",
+		expand: (d) => ({
+			x: [kf(Math.max(0, d - Math.min(.7, d * .25)), 0, "in"), kf(d, .5)],
+			opacity: [kf(Math.max(0, d - Math.min(.4, d * .15)), 1), kf(d, 0)]
+		})
+	},
+	zoomOut: {
+		label: "缩小出场",
+		group: "出场",
+		expand: (d) => ({
+			scale: [kf(Math.max(0, d - Math.min(.8, d * .3)), 1, "in"), kf(d, .3)],
+			opacity: [kf(Math.max(0, d - Math.min(.4, d * .15)), 1), kf(d, 0)]
+		})
+	},
+	kenBurns: {
+		label: "镜头缓推",
+		group: "组合",
+		expand: (d) => ({
+			scale: [kf(0, 1, "inOut"), kf(d, 1.15)],
+			x: [kf(0, 0, "inOut"), kf(d, .02)]
+		})
+	},
+	kenBurnsOut: {
+		label: "镜头缓拉",
+		group: "组合",
+		expand: (d) => ({
+			scale: [kf(0, 1.15, "inOut"), kf(d, 1)],
+			y: [kf(0, .02, "inOut"), kf(d, 0)]
+		})
+	},
+	pop: {
+		label: "弹跳强调",
+		group: "组合",
+		expand: (d) => ({ scale: [kf(0, .9, "elastic"), kf(Math.min(.7, d * .25), 1)] })
+	},
+	tilt: {
+		label: "摇摆",
+		group: "组合",
+		expand: (d) => ({ rotation: [
+			kf(0, -3, "inOut"),
+			kf(d / 4, 3, "inOut"),
+			kf(d / 2, -3, "inOut"),
+			kf(d * 3 / 4, 3, "inOut"),
+			kf(d, -3)
+		] })
+	},
+	pulse: {
+		label: "脉冲",
+		group: "循环",
+		expand: (d) => {
+			const kfs = [];
+			for (let i = 0; i * 1 <= d; i++) kfs.push(kf(i, i % 2 ? 1.06 : 1, "inOut"));
+			if (kfs[kfs.length - 1].t < d) kfs.push(kf(d, kfs.length % 2 ? 1.06 : 1));
+			return { scale: kfs };
+		}
+	},
+	wobble: {
+		label: "抖动",
+		group: "循环",
+		expand: (d) => {
+			const kfs = [];
+			for (let i = 0; i * .5 <= d; i++) kfs.push(kf(i * .5, i % 2 ? .008 : -.008, "linear"));
+			return { x: kfs };
+		}
+	},
+	float: {
+		label: "漂浮",
+		group: "循环",
+		expand: (d) => {
+			const kfs = [];
+			for (let i = 0; i * 2 <= d; i++) kfs.push(kf(i * 2, i % 2 ? -.015 : .015, "inOut"));
+			if (kfs[kfs.length - 1].t < d) kfs.push(kf(d, kfs.length % 2 ? -.015 : .015));
+			return { y: kfs };
+		}
+	}
+};
+const expandAnimationPreset = (name, dur) => {
+	const p = ANIMATION_PRESETS[name];
+	return p ? p.expand(Math.max(.1, dur)) : void 0;
 };
 
 //#endregion
@@ -21018,6 +21185,44 @@ const FILTER_PRESETS = [
 		filter: { blur: 4 }
 	}
 ];
+const ANIM_GROUPS = [
+	"入场",
+	"出场",
+	"组合",
+	"循环"
+];
+const AnimSelect = ({ clip, onCommit }) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+	className: "djp-select",
+	value: "",
+	title: clip.animations ? "动画（已生效，可换或清除）" : "动画",
+	onChange: (e) => {
+		const key = e.target.value;
+		if (key === "__clear") {
+			onCommit({});
+			return;
+		}
+		const anims = expandAnimationPreset(key, clip.clipDuration ?? 1);
+		if (anims) onCommit(anims);
+		e.target.value = "";
+	},
+	children: [
+		/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+			value: "",
+			children: "✨ 动画…"
+		}),
+		clip.animations && Object.keys(clip.animations).length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+			value: "__clear",
+			children: "✕ 清除动画"
+		}),
+		ANIM_GROUPS.map((g) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("optgroup", {
+			label: g,
+			children: Object.entries(ANIMATION_PRESETS).filter(([, p]) => p.group === g).map(([key, p]) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+				value: key,
+				children: p.label
+			}, key))
+		}, g))
+	]
+});
 const FilterSelect = ({ value, onCommit }) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
 	className: "djp-select",
 	value: value ? JSON.stringify(value) : "",
@@ -21776,6 +21981,10 @@ const Panel = () => {
 									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(FilterSelect, {
 										value: c$2.filter,
 										onCommit: (f) => o.updateClip(c$2.id, { filter: f })
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnimSelect, {
+										clip: c$2,
+										onCommit: (anims) => o.updateClip(c$2.id, { animations: anims })
 									})
 								]
 							})]
@@ -21843,6 +22052,10 @@ const Panel = () => {
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(FilterSelect, {
 								value: c$2.filter,
 								onCommit: (f) => o.updateClip(c$2.id, { filter: f })
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnimSelect, {
+								clip: c$2,
+								onCommit: (anims) => o.updateClip(c$2.id, { animations: anims })
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								className: "djp-btn",

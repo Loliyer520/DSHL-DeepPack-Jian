@@ -7,6 +7,7 @@ import {
   type Overlay,
   type Timeline,
 } from '../../../engine/src/schema';
+import { ANIMATION_PRESETS, expandAnimationPreset } from '../../../engine/src/presets';
 import { PreviewVideo } from './PreviewVideo';
 import { playerBus, seekToSeconds } from './bus';
 import { assetUrl, getTimeline, putTimeline, uploadAsset, type AssetInfo } from './api';
@@ -284,6 +285,38 @@ const FILTER_PRESETS: { label: string; filter: Exclude<Clip['filter'], undefined
   { label: '高对比', filter: { contrast: 1.3 } },
   { label: '柔焦', filter: { blur: 4 } },
 ];
+
+// 动画预设下拉：展开成关键帧落库（存储层不存预设名）；「无动画」清空 animations
+const ANIM_GROUPS = ['入场', '出场', '组合', '循环'] as const;
+const AnimSelect: React.FC<{ clip: Clip; onCommit: (anims: Clip['animations']) => void }> = ({ clip, onCommit }) => (
+  <select
+    className="djp-select"
+    value=""
+    title={clip.animations ? '动画（已生效，可换或清除）' : '动画'}
+    onChange={(e) => {
+      const key = e.target.value;
+      if (key === '__clear') {
+        onCommit({});
+        return;
+      }
+      const anims = expandAnimationPreset(key, clip.clipDuration ?? 1);
+      if (anims) onCommit(anims);
+      e.target.value = '';
+    }}
+  >
+    <option value="">✨ 动画…</option>
+    {clip.animations && Object.keys(clip.animations).length > 0 && <option value="__clear">✕ 清除动画</option>}
+    {ANIM_GROUPS.map((g) => (
+      <optgroup key={g} label={g}>
+        {Object.entries(ANIMATION_PRESETS)
+          .filter(([, p]) => p.group === g)
+          .map(([key, p]) => (
+            <option key={key} value={key}>{p.label}</option>
+          ))}
+      </optgroup>
+    ))}
+  </select>
+);
 
 // 滤镜下拉：值用 JSON 序列化对齐预设，空值 = 无滤镜
 const FilterSelect: React.FC<{ value: Clip['filter']; onCommit: (f: Clip['filter']) => void }> = ({ value, onCommit }) => (
@@ -853,6 +886,7 @@ export const Panel: React.FC = () => {
                   onCommit={(v) => o.updateClip(c.id, { speed: Math.min(10, Math.max(0.1, v)) })}
                 />
                 <FilterSelect value={c.filter} onCommit={(f) => o.updateClip(c.id, { filter: f })} />
+                <AnimSelect clip={c} onCommit={(anims) => o.updateClip(c.id, { animations: anims })} />
               </div>
             </div>
           ))}
@@ -889,6 +923,7 @@ export const Panel: React.FC = () => {
             <NumberField label="时长" value={c.clipDuration} min={0.1} onCommit={(v) => o.updateClip(c.id, { clipDuration: v })} />
             <NumberField label="速度" value={c.speed ?? 1} step={0.25} min={0.1} onCommit={(v) => o.updateClip(c.id, { speed: Math.min(10, Math.max(0.1, v)) })} />
             <FilterSelect value={c.filter} onCommit={(f) => o.updateClip(c.id, { filter: f })} />
+            <AnimSelect clip={c} onCommit={(anims) => o.updateClip(c.id, { animations: anims })} />
             <button className="djp-btn" title="在播放头处分割" onClick={() => o.splitClip(c.id, Math.round(playheadRef.current * 100) / 100)}>✂</button>
             <button className="djp-del" title="删除画中画" onClick={() => o.removeClip(c.id)}>✕</button>
           </div>

@@ -15,10 +15,13 @@ import { z } from "zod";
 export const transitionSchema = z.enum(["none", "fade"]).default("none");
 
 // ---------- v3：关键帧 / 滤镜 / 变速（全 additive，旧 JSON 照收） ----------
-// 关键帧：t = clip 内相对秒（成片时间轴），v = 属性值；相邻帧间线性插值，区间外鉗端点
+// 关键帧：t = clip 内相对秒（成片时间轴），v = 属性值；相邻帧间按缓动插值，区间外鉗端点
+// e = 从本帧到下一帧的缓动曲线（省略=线性）
+export const easingSchema = z.enum(["linear", "in", "out", "inOut", "bounce", "elastic"]);
 export const keyframeSchema = z.object({
   t: z.number().min(0),
   v: z.number(),
+  e: easingSchema.optional(),
 });
 
 // 动画通道：x/y 为画布分数偏移（0=原位），scale 1=原大，opacity 0-1，rotation 度，volume 0-1 乘在 clip.volume 上
@@ -157,7 +160,30 @@ export const clipBox = (c: Clip) => c.box ?? DEFAULT_BOX;
 let trackSeq = 0;
 const autoId = (p: string) => `${p}${Date.now().toString(36)}${(trackSeq++).toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 
-// 关键帧求值：相邻帧线性插值，区间外鉗端点。空/单点退化常值。
+// 缓动曲线：f(0..1) → 0..1
+const EASING: Record<string, (f: number) => number> = {
+  linear: (f) => f,
+  in: (f) => f * f * f, // cubic 加速
+  out: (f) => 1 - Math.pow(1 - f, 3), // cubic 减速
+  inOut: (f) => (f < 0.5 ? 4 * f * f * f : 1 - Math.pow(-2 * f + 2, 3) / 2),
+  bounce: (f) => {
+    // ease-out bounce（落地弹跳感）
+    const n1 = 7.5625;
+    const d1 = 2.75;
+    if (f < 1 / d1) return n1 * f * f;
+    if (f < 2 / d1) return n1 * (f -= 1.5 / d1) * f + 0.75;
+    if (f < 2.5 / d1) return n1 * (f -= 2.25 / d1) * f + 0.9375;
+    return n1 * (f -= 2.625 / d1) * f + 0.984375;
+  },
+  elastic: (f) => {
+    // ease-out elastic（弹簧过冲）
+    if (f === 0 || f === 1) return f;
+    const c4 = (2 * Math.PI) / 3;
+    return Math.pow(2, -10 * f) * Math.sin((f * 10 - 0.75) * c4) + 1;
+  },
+};
+
+// 关键帧求值：相邻帧按前一帧的缓动曲线插值，区间外鉗端点。空/单点退化常值。
 export const evalKeyframes = (kfs: Keyframe[] | undefined, sec: number): number | undefined => {
   if (!kfs || kfs.length === 0) return undefined;
   if (kfs.length === 1) return kfs[0].v;
@@ -170,7 +196,8 @@ export const evalKeyframes = (kfs: Keyframe[] | undefined, sec: number): number 
     const b = sorted[i + 1];
     if (sec >= a.t && sec <= b.t) {
       const f = (sec - a.t) / (b.t - a.t);
-      return a.v + (b.v - a.v) * f;
+      const eased = EASING[a.e ?? "linear"](f);
+      return a.v + (b.v - a.v) * eased;
     }
   }
   return last.v;

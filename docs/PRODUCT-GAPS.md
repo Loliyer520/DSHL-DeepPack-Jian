@@ -14,7 +14,7 @@
 | 多轨视频/音频 | ❌ schema 单轨 | ✅ schema v2（本轮）：videoTracks[0] 主轨串行 + 叠加轨 PiP + audioTracks 多轨 |
 | 画中画 | ❌ | ✅ 本轮：box 0-1 分数矩形（右下默认 30%）+ 位置预设 + 绝对时间摆放 |
 | 变速 | ❌ | ✅ schema v3（本轮）：恒定变速 speed 0.1–10（占时不变、素材消耗换算 + playbackRate），双 UI 速度框 + AI 可调 |
-| 关键帧 | ❌ | ✅ schema v3（本轮）：x/y/scale/opacity/rotation/volume 包络（线性插值），分割时右半段时间轴自动平移 |
+| 关键帧/动效 | ❌ | ✅ schema v3+动画专项（本轮）：6 通道关键帧 + 6 种缓动（linear/in/out/inOut/bounce/elastic）+ 18 个一键动画预设（入场/出场/组合/循环四组），预设按 clip 时长展开成纯关键帧落库，双 UI 下拉 + AI 可调 |
 | 滤镜调色 | ❌ | ✅ schema v3（本轮）：CSS 滤镜 7 通道 + 8 预设下拉（提亮/黑白/复古/暖调/冷调/高饱和/高对比/柔焦），AI 可设 |
 | 抠像/特效/跟踪 | ❌ | 下轮起（优先级低） |
 | 转场扩展（擦除/滑动等） | ❌ 仅 fade/none | 下轮 |
@@ -47,3 +47,12 @@
 - **服务端净化**（防项目变砖——坏值入库会让 parseTimeline 拒载）：sanitizeFilter/sanitizeAnimations/sanitizeSpeed；未知 filter 字段丢、坏关键帧整通道丢、越界数值 clamp（contrast 99→3）而非丢弃；splitClip 右半段 `shiftAnims` 时间轴平移；updateClip 找不到视频 clip 时回退音频 clip（AI 同一 op 给音频设包络/变速）。
 - MCP：updateClip PATCH / addClip / addAudio 均带 v3 字段与描述；ops 协议描述补 v3 能力句。
 - UI：双前端速度框（视频/画中画/音频）+ 滤镜预设下拉 ×8；5190 断言速度字段×5、滤镜下拉×4、预设齐全。
+
+## 动画专项（2026-09-22 本轮）
+
+- **缓动**：关键帧加可选 `e` 字段（linear/in/out/inOut/bounce/elastic），作用于本帧→下一帧区间；bounce/elastic 为 ease-out 系（弹跳/弹簧过冲）。渲染、预览、面板共用同一 evalKeyframes。
+- **预设库**（engine/src/presets.ts）：18 个预设四组——入场（淡入/左右上滑入/放大/弹跳/旋转）、出场（淡出/左右滑出/缩小）、组合（Ken Burns 缓推缓拉/弹跳强调/摇摆）、循环（脉冲/抖动/漂浮）。`expandAnimationPreset(name, dur)` 按 clip 时长展开成带缓动的关键帧；**存储层不存预设名**（展开式），分割平移、撤销栈等全免费。
+- **服务端**：updateClip/addClip 收 `animationPreset`（apply 时按 clip 时长展开），`"none"` 清除；sanitizeAnimations/shiftAnims 保留 `e` 字段；`GET /api/animation-presets` 列表端点。
+- **UI**：双前端卡片「✨ 动画…」下拉（分组 optgroup，已生效时多出「✕ 清除动画」）；MCP 同字段，AI 可直接「加个弹跳入场」。
+- **验证**：缓动形状单测（in 低于线性/out 高于/bounce 后段反超/elastic 过冲 >1）；ops 展开 bounceIn 关键帧+e 字段正确、none 清除生效、addClip 预设链路通；渲染级 kenBurns 首末帧边缘均值 88.8→91.2 有差异；5190 断言下拉×2、四分组、18 预设齐。
+- **坑**：tsconfig.build.json 的 include 白名单——engine 新增 src 文件要手动加进 include，否则 tsc 不报错但 dist 缺文件，服务端 import 到运行时才炸。

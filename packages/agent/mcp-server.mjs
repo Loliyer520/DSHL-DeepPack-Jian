@@ -42,14 +42,19 @@ const PATCH = {
     animations: {
       type: "object",
       properties: {
-        x: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM }, required: ["t", "v"] }, description: "画布分数偏移（0=原位）" },
-        y: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM }, required: ["t", "v"] } },
-        scale: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM }, required: ["t", "v"] }, description: "1=原大" },
-        opacity: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM }, required: ["t", "v"] }, description: "0-1" },
-        rotation: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM }, required: ["t", "v"] }, description: "度" },
-        volume: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM }, required: ["t", "v"] }, description: "音量包络 0-1，乘在 clip.volume 上" },
+        x: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM, e: { enum: ["linear", "in", "out", "inOut", "bounce", "elastic"], description: "到下一帧的缓动" } }, required: ["t", "v"] }, description: "画布分数偏移（0=原位）" },
+        y: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM, e: { enum: ["linear", "in", "out", "inOut", "bounce", "elastic"] } }, required: ["t", "v"] } },
+        scale: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM, e: { enum: ["linear", "in", "out", "inOut", "bounce", "elastic"] } }, required: ["t", "v"] }, description: "1=原大" },
+        opacity: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM, e: { enum: ["linear", "in", "out", "inOut", "bounce", "elastic"] } }, required: ["t", "v"] }, description: "0-1" },
+        rotation: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM, e: { enum: ["linear", "in", "out", "inOut", "bounce", "elastic"] } }, required: ["t", "v"] }, description: "度" },
+        volume: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM, e: { enum: ["linear", "in", "out", "inOut", "bounce", "elastic"] } }, required: ["t", "v"] }, description: "音量包络 0-1，乘在 clip.volume 上" },
       },
-      description: "关键帧动画：t=clip 内相对秒，v=值，线性插值；设 {} 清空动画",
+      description: "关键帧动画：t=clip 内相对秒，v=值，e=缓动(linear/in/out/inOut/bounce/elastic)；设 {} 清空动画",
+    },
+    animationPreset: {
+      type: "string",
+      enum: ["fadeIn", "slideInLeft", "slideInRight", "slideInUp", "zoomIn", "bounceIn", "spinIn", "fadeOut", "slideOutLeft", "slideOutRight", "zoomOut", "kenBurns", "kenBurnsOut", "pop", "tilt", "pulse", "wobble", "float", "none"],
+      description: "一键动画预设（服务端按 clip 时长展开成关键帧，比手排 animations 省事）；'none'=清除动画",
     },
     text: { type: "string" },
     startSeconds: NUM,
@@ -76,7 +81,7 @@ const TOOLS = [
       'addAudio{src,duration,atSeconds,volume?,track?} —— 音频轨加 clip，track 是轨名（同名复用，缺省新建） / ' +
       'removeAudio{id} / updateAudioTrack{id,patch:{volume?,muted?,name?}} / ' +
       'splitClip{id,atSeconds} —— 在全局时间轴 atSeconds 处把片段一分为二（主轨/叠加/音频 clip 均可，切点太靠边会被忽略）/ ' +
-      'v3 能力：updateClip 的 patch 可设 speed（0.1-10 恒定变速，2=快放一倍，clipDuration 仍是成片占时）、filter（{brightness?,contrast?,saturate?,blur?,grayscale?,sepia?,hueRotate?}，设 {} 清空）、animations（关键帧 {x?,y?,scale?,opacity?,rotation?,volume?}: [{t,v}]，t 为 clip 内相对秒线性插值；x/y 是画布分数偏移，scale 1=原大，opacity/volume 0-1，rotation 度；设 {} 清空；给音频 clip 设 volume 包络即音量包络）/ ' +
+      'v3 能力：updateClip 的 patch 可设 speed（0.1-10 恒定变速，2=快放一倍，clipDuration 仍是成片占时）、filter（{brightness?,contrast?,saturate?,blur?,grayscale?,sepia?,hueRotate?}，设 {} 清空）、animations（关键帧 {x?,y?,scale?,opacity?,rotation?,volume?}: [{t,v,e?}]，t 为 clip 内相对秒，e 缓动 linear/in/out/inOut/bounce/elastic；x/y 是画布分数偏移，scale 1=原大，opacity/volume 0-1，rotation 度；设 {} 清空；给音频 clip 设 volume 包络即音量包络）、animationPreset（一键动画预设：fadeIn/slideInLeft/slideInRight/slideInUp/zoomIn/bounceIn/spinIn/fadeOut/slideOutLeft/slideOutRight/zoomOut/kenBurns/kenBurnsOut/pop/tilt/pulse/wobble/float，"none" 清除；按 clip 时长自动展开成关键帧，比手排省事优先用）/ ' +
       'addOverlay{text,startSeconds,endSeconds,position,fontSize,color} / removeOverlay{index} / updateOverlay{index,patch} / ' +
       'setMeta{patch:{fps?,width?,height?}}（调画布：帧率 1-120，宽高 16-7680 偶数）。\n' +
       "时间单位都是秒；transition 只接受 \"fade\" 或 \"none\"。总时长 = 主轨道串行与所有叠加/音频 clip 末尾的最大值。",

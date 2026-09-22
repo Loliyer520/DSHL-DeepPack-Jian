@@ -2,6 +2,7 @@ import React from "react";
 import { useStore } from "../store";
 import { fmtSec } from "../data";
 import type { Clip } from "../../../engine/src/schema";
+import { ANIMATION_PRESETS, expandAnimationPreset } from "../../../engine/src/presets";
 
 // 右下：剪辑面板（dsh 风格）——strip 标题行 + 行式编辑卡片
 // v2 多轨：片段=主轨道；画中画区（绝对时间+盒子预设）；音频区（轨音量/静音+clip）
@@ -48,6 +49,41 @@ const FILTER_PRESETS: Array<{ label: string; filter: Exclude<Clip["filter"], und
   { label: "高对比", filter: { contrast: 1.3 } },
   { label: "柔焦", filter: { blur: 4 } },
 ];
+
+// 动画预设下拉（与面板 AnimSelect 同集）：展开成关键帧落库
+const ANIM_GROUPS = ["入场", "出场", "组合", "循环"] as const;
+const AnimSelect: React.FC<{ clip: Clip }> = ({ clip }) => {
+  const { updateClip } = useStore();
+  return (
+    <select
+      className="chip-select"
+      value=""
+      title={clip.animations && Object.keys(clip.animations).length > 0 ? "动画（已生效，可换或清除）" : "动画"}
+      onChange={(e) => {
+        const key = e.target.value;
+        if (key === "__clear") {
+          updateClip(clip.id, { animations: {} });
+          return;
+        }
+        const anims = expandAnimationPreset(key, clip.clipDuration ?? 1);
+        if (anims) updateClip(clip.id, { animations: anims });
+        e.target.value = "";
+      }}
+    >
+      <option value="">✨ 动画…</option>
+      {clip.animations && Object.keys(clip.animations).length > 0 && <option value="__clear">✕ 清除动画</option>}
+      {ANIM_GROUPS.map((g) => (
+        <optgroup key={g} label={g}>
+          {Object.entries(ANIMATION_PRESETS)
+            .filter(([, p]) => p.group === g)
+            .map(([key, p]) => (
+              <option key={key} value={key}>{p.label}</option>
+            ))}
+        </optgroup>
+      ))}
+    </select>
+  );
+};
 
 const ClipRow: React.FC<{ clip: Clip; index: number; splitAt?: number }> = ({ clip, index, splitAt }) => {
   const { updateClip, removeClip, splitClip } = useStore();
@@ -117,6 +153,7 @@ const ClipRow: React.FC<{ clip: Clip; index: number; splitAt?: number }> = ({ cl
             <option key={p.label} value={JSON.stringify(p.filter)}>{p.label}</option>
           ))}
         </select>
+        <AnimSelect clip={clip} />
       </div>
     </div>
   );

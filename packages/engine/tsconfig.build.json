@@ -8,5 +8,5 @@
     "moduleResolution": "NodeNext",
     "lib": ["DOM", "ES2022"]
   },
-  "include": ["src/schema.ts", "src/render.ts"]
+  "include": ["src/schema.ts", "src/render.ts", "src/presets.ts"]
 }

@@ -9,6 +9,7 @@ import { DeepSeekHarness } from "@deepseek-ai/dsh-sdk-client";
 import { execFileSync } from "node:child_process";
 import { renderFrame, renderVideo, invalidateBundle } from "../../engine/dist/render.js";
 import { parseTimeline } from "../../engine/dist/schema.js";
+import { expandAnimationPreset, listAnimationPresets } from "../../engine/dist/presets.js";
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
 const PORT = Number(process.env.PORT || 5180);
@@ -202,12 +203,13 @@ const sanitizeFilter = (f) => {
   }
   return Object.keys(out).length ? out : undefined;
 };
+const VALID_EASINGS = new Set(["linear", "in", "out", "inOut", "bounce", "elastic"]);
 const sanitizeAnimations = (a) => {
   if (!a || typeof a !== "object") return undefined;
   const kfOk = (arr) => Array.isArray(arr) && arr.length > 0 && arr.every((k) => k && Number.isFinite(Number(k.t)) && Number.isFinite(Number(k.v)));
   const out = {};
   for (const ch of ["x", "y", "scale", "opacity", "rotation", "volume"]) {
-    if (kfOk(a[ch])) out[ch] = a[ch].map((k) => ({ t: Number(k.t), v: Number(k.v) }));
+    if (kfOk(a[ch])) out[ch] = a[ch].map((k) => ({ t: Number(k.t), v: Number(k.v), ...(VALID_EASINGS.has(k.e) ? { e: k.e } : {}) }));
   }
   return Object.keys(out).length ? out : undefined;
 };
@@ -221,13 +223,17 @@ const shiftAnims = (anims, off) => {
   const out = {};
   for (const ch of Object.keys(anims)) {
     if (!Array.isArray(anims[ch])) continue;
-    out[ch] = anims[ch].map((k) => ({ t: Math.max(0, Number(k.t) - off), v: Number(k.v) }));
+    out[ch] = anims[ch].map((k) => ({ t: Math.max(0, Number(k.t) - off), v: Number(k.v), ...(VALID_EASINGS.has(k.e) ? { e: k.e } : {}) }));
   }
   return Object.keys(out).length ? out : undefined;
 };
 
 function sanitizeOp(op) {
   if (op.op === "updateClip" && op.patch && typeof op.patch === "object") {
+    if (op.patch.animationPreset !== undefined) {
+      // 占位直通：applyOpsToTimeline 里拿到 clip 时长后展开；""/none 表示清除动画
+      if (typeof op.patch.animationPreset !== "string") delete op.patch.animationPreset;
+    }
     if (op.patch.speed !== undefined) {
       const s = sanitizeSpeed(op.patch.speed);
       if (s !== undefined) op.patch.speed = s;
@@ -460,6 +466,10 @@ function applyOpsToTimeline(ops) {
         if (flt) clip.filter = flt;
         const anim = sanitizeAnimations(op.animations);
         if (anim) clip.animations = anim;
+        else if (typeof op.animationPreset === "string" && op.animationPreset) {
+          const expanded = expandAnimationPreset(op.animationPreset, clip.clipDuration);
+          if (expanded) clip.animations = expanded;
+        }
         if (isOverlay) {
           clip.atSeconds = clampNum(op.atSeconds, 0, 0);
           if (op.box && typeof op.box === "object") {
@@ -489,15 +499,22 @@ function applyOpsToTimeline(ops) {
       }
       case "updateClip": {
         const hit = findVideoClip(op.id);
-        if (hit) Object.assign(hit.clip, op.patch);
-        else {
+        const target = hit?.clip ?? (() => {
           // 音频 clip 回退：AI 给音频设变速/包络/音量走同一 op
           for (const tr of t.audioTracks) {
             const ac = tr.clips.find((x) => x.id === op.id);
-            if (ac) {
-              Object.assign(ac, op.patch);
-              break;
-            }
+            if (ac) return ac;
+          }
+          return null;
+        })();
+        if (target) {
+          const { animationPreset, ...rest } = op.patch;
+          Object.assign(target, rest);
+          if (animationPreset !== undefined) {
+            const dur = target.clipDuration ?? target.duration ?? 1;
+            const expanded = animationPreset && animationPreset !== "none" ? expandAnimationPreset(animationPreset, dur) : undefined;
+            if (expanded) target.animations = expanded;
+            else delete target.animations; // ""/none = 清除动画
           }
         }
         break;
@@ -662,6 +679,11 @@ const server = http.createServer(async (req, res) => {
       applyOpsToTimeline(accepted); // 服务端直接落时间线（事实源）
     }
     return json(res, 200, { accepted: accepted.length, rejected });
+  }
+
+  // 动画预设列表（面板下拉用）
+  if (url.pathname === "/api/animation-presets" && req.method === "GET") {
+    return json(res, 200, { presets: listAnimationPresets() });
   }
 
   // 版本历史：列表 / 恢复（恢复前对当前状态保底快照，可来回切）
