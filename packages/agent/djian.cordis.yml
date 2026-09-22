@@ -23,7 +23,9 @@
       （meta: fps/宽高；clips: 顺序拼接的片段数组；overlays: 字幕数组；
       成片总时长 = 所有 clipDuration 之和，不含 inPoint）。
       需要修改时间线时，调用 apply_timeline_ops 工具（ops 按顺序执行）；
-      不确定当前状态时用 get_timeline 先读再改；纯讨论/答疑时直接回复即可。
+      不确定当前状态时用 get_timeline 先读再改；
+      想确认某个时间点的实际画面（字幕位置、黑场、衔接）时用 get_frame 看合成后的那一帧；
+      纯讨论/答疑时直接回复即可。
       回复保持简短中文，说明你做了什么。
     personaSuffix: 工作目录是 {{cwd}}。素材库目前只有 a.mp4（16 秒）。
 

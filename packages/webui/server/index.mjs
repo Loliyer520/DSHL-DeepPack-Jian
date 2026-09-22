@@ -6,7 +6,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DeepSeekHarness } from "@deepseek-ai/dsh-sdk-client";
-import { renderVideo } from "../../engine/dist/render.js";
+import { execFileSync } from "node:child_process";
+import { renderFrame, renderVideo } from "../../engine/dist/render.js";
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
 const PORT = Number(process.env.PORT || 5180);
@@ -64,6 +65,62 @@ async function getHarness() {
 let pendingOps = []; // run 期间由 MCP server POST 进来，run 结束后 drain
 let lastTimeline = null; // 前端随 /api/chat 上报的最近时间线（供 get_timeline 工具读）
 let exportJob = null; // 导出任务：{ status: rendering|done|error, progress, outFile, result?, error? }
+
+// 帧画面分析：ffmpeg 缩到 96×54 抽原始 RGB，算亮度/黑场/主色/底部字幕区亮像素占比——
+// 给不支持图像输入的文本模型一份「能读懂的画面数据」。
+function analyzeFrame(pngPath) {
+  const W = 96, H = 54;
+  const raw = execFileSync(
+    "ffmpeg",
+    ["-v", "error", "-i", pngPath, "-vf", `scale=${W}:${H}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+    { maxBuffer: 1 << 22 }
+  );
+  const n = W * H;
+  let sum = 0, sumSq = 0, dark = 0;
+  const buckets = new Map();
+  const lumAt = (x, y) => {
+    const i = (y * W + x) * 3;
+    return 0.299 * raw[i] + 0.587 * raw[i + 1] + 0.114 * raw[i + 2];
+  };
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 3;
+      const r = raw[i], g = raw[i + 1], b = raw[i + 2];
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+      sum += lum;
+      sumSq += lum * lum;
+      if (lum < 16) dark++;
+      const key = `${r >> 6},${g >> 6},${b >> 6}`;
+      buckets.set(key, (buckets.get(key) || 0) + 1);
+    }
+  }
+  const avgBrightness = Math.round(sum / n);
+  const contrast = Math.round(Math.sqrt(Math.max(0, sumSq / n - avgBrightness * avgBrightness)));
+  const darkPercent = Math.round((dark / n) * 100);
+  const dominant = [...buckets.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([k, c]) => {
+      const [rq, gq, bq] = k.split(",").map(Number);
+      return { rgb: [rq * 64 + 32, gq * 64 + 32, bq * 64 + 32], percent: Math.round((c / n) * 100) };
+    });
+  // 底部 1/3 区域（字幕常位）亮像素占比——白色字幕检测代理
+  let bottomBright = 0, bottomN = 0;
+  for (let y = Math.floor((H * 2) / 3); y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (lumAt(x, y) > 200) bottomBright++;
+      bottomN++;
+    }
+  }
+  const bottomBrightPercent = Math.round((bottomBright / bottomN) * 1000) / 10;
+  return {
+    avgBrightness, // 0-255，<16 基本黑场，>240 基本白场
+    contrast, // 亮度标准差，<10 接近纯色画面
+    darkPercent, // 接近黑像素(lum<16)的占比
+    dominantColors: dominant, // 前 3 主色及占比
+    bottomThirdBrightPercent: bottomBrightPercent, // 底部 1/3 区域亮像素(>200)占比，有白字幕时通常 1%~15%
+  };
+}
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -182,6 +239,31 @@ const server = http.createServer(async (req, res) => {
   // MCP server 读当前时间线
   if (url.pathname === "/api/internal/timeline") {
     return json(res, 200, lastTimeline ?? { meta: { fps: 30, width: 1280, height: 720 }, clips: [], overlays: [] });
+  }
+
+  // MCP server 取合成后单帧（供 get_frame 工具；PNG base64 回传）
+  if (url.pathname === "/api/internal/frame" && req.method === "POST") {
+    const body = JSON.parse(await readBody(req));
+    const timeline = body?.timeline ?? lastTimeline;
+    const seconds = Number(body?.seconds);
+    if (!timeline?.clips?.length) return json(res, 400, { error: "时间线为空" });
+    if (!Number.isFinite(seconds) || seconds < 0) return json(res, 400, { error: "seconds 必须是非负数字" });
+    const outFile = path.join(DJIAN, "out", "frames", `frame-${Date.now()}.png`);
+    try {
+      const r = await renderFrame({ timeline, timeSeconds: seconds, outFile });
+      const png = fs.readFileSync(outFile);
+      const stats = analyzeFrame(outFile);
+      fs.rm(outFile, { force: true }, () => {});
+      return json(res, 200, {
+        frame: r.frame,
+        width: r.width,
+        height: r.height,
+        pngBase64: png.toString("base64"),
+        stats,
+      });
+    } catch (e) {
+      return json(res, 500, { error: `取帧失败：${e.message}` });
+    }
   }
 
   // ---- 导出 mp4（低配机器单飞行任务）----

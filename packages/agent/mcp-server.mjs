@@ -64,6 +64,19 @@ const TOOLS = [
     description: "读取当前时间线的最新 JSON（meta/clips/overlays）。修改前后都可以调用以确认状态。",
     inputSchema: { type: "object", properties: {} },
   },
+  {
+    name: "get_frame",
+    description:
+      "查看时间线在第 N 秒处合成后的实际画面（与成片一致，含字幕/淡入等效果）。" +
+      "返回该帧 PNG 图片 + 画面数据统计（平均亮度/黑场占比/主色/底部字幕区亮像素占比）。" +
+      "若你无法接收图像，请依据 stats 数据判断：avgBrightness<16 是黑场、contrast<10 接近纯色、" +
+      "bottomThirdBrightPercent 在 1~15 通常表示底部有白色字幕。秒数越界会自动钳到有效范围。",
+    inputSchema: {
+      type: "object",
+      properties: { seconds: { type: "number", minimum: 0, description: "要看的时间点（秒）" } },
+      required: ["seconds"],
+    },
+  },
 ];
 
 function send(msg) {
@@ -83,6 +96,17 @@ async function forwardOps(ops) {
 
 async function fetchTimeline() {
   const res = await fetch(`${WEBUI}/api/internal/timeline`, { signal: AbortSignal.timeout(10_000) });
+  if (!res.ok) throw new Error(`webui HTTP ${res.status}`);
+  return res.json();
+}
+
+async function fetchFrame(seconds) {
+  const res = await fetch(`${WEBUI}/api/internal/frame`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ seconds }),
+    signal: AbortSignal.timeout(120_000), // 首次取帧要拉浏览器，留足时间
+  });
   if (!res.ok) throw new Error(`webui HTTP ${res.status}`);
   return res.json();
 }
@@ -136,6 +160,27 @@ rl.on("line", async (line) => {
         if (name === "get_timeline") {
           const t = await fetchTimeline();
           return reply({ content: [{ type: "text", text: JSON.stringify(t) }] });
+        }
+        if (name === "get_frame") {
+          const seconds = Number(args.seconds);
+          if (!Number.isFinite(seconds) || seconds < 0) {
+            return reply({ content: [{ type: "text", text: "seconds 必须是非负数字" }], isError: true });
+          }
+          const r = await fetchFrame(seconds);
+          if (r.error) return reply({ content: [{ type: "text", text: r.error }], isError: true });
+          return reply({
+            content: [
+              { type: "image", data: r.pngBase64, mimeType: "image/png" },
+              {
+                type: "text",
+                text:
+                  `第 ${seconds}s 处的合成帧（第 ${r.frame} 帧，${r.width}×${r.height}）。\n` +
+                  `画面数据统计：${JSON.stringify(r.stats)}\n` +
+                  `判读参考：avgBrightness<16=黑场；contrast<10=接近纯色；` +
+                  `bottomThirdBrightPercent 1~15=底部大概率有白色字幕；darkPercent 高=画面整体偏暗。`,
+              },
+            ],
+          });
         }
         return fail(-32601, `unknown tool: ${name}`);
       }

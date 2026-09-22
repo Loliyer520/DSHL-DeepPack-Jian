@@ -1,5 +1,5 @@
 import { bundle } from "@remotion/bundler";
-import { renderMedia, selectComposition } from "@remotion/renderer";
+import { renderMedia, renderStill, selectComposition } from "@remotion/renderer";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
@@ -74,4 +74,41 @@ export async function renderVideo(opts: RenderOptions): Promise<{ outFile: strin
   });
 
   return { outFile: opts.outFile, durationInFrames, fps: timeline.meta.fps };
+}
+
+// 渲染合成后的单帧（含字幕/转场，与成片一致）→ PNG。供「看指定帧」工具与调试用。
+// assetsDir 省略时取 DJIAN_ASSETS_DIR 环境变量或 monorepo 的 webui/public。
+export async function renderFrame(opts: {
+  timeline: unknown;
+  timeSeconds: number;
+  outFile: string; // PNG 绝对路径
+  assetsDir?: string;
+}): Promise<{ outFile: string; frame: number; width: number; height: number }> {
+  const timeline: Timeline = parseTimeline(opts.timeline);
+  const durationInFrames = Math.max(1, timelineDurationInFrames(timeline));
+  const fps = timeline.meta.fps;
+  const frame = Math.min(Math.max(0, Math.round(opts.timeSeconds * fps)), durationInFrames - 1);
+
+  const assetsDir =
+    opts.assetsDir ?? process.env.DJIAN_ASSETS_DIR ?? path.resolve(engineDir, "../../webui/public");
+  const serveUrl = await getBundle(assetsDir);
+  const composition = await selectComposition({
+    serveUrl,
+    id: "TimelineVideo",
+    inputProps: { timeline },
+    chromiumOptions,
+  });
+
+  fs.mkdirSync(path.dirname(opts.outFile), { recursive: true });
+  await renderStill({
+    composition,
+    serveUrl,
+    output: opts.outFile,
+    frame,
+    inputProps: { timeline },
+    chromiumOptions,
+    imageFormat: "png",
+    overwrite: true,
+  });
+  return { outFile: opts.outFile, frame, width: timeline.meta.width, height: timeline.meta.height };
 }
