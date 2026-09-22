@@ -147,7 +147,9 @@ function readBody(req) {
 }
 
 const json = (res, code, obj) => {
-  res.writeHead(code, { "Content-Type": "application/json" });
+  const h = { "Content-Type": "application/json" };
+  if (res._aco) h["Access-Control-Allow-Origin"] = res._aco;
+  res.writeHead(code, h);
   res.end(JSON.stringify(obj));
 };
 
@@ -216,8 +218,87 @@ function normalizeOps(rawOps) {
   return { accepted, rejected };
 }
 
+// ---- 时间线持久化（~/.djian/timeline.json 是唯一事实源）+ 服务端直接应用 ops ----
+const TIMELINE_FILE = path.join(process.env.HOME || "/root", ".djian", "timeline.json");
+const EMPTY_TIMELINE = { meta: { fps: 30, width: 1280, height: 720 }, clips: [], audio: null, overlays: [] };
+
+function loadTimelineFile() {
+  try { return JSON.parse(fs.readFileSync(TIMELINE_FILE, "utf8")); } catch { return null; }
+}
+function persistTimeline(t) {
+  try {
+    fs.mkdirSync(path.dirname(TIMELINE_FILE), { recursive: true });
+    fs.writeFileSync(TIMELINE_FILE, JSON.stringify(t, null, 2));
+  } catch (e) { console.warn("timeline 持久化失败:", e.message); }
+}
+lastTimeline = loadTimelineFile();
+
+const newClipId = () => "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const clampNum = (v, fb, min = -Infinity, max = Infinity) =>
+  typeof v === "number" && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fb;
+
+// 与 webui store 的剪辑原语同语义，直接落在 lastTimeline 上并持久化
+function applyOpsToTimeline(ops) {
+  const t = lastTimeline ?? structuredClone(EMPTY_TIMELINE);
+  for (const op of ops) {
+    switch (op.op) {
+      case "addClip":
+        t.clips.push({
+          id: newClipId(), type: "video",
+          src: typeof op.src === "string" ? op.src : "a.mp4",
+          inPoint: clampNum(op.inPoint, 0, 0),
+          clipDuration: clampNum(op.clipDuration, 3, 0.1),
+          transition: op.transition === "fade" ? "fade" : "none",
+          volume: clampNum(op.volume, 1, 0, 1),
+        });
+        break;
+      case "removeClip":
+        t.clips = t.clips.filter((c) => c.id !== op.id);
+        break;
+      case "updateClip":
+        t.clips = t.clips.map((c) => (c.id === op.id ? { ...c, ...op.patch } : c));
+        break;
+      case "reorderClips": {
+        const map = new Map(t.clips.map((c) => [c.id, c]));
+        const next = op.order.map((id) => map.get(id)).filter(Boolean);
+        t.clips = [...next, ...t.clips.filter((c) => !op.order.includes(c.id))];
+        break;
+      }
+      case "addOverlay":
+        t.overlays.push({
+          text: op.text,
+          startSeconds: clampNum(op.startSeconds, 0, 0),
+          endSeconds: clampNum(op.endSeconds, 3, 0),
+          position: ["top", "center", "bottom"].includes(op.position) ? op.position : "bottom",
+          fontSize: clampNum(op.fontSize, 48, 1),
+          color: typeof op.color === "string" ? op.color : "#ffffff",
+        });
+        break;
+      case "removeOverlay":
+        t.overlays = t.overlays.filter((_, i) => i !== op.index);
+        break;
+      case "updateOverlay":
+        t.overlays = t.overlays.map((o, i) => (i === op.index ? { ...o, ...op.patch } : o));
+        break;
+    }
+  }
+  lastTimeline = t;
+  persistTimeline(t);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+  // CORS：供官方 dsh web（5190）里的剪辑面板插件跨域读写
+  const origin = req.headers.origin ?? "";
+  if (/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) res._aco = origin;
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      ...(res._aco ? { "Access-Control-Allow-Origin": res._aco } : {}),
+      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    });
+    return res.end();
+  }
   // 临时请求日志：定位用户端白屏（看浏览器实际请求了什么、状态码、UA）
   res.on("finish", () => {
     const skip = url.pathname.startsWith("/api/export/status"); // 轮询不吵
@@ -233,12 +314,25 @@ const server = http.createServer(async (req, res) => {
     const body = JSON.parse(await readBody(req));
     const { accepted, rejected } = normalizeOps(body.ops);
     pendingOps.push(...accepted);
+    if (accepted.length) applyOpsToTimeline(accepted); // 服务端直接落时间线（事实源）
     return json(res, 200, { accepted: accepted.length, rejected });
   }
 
   // MCP server 读当前时间线
-  if (url.pathname === "/api/internal/timeline") {
-    return json(res, 200, lastTimeline ?? { meta: { fps: 30, width: 1280, height: 720 }, clips: [], overlays: [] });
+  if (url.pathname === "/api/internal/timeline" && req.method === "GET") {
+    return json(res, 200, lastTimeline ?? structuredClone(EMPTY_TIMELINE));
+  }
+
+  // 剪辑面板（官方壳插件）写回整份时间线
+  if (url.pathname === "/api/internal/timeline" && req.method === "POST") {
+    const body = JSON.parse(await readBody(req));
+    const t = body?.timeline ?? body;
+    if (!t?.meta || !Array.isArray(t.clips) || !Array.isArray(t.overlays)) {
+      return json(res, 400, { error: "时间线格式不正确" });
+    }
+    lastTimeline = t;
+    persistTimeline(t);
+    return json(res, 200, { ok: true });
   }
 
   // MCP server 取合成后单帧（供 get_frame 工具；PNG base64 回传）
@@ -368,6 +462,8 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(200, {
     "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream",
     "Cache-Control": cacheControl,
+    // 官方壳（5190）里 remotion Player 跨域拉素材时要 ACAO
+    ...(res._aco ? { "Access-Control-Allow-Origin": res._aco } : {}),
   });
   fs.createReadStream(filePath).pipe(res);
 });

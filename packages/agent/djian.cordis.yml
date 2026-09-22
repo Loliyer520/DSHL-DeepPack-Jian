@@ -41,3 +41,8 @@
         args: ['/my/own/djian/packages/agent/mcp-server.mjs']
         env:
           DJIAN_WEBUI_URL: http://127.0.0.1:5180
+
+# 剪辑面板 web 客户端插件（官方壳右侧栏 tab）
+- insert:
+    - id: djian-timeline-ui
+      name: '@djian/client-ui-timeline'
