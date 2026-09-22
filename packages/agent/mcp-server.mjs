@@ -14,6 +14,17 @@ const PATCH = {
     clipDuration: { type: "number", exclusiveMinimum: 0 },
     transition: { enum: ["none", "fade"] },
     volume: { type: "number", minimum: 0, maximum: 1 },
+    atSeconds: { type: "number", minimum: 0, description: "叠加轨专用：绝对起始秒" },
+    box: {
+      type: "object",
+      properties: {
+        x: { type: "number", minimum: 0, maximum: 1 },
+        y: { type: "number", minimum: 0, maximum: 1 },
+        w: { type: "number", minimum: 0.01, maximum: 1 },
+        h: { type: "number", minimum: 0.01, maximum: 1 },
+      },
+      description: "叠加轨专用：画中画盒子（0-1 分数矩形）",
+    },
     text: { type: "string" },
     startSeconds: NUM,
     endSeconds: NUM,
@@ -33,12 +44,14 @@ const TOOLS = [
   {
     name: "apply_timeline_ops",
     description:
-      "对当前视频时间线应用一批剪辑操作。ops 数组按顺序执行。每个元素必须是 {\"op\":\"操作名\", ...参数} 形式，op 字段必填且必须是以下之一：\n" +
-      'addClip{src,inPoint,clipDuration,transition,volume} / removeClip{id} / updateClip{id,patch} / reorderClips{order:[id...]} / ' +
+      "对当前视频时间线应用一批剪辑操作（时间线 v2 多轨模型）。ops 数组按顺序执行。每个元素必须是 {\"op\":\"操作名\", ...参数} 形式：\n" +
+      'addClip{src,inPoint,clipDuration,transition,volume,track?,atSeconds?,box?} —— track 省略或 "main" 加主轨道（串行）；track:"pip" 加画中画叠加轨（必顷 atSeconds 绝对秒，box 可选 0-1 分数矩形 {x,y,w,h}，默认右下 30%）/ ' +
+      'removeClip{id} / updateClip{id,patch} / reorderClips{order:[id...]} / ' +
+      'addAudio{src,duration,atSeconds,volume?,track?} —— 音频轨加 clip，track 是轨名（同名复用，缺省新建） / ' +
+      'removeAudio{id} / updateAudioTrack{id,patch:{volume?,muted?,name?}} / ' +
       'addOverlay{text,startSeconds,endSeconds,position,fontSize,color} / removeOverlay{index} / updateOverlay{index,patch} / ' +
       'setMeta{patch:{fps?,width?,height?}}（调画布：帧率 1-120，宽高 16-7680 偶数）。\n' +
-      "patch 可含：inPoint/clipDuration/transition/volume（改片段）或 text/startSeconds/endSeconds/position/fontSize/color（改字幕）。\n" +
-      "时间单位都是秒；transition 只接受 \"fade\" 或 \"none\"。",
+      "时间单位都是秒；transition 只接受 \"fade\" 或 \"none\"。总时长 = 主轨道串行与所有叠加/音频 clip 末尾的最大值。",
     inputSchema: {
       type: "object",
       properties: {
@@ -46,10 +59,13 @@ const TOOLS = [
           type: "array",
           items: {
             oneOf: [
-              opSchema("addClip", { src: { type: "string" }, inPoint: NUM, clipDuration: { type: "number", exclusiveMinimum: 0 }, transition: { enum: ["none", "fade"] }, volume: { type: "number", minimum: 0, maximum: 1 } }),
+              opSchema("addClip", { src: { type: "string" }, inPoint: NUM, clipDuration: { type: "number", exclusiveMinimum: 0 }, transition: { enum: ["none", "fade"] }, volume: { type: "number", minimum: 0, maximum: 1 }, track: { type: "string" }, atSeconds: NUM, box: { type: "object" } }),
               opSchema("removeClip", { id: { type: "string" } }, ["id"]),
               opSchema("updateClip", { id: { type: "string" }, patch: PATCH }, ["id", "patch"]),
               opSchema("reorderClips", { order: { type: "array", items: { type: "string" } } }, ["order"]),
+              opSchema("addAudio", { src: { type: "string" }, inPoint: NUM, duration: { type: "number", exclusiveMinimum: 0 }, volume: { type: "number", minimum: 0, maximum: 1 }, atSeconds: NUM, track: { type: "string" } }, ["src", "duration"]),
+              opSchema("removeAudio", { id: { type: "string" } }, ["id"]),
+              opSchema("updateAudioTrack", { id: { type: "string" }, patch: { type: "object", properties: { volume: { type: "number", minimum: 0, maximum: 1 }, muted: { type: "boolean" }, name: { type: "string" } } } }, ["id", "patch"]),
               opSchema("addOverlay", { text: { type: "string" }, startSeconds: NUM, endSeconds: NUM, position: { enum: ["top", "center", "bottom"] }, fontSize: NUM, color: { type: "string" } }, ["text", "startSeconds", "endSeconds"]),
               opSchema("removeOverlay", { index: { type: "integer", minimum: 0 } }, ["index"]),
               opSchema("updateOverlay", { index: { type: "integer", minimum: 0 }, patch: PATCH }, ["index", "patch"]),
@@ -63,7 +79,7 @@ const TOOLS = [
   },
   {
     name: "get_timeline",
-    description: "读取当前时间线的最新 JSON（meta/clips/overlays）。修改前后都可以调用以确认状态。",
+    description: "读取当前时间线的最新 JSON（v2 多轨：videoTracks[0] 主轨串行、叠加轨 PiP、audioTracks、overlays）。修改前后都可以调用以确认状态。",
     inputSchema: { type: "object", properties: {} },
   },
   {

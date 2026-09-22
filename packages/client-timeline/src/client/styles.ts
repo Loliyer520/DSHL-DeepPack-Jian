@@ -61,6 +61,20 @@ const CSS = `
 .djp-expwrap { position: relative; }
 .djp-exppop { top: 30px; }
 
+/* ---- 多轨轨道条 ---- */
+.djp-tstrip { display: flex; flex-direction: column; gap: 4px; }
+.djp-trow { display: flex; align-items: center; gap: 6px; }
+.djp-trow-name { flex: 0 0 56px; font-size: 11px; color: var(--dsw-alias-label-tertiary); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.djp-trow-lane { flex: 1; }
+.djp-trow-empty { font-size: 11px; color: var(--dsw-alias-label-tertiary); padding: 0 8px; }
+.djp-pip-block { background: var(--dsw-alias-bg-overlay); border: 0.5px dashed var(--dsw-alias-border-l4); }
+.djp-audio-block { background: var(--dsw-alias-brand-primary); opacity: 0.75; }
+.djp-audio-block .djp-track-label { color: #fff; }
+
+/* ---- 画中画/音频卡 ---- */
+.djp-card-head label.djp-field input[type='range'] { accent-color: var(--dsw-alias-brand-primary); }
+.djp-btn.djp-error { color: var(--dsw-alias-state-error-primary); }
+
 /* ---- 画布设置对话框 ---- */
 .djp-mask { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; }
 .djp-dialog { width: 300px; background: var(--dsw-alias-bg-layer-1); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }

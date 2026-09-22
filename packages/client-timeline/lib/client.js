@@ -19687,9 +19687,36 @@ const clipSchema = z.object({
 	inPoint: z.number().min(0),
 	clipDuration: z.number().positive(),
 	transition: transitionSchema,
-	volume: z.number().min(0).max(1).default(1)
+	volume: z.number().min(0).max(1).default(1),
+	atSeconds: z.number().min(0).optional(),
+	box: z.object({
+		x: z.number().min(0).max(1),
+		y: z.number().min(0).max(1),
+		w: z.number().min(.01).max(1),
+		h: z.number().min(.01).max(1)
+	}).optional()
 });
-const audioTrackSchema = z.object({
+const videoTrackSchema = z.object({
+	id: z.string(),
+	name: z.string().optional(),
+	clips: z.array(clipSchema).default([])
+});
+const audioClipSchema = z.object({
+	id: z.string(),
+	src: z.string(),
+	inPoint: z.number().min(0).default(0),
+	duration: z.number().positive(),
+	volume: z.number().min(0).max(1).default(1),
+	atSeconds: z.number().min(0).default(0)
+});
+const audioTrackV2Schema = z.object({
+	id: z.string(),
+	name: z.string().optional(),
+	volume: z.number().min(0).max(1).default(1),
+	muted: z.boolean().default(false),
+	clips: z.array(audioClipSchema).default([])
+});
+const legacyAudioSchema = z.object({
 	src: z.string(),
 	volume: z.number().min(0).max(1).default(1),
 	startAtSeconds: z.number().min(0).default(0)
@@ -19706,18 +19733,44 @@ const overlaySchema = z.object({
 	fontSize: z.number().positive().default(64),
 	color: z.string().default("#ffffff")
 });
-const timelineSchema = z.object({
-	meta: z.object({
-		fps: z.number().positive(),
-		width: z.number().int().positive(),
-		height: z.number().int().positive()
-	}),
-	clips: z.array(clipSchema).min(1),
-	audio: audioTrackSchema.nullable().default(null),
+const metaSchema = z.object({
+	fps: z.number().positive(),
+	width: z.number().int().positive(),
+	height: z.number().int().positive()
+});
+const timelineInputSchema = z.object({
+	meta: metaSchema,
+	videoTracks: z.array(videoTrackSchema).optional(),
+	audioTracks: z.array(audioTrackV2Schema).optional(),
+	clips: z.array(clipSchema).optional(),
+	audio: legacyAudioSchema.nullable().optional(),
 	overlays: z.array(overlaySchema).default([])
 });
+const timelineSchema = z.object({
+	meta: metaSchema,
+	version: z.literal(2).default(2),
+	videoTracks: z.array(videoTrackSchema).min(1),
+	audioTracks: z.array(audioTrackV2Schema),
+	overlays: z.array(overlaySchema)
+});
 const SEC$1 = (fps, s) => Math.round(s * fps);
-const timelineDurationInFrames = (t) => t.clips.reduce((acc, c$2) => acc + SEC$1(t.meta.fps, c$2.clipDuration), 0);
+const DEFAULT_BOX = {
+	x: .66,
+	y: .66,
+	w: .3,
+	h: .3
+};
+const clipBox = (c$2) => c$2.box ?? DEFAULT_BOX;
+const timelineDurationInFrames = (t) => {
+	const fps = t.meta.fps;
+	let frames = t.videoTracks[0]?.clips.reduce((acc, c$2) => acc + SEC$1(fps, c$2.clipDuration), 0) ?? 0;
+	for (const tr of t.videoTracks.slice(1)) for (const c$2 of tr.clips) frames = Math.max(frames, SEC$1(fps, (c$2.atSeconds ?? 0) + c$2.clipDuration));
+	for (const tr of t.audioTracks) {
+		if (tr.muted) continue;
+		for (const c$2 of tr.clips) frames = Math.max(frames, SEC$1(fps, c$2.atSeconds + c$2.duration));
+	}
+	return Math.max(1, frames);
+};
 
 //#endregion
 //#region src/client/PreviewVideo.tsx
@@ -19739,21 +19792,16 @@ const FadeIn = ({ fade, children }) => {
 };
 const ClipSegment = ({ clip }) => {
 	const { fps } = useVideoConfig();
-	const fade = clip.transition === "fade";
-	if (clip.type === "image") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(FadeIn, {
-		fade,
-		children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Img, {
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(FadeIn, {
+		fade: clip.transition === "fade",
+		children: clip.type === "image" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Img, {
 			src: clip.src,
 			style: {
 				width: "100%",
 				height: "100%",
 				objectFit: "cover"
 			}
-		})
-	});
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(FadeIn, {
-		fade,
-		children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(OffthreadVideo, {
+		}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(OffthreadVideo, {
 			src: clip.src,
 			startFrom: SEC(fps, clip.inPoint),
 			volume: clip.volume,
@@ -19765,20 +19813,56 @@ const ClipSegment = ({ clip }) => {
 		})
 	});
 };
+const PipSegment = ({ clip }) => {
+	const { fps } = useVideoConfig();
+	const box = clipBox(clip);
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Sequence, {
+		from: SEC(fps, clip.atSeconds ?? 0),
+		durationInFrames: SEC(fps, clip.clipDuration),
+		children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+			style: {
+				position: "absolute",
+				left: `${box.x * 100}%`,
+				top: `${box.y * 100}%`,
+				width: `${box.w * 100}%`,
+				height: `${box.h * 100}%`,
+				overflow: "hidden",
+				boxShadow: "0 4px 18px rgba(0,0,0,0.45)",
+				borderRadius: 6
+			},
+			children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ClipSegment, { clip })
+		})
+	});
+};
+const AudioSegment = ({ clip, trackVolume, muted }) => {
+	const { fps } = useVideoConfig();
+	if (muted) return null;
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Sequence, {
+		from: SEC(fps, clip.atSeconds),
+		durationInFrames: SEC(fps, clip.duration),
+		children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Audio, {
+			src: clip.src,
+			startFrom: SEC(fps, clip.inPoint),
+			volume: trackVolume * clip.volume
+		})
+	});
+};
 const PreviewVideo = ({ timeline }) => {
 	const { fps } = useVideoConfig();
+	const [mainTrack, ...overlayTracks] = timeline.videoTracks;
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(AbsoluteFill, {
 		style: { backgroundColor: "#000" },
 		children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Series, { children: timeline.clips.map((clip) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Series.Sequence, {
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Series, { children: mainTrack.clips.map((clip) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Series.Sequence, {
 				durationInFrames: SEC(fps, clip.clipDuration),
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ClipSegment, { clip })
 			}, clip.id)) }),
-			timeline.audio ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Audio, {
-				src: timeline.audio.src,
-				volume: timeline.audio.volume,
-				startFrom: SEC(fps, timeline.audio.startAtSeconds)
-			}) : null,
+			overlayTracks.map((tr) => tr.clips.map((clip) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PipSegment, { clip }, clip.id))),
+			timeline.audioTracks.map((tr) => tr.clips.map((clip) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AudioSegment, {
+				clip,
+				trackVolume: tr.volume,
+				muted: tr.muted
+			}, clip.id))),
 			timeline.overlays.map((ov, i) => {
 				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Sequence, {
 					from: SEC(fps, ov.startSeconds),
@@ -20556,33 +20640,126 @@ const clipId = () => "c" + Date.now().toString(36) + Math.random().toString(36).
 const ops = (mutate) => ({
 	addClip: () => mutate((t) => ({
 		...t,
-		clips: [...t.clips, {
+		videoTracks: t.videoTracks.map((tr, i) => i === 0 ? {
+			...tr,
+			clips: [...tr.clips, {
+				id: clipId(),
+				type: "video",
+				src: tr.clips[tr.clips.length - 1]?.src ?? "a.mp4",
+				inPoint: 0,
+				clipDuration: 3,
+				transition: "none",
+				volume: 1
+			}]
+		} : tr)
+	})),
+	addPip: () => mutate((t) => {
+		const src = t.videoTracks[0]?.clips[t.videoTracks[0].clips.length - 1]?.src ?? "a.mp4";
+		const clip = {
 			id: clipId(),
 			type: "video",
-			src: t.clips[t.clips.length - 1]?.src ?? "a.mp4",
+			src,
 			inPoint: 0,
 			clipDuration: 3,
 			transition: "none",
-			volume: 1
-		}]
-	})),
+			volume: 1,
+			atSeconds: 0
+		};
+		if (t.videoTracks[1]) return {
+			...t,
+			videoTracks: t.videoTracks.map((tr, i) => i === 1 ? {
+				...tr,
+				clips: [...tr.clips, clip]
+			} : tr)
+		};
+		return {
+			...t,
+			videoTracks: [...t.videoTracks, {
+				id: "v2",
+				name: "画中画",
+				clips: [clip]
+			}]
+		};
+	}),
+	addAudio: (src, duration = 10) => mutate((t) => {
+		const clip = {
+			id: clipId(),
+			src,
+			inPoint: 0,
+			duration,
+			volume: 1,
+			atSeconds: 0
+		};
+		if (t.audioTracks[0]) return {
+			...t,
+			audioTracks: t.audioTracks.map((tr, i) => i === 0 ? {
+				...tr,
+				clips: [...tr.clips, clip]
+			} : tr)
+		};
+		return {
+			...t,
+			audioTracks: [{
+				id: "a1",
+				name: "音频",
+				volume: 1,
+				muted: false,
+				clips: [clip]
+			}]
+		};
+	}),
 	removeClip: (id) => mutate((t) => ({
 		...t,
-		clips: t.clips.filter((c$2) => c$2.id !== id)
+		videoTracks: t.videoTracks.map((tr) => ({
+			...tr,
+			clips: tr.clips.filter((c$2) => c$2.id !== id)
+		})).filter((tr, i) => i === 0 || tr.clips.length > 0)
+	})),
+	removeAudioClip: (id) => mutate((t) => ({
+		...t,
+		audioTracks: t.audioTracks.map((tr) => ({
+			...tr,
+			clips: tr.clips.filter((c$2) => c$2.id !== id)
+		})).filter((tr) => tr.clips.length > 0)
 	})),
 	updateClip: (id, patch) => mutate((t) => ({
 		...t,
-		clips: t.clips.map((c$2) => c$2.id === id ? {
-			...c$2,
+		videoTracks: t.videoTracks.map((tr) => ({
+			...tr,
+			clips: tr.clips.map((c$2) => c$2.id === id ? {
+				...c$2,
+				...patch
+			} : c$2)
+		}))
+	})),
+	updateAudioTrack: (id, patch) => mutate((t) => ({
+		...t,
+		audioTracks: t.audioTracks.map((tr) => tr.id === id ? {
+			...tr,
 			...patch
-		} : c$2)
+		} : tr)
+	})),
+	updateAudioClip: (id, patch) => mutate((t) => ({
+		...t,
+		audioTracks: t.audioTracks.map((tr) => ({
+			...tr,
+			clips: tr.clips.map((c$2) => c$2.id === id ? {
+				...c$2,
+				...patch
+			} : c$2)
+		}))
 	})),
 	reorderClips: (order) => mutate((t) => {
-		const map = new Map(t.clips.map((c$2) => [c$2.id, c$2]));
+		const tr0 = t.videoTracks[0];
+		const map = new Map(tr0.clips.map((c$2) => [c$2.id, c$2]));
 		const next = order.map((id) => map.get(id)).filter((c$2) => Boolean(c$2));
+		const main = {
+			...tr0,
+			clips: [...next, ...tr0.clips.filter((c$2) => !order.includes(c$2.id))]
+		};
 		return {
 			...t,
-			clips: [...next, ...t.clips.filter((c$2) => !order.includes(c$2.id))]
+			videoTracks: [main, ...t.videoTracks.slice(1)]
 		};
 	}),
 	addOverlay: () => mutate((t) => ({
@@ -20625,8 +20802,8 @@ const NumberField = ({ label: label$2, value, step = .5, min = 0, onCommit }) =>
 	}, value)]
 });
 const TrackStrip = ({ t, onSeekClip }) => {
-	const total = t.clips.reduce((s, c$2) => s + c$2.clipDuration, 0);
 	const [playhead, setPlayhead] = (0, react.useState)(0);
+	const total = Math.max(.1, timelineDurationInFrames(t) / t.meta.fps);
 	(0, react.useEffect)(() => {
 		let raf = 0;
 		const tick = () => {
@@ -20637,39 +20814,99 @@ const TrackStrip = ({ t, onSeekClip }) => {
 		raf = requestAnimationFrame(tick);
 		return () => cancelAnimationFrame(raf);
 	}, [t.meta.fps]);
-	if (t.clips.length === 0 || total <= 0) return null;
 	const onSeek = (e) => {
 		const rect = e.currentTarget.getBoundingClientRect();
 		seekToSeconds(Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)) * total, t.meta.fps);
 	};
+	const main = t.videoTracks[0];
+	const overlays = t.videoTracks.slice(1);
 	let acc = 0;
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "djp-track",
+	const mainBlocks = main.clips.map((c$2) => {
+		const start = acc;
+		acc += c$2.clipDuration;
+		return {
+			clip: c$2,
+			start,
+			widthPct: c$2.clipDuration / total * 100
+		};
+	});
+	const Row = ({ name, children }) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "djp-trow",
 		onClick: onSeek,
-		children: [t.clips.map((c$2) => {
-			const start = acc;
-			acc += c$2.clipDuration;
-			return {
-				clip: c$2,
-				start,
-				widthPct: c$2.clipDuration / total * 100
-			};
-		}).map(({ clip, start, widthPct }) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: `djp-track-block ${clip.transition === "fade" ? "djp-fade" : ""}`,
-			style: { width: `${widthPct}%` },
-			title: `${clip.src} · ${fmtSec(start)}–${fmtSec(start + clip.clipDuration)}`,
-			onClick: (e) => {
-				e.stopPropagation();
-				onSeekClip(start);
-			},
-			children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				className: "djp-track-label",
-				children: clip.src
-			})
-		}, clip.id)), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: "djp-playhead",
-			style: { left: `${Math.min(playhead, total) / total * 100}%` }
+		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+			className: "djp-trow-name",
+			children: name
+		}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: "djp-track djp-trow-lane",
+			children: [children, /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "djp-playhead",
+				style: { left: `${Math.min(playhead, total) / total * 100}%` }
+			})]
 		})]
+	});
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "djp-tstrip",
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(Row, {
+				name: "视频",
+				children: [mainBlocks.map(({ clip, start, widthPct }) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: `djp-track-block ${clip.transition === "fade" ? "djp-fade" : ""}`,
+					style: { width: `${widthPct}%` },
+					title: `${clip.src} · ${fmtSec(start)}–${fmtSec(start + clip.clipDuration)}`,
+					onClick: (e) => {
+						e.stopPropagation();
+						onSeekClip(start);
+					},
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "djp-track-label",
+						children: clip.src
+					})
+				}, clip.id)), main.clips.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					className: "djp-trow-empty",
+					children: "空"
+				})]
+			}),
+			overlays.map((tr) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Row, {
+				name: tr.name ?? "画中画",
+				children: tr.clips.map((c$2) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "djp-track-block djp-pip-block",
+					style: {
+						position: "absolute",
+						left: `${(c$2.atSeconds ?? 0) / total * 100}%`,
+						width: `${c$2.clipDuration / total * 100}%`
+					},
+					title: `${c$2.src} · ${fmtSec(c$2.atSeconds ?? 0)}–${fmtSec((c$2.atSeconds ?? 0) + c$2.clipDuration)}`,
+					onClick: (e) => {
+						e.stopPropagation();
+						onSeekClip(c$2.atSeconds ?? 0);
+					},
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "djp-track-label",
+						children: c$2.src
+					})
+				}, c$2.id))
+			}, tr.id)),
+			t.audioTracks.map((tr) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Row, {
+				name: `♪ ${tr.name ?? "音频"}`,
+				children: tr.clips.map((c$2) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "djp-track-block djp-audio-block",
+					style: {
+						position: "absolute",
+						left: `${c$2.atSeconds / total * 100}%`,
+						width: `${c$2.duration / total * 100}%`
+					},
+					title: `${c$2.src} · ${fmtSec(c$2.atSeconds)}–${fmtSec(c$2.atSeconds + c$2.duration)}`,
+					onClick: (e) => {
+						e.stopPropagation();
+						onSeekClip(c$2.atSeconds);
+					},
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "djp-track-label",
+						children: ["♪ ", c$2.src]
+					})
+				}, c$2.id))
+			}, tr.id))
+		]
 	});
 };
 const Panel = () => {
@@ -20677,6 +20914,7 @@ const Panel = () => {
 	const hist = useHistory(timeline, mutate);
 	const o = ops(hist.commit);
 	const [canvasOpen, setCanvasOpen] = (0, react.useState)(false);
+	const audioFileRef = (0, react.useRef)(null);
 	(0, react.useEffect)(() => {
 		const onKey = (e) => {
 			if (!(e.ctrlKey || e.metaKey)) return;
@@ -20704,37 +20942,125 @@ const Panel = () => {
 	const t = timeline;
 	const durationInFrames = Math.max(1, timelineDurationInFrames(t));
 	const totalSec = durationInFrames / t.meta.fps;
+	const mainClips = t.videoTracks[0]?.clips ?? [];
+	const pipClips = t.videoTracks.slice(1).flatMap((tr) => tr.clips);
+	const audioClips = t.audioTracks.flatMap((tr) => tr.clips);
+	const hasContent = mainClips.length + pipClips.length + audioClips.length > 0;
+	const BOX_PRESETS = [
+		{
+			label: "右下",
+			box: {
+				x: .66,
+				y: .66,
+				w: .3,
+				h: .3
+			}
+		},
+		{
+			label: "左下",
+			box: {
+				x: .03,
+				y: .66,
+				w: .3,
+				h: .3
+			}
+		},
+		{
+			label: "右上",
+			box: {
+				x: .66,
+				y: .04,
+				w: .3,
+				h: .3
+			}
+		},
+		{
+			label: "左上",
+			box: {
+				x: .03,
+				y: .04,
+				w: .3,
+				h: .3
+			}
+		},
+		{
+			label: "居中",
+			box: {
+				x: .35,
+				y: .35,
+				w: .3,
+				h: .3
+			}
+		},
+		{
+			label: "全屏",
+			box: {
+				x: 0,
+				y: 0,
+				w: 1,
+				h: 1
+			}
+		}
+	];
 	const previewTimeline = {
 		...t,
-		clips: t.clips.map((c$2) => ({
-			...c$2,
-			src: assetUrl(c$2.src)
+		videoTracks: t.videoTracks.map((tr) => ({
+			...tr,
+			clips: tr.clips.map((c$2) => ({
+				...c$2,
+				src: assetUrl(c$2.src)
+			}))
 		})),
-		audio: t.audio ? {
-			...t.audio,
-			src: assetUrl(t.audio.src)
-		} : t.audio
+		audioTracks: t.audioTracks.map((tr) => ({
+			...tr,
+			clips: tr.clips.map((c$2) => ({
+				...c$2,
+				src: assetUrl(c$2.src)
+			}))
+		}))
 	};
 	const addAssetClip = (a$2) => hist.commit((cur) => ({
 		...cur,
-		clips: [...cur.clips, {
+		videoTracks: cur.videoTracks.map((tr, i) => i === 0 ? {
+			...tr,
+			clips: [...tr.clips, {
+				id: clipId(),
+				type: a$2.type === "image" ? "image" : "video",
+				src: a$2.name,
+				inPoint: 0,
+				clipDuration: a$2.type === "image" ? 3 : a$2.duration ?? 3,
+				transition: "none",
+				volume: 1
+			}]
+		} : tr)
+	}));
+	const setBgm = (name) => hist.commit((cur) => {
+		const clip = {
 			id: clipId(),
-			type: a$2.type === "image" ? "image" : "video",
-			src: a$2.name,
-			inPoint: 0,
-			clipDuration: a$2.type === "image" ? 3 : a$2.duration ?? 3,
-			transition: "none",
-			volume: 1
-		}]
-	}));
-	const setBgm = (name) => hist.commit((cur) => ({
-		...cur,
-		audio: {
 			src: name,
+			inPoint: 0,
+			duration: 10,
 			volume: 1,
-			startAtSeconds: 0
-		}
-	}));
+			atSeconds: 0
+		};
+		if (cur.audioTracks[0]) return {
+			...cur,
+			audioTracks: cur.audioTracks.map((tr, i) => i === 0 ? {
+				...tr,
+				clips: [...tr.clips, clip]
+			} : tr)
+		};
+		return {
+			...cur,
+			audioTracks: [{
+				id: "a1",
+				name: "配乐",
+				volume: 1,
+				muted: false,
+				clips: [clip]
+			}]
+		};
+	});
 	const onDragOver = (e) => {
 		if (e.dataTransfer.types.includes("text/clip-index")) {
 			e.preventDefault();
@@ -20746,9 +21072,9 @@ const Panel = () => {
 		if (!Number.isInteger(from)) return;
 		e.preventDefault();
 		const target = e.target.closest(".djp-card");
-		const to = target ? Number(target.dataset.index) : t.clips.length - 1;
+		const to = target ? Number(target.dataset.index) : (t.videoTracks[0]?.clips.length ?? 1) - 1;
 		if (!Number.isInteger(to) || from === to) return;
-		const order = t.clips.map((c$2) => c$2.id);
+		const order = (t.videoTracks[0]?.clips ?? []).map((c$2) => c$2.id);
 		const [moved] = order.splice(from, 1);
 		order.splice(to, 0, moved);
 		o.reorderClips(order);
@@ -20792,9 +21118,11 @@ const Panel = () => {
 							"fps · ",
 							totalSec.toFixed(1),
 							"s · ",
-							t.clips.length,
-							" 段 ·",
-							" ",
+							mainClips.length,
+							" 段",
+							pipClips.length ? ` · 画中画×${pipClips.length}` : "",
+							audioClips.length ? ` · 音频×${audioClips.length}` : "",
+							" · ",
 							t.overlays.length,
 							" 字幕"
 						]
@@ -20808,9 +21136,9 @@ const Panel = () => {
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ExportControl, { t })
 				]
 			}),
-			t.clips.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+			!hasContent ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "djp-empty",
-				children: "还没有片段——让 AI 加素材，或点下方「片段 +」"
+				children: "还没有片段——让 AI 加素材，从素材库加，或点下方「片段 +」"
 			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "djp-stage",
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Player, {
@@ -20844,16 +21172,27 @@ const Panel = () => {
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "djp-section-head",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "片段" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							className: "djp-add",
-							title: "添加片段",
-							onClick: o.addClip,
-							children: "+"
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "片段（主轨道）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							style: {
+								display: "flex",
+								gap: 6
+							},
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "djp-btn",
+								title: "加画中画叠加轨",
+								onClick: o.addPip,
+								children: "画中画"
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "djp-add",
+								title: "添加片段",
+								onClick: o.addClip,
+								children: "+"
+							})]
 						})]
 					}),
-					t.clips.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					mainClips.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "djp-hint",
-						children: "空时间线"
+						children: "主轨道空"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						onDragOver,
@@ -20863,7 +21202,7 @@ const Panel = () => {
 							flexDirection: "column",
 							gap: 6
 						},
-						children: t.clips.map((c$2, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						children: mainClips.map((c$2, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "djp-card",
 							"data-index": i,
 							draggable: true,
@@ -20931,6 +21270,168 @@ const Panel = () => {
 							})]
 						}, c$2.id))
 					})
+				]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "djp-section",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "djp-section-head",
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "画中画" })
+					}),
+					pipClips.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "djp-hint",
+						children: "无叠加片段——「片段」区点「画中画」或让 AI 加"
+					}),
+					pipClips.map((c$2) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "djp-card djp-overlay-row",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "djp-card-title",
+								style: { maxWidth: 90 },
+								children: c$2.src
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+								className: "djp-select",
+								value: c$2.box ? JSON.stringify(c$2.box) : "",
+								onChange: (e) => {
+									const v = e.target.value;
+									if (!v) {
+										o.updateClip(c$2.id, { box: void 0 });
+										return;
+									}
+									const p = BOX_PRESETS.find((x) => JSON.stringify(x.box) === v);
+									if (p) o.updateClip(c$2.id, { box: p.box });
+								},
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+									value: "",
+									children: "默认（右下 30%）"
+								}), BOX_PRESETS.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+									value: JSON.stringify(p.box),
+									children: p.label
+								}, p.label))]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+								label: "从",
+								value: c$2.atSeconds ?? 0,
+								onCommit: (v) => o.updateClip(c$2.id, { atSeconds: Math.max(0, v) })
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+								label: "时长",
+								value: c$2.clipDuration,
+								min: .1,
+								onCommit: (v) => o.updateClip(c$2.id, { clipDuration: v })
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "djp-del",
+								title: "删除画中画",
+								onClick: () => o.removeClip(c$2.id),
+								children: "✕"
+							})
+						]
+					}, c$2.id))
+				]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "djp-section",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "djp-section-head",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "音频" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							style: {
+								display: "flex",
+								gap: 6,
+								alignItems: "center"
+							},
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+								ref: audioFileRef,
+								type: "file",
+								accept: "audio/*,video/*",
+								style: { display: "none" },
+								onChange: async (e) => {
+									const f = e.target.files?.[0];
+									if (!f) return;
+									try {
+										const up = await uploadAsset(f);
+										o.addAudio(up.name, up.duration ?? 10);
+									} catch {}
+									if (audioFileRef.current) audioFileRef.current.value = "";
+								}
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "djp-btn",
+								title: "上传音频并加入音频轨",
+								onClick: () => audioFileRef.current?.click(),
+								children: "上传"
+							})]
+						})]
+					}),
+					t.audioTracks.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "djp-hint",
+						children: "无音频轨——素材库「♪配乐」、上方「上传」或让 AI 加"
+					}),
+					t.audioTracks.map((tr) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "djp-card",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "djp-card-head",
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "djp-card-title",
+									children: ["♪ ", tr.name ?? "音频"]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: `djp-btn ${tr.muted ? "djp-error" : ""}`,
+									title: tr.muted ? "取消静音" : "静音",
+									onClick: () => o.updateAudioTrack(tr.id, { muted: !tr.muted }),
+									children: tr.muted ? "🔇" : "🔊"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+									className: "djp-field",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "轨音量" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+										type: "range",
+										min: 0,
+										max: 1,
+										step: .05,
+										value: tr.volume,
+										onChange: (e) => o.updateAudioTrack(tr.id, { volume: Number(e.target.value) }),
+										style: { width: 70 }
+									})]
+								})
+							]
+						}), tr.clips.map((c$2) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "djp-fields",
+							style: { alignItems: "center" },
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "djp-card-title",
+									style: { maxWidth: 80 },
+									children: c$2.src
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+									label: "从",
+									value: c$2.atSeconds,
+									onCommit: (v) => o.updateAudioClip(c$2.id, { atSeconds: Math.max(0, v) })
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+									label: "时长",
+									value: c$2.duration,
+									min: .1,
+									onCommit: (v) => o.updateAudioClip(c$2.id, { duration: v })
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+									label: "音量",
+									value: c$2.volume,
+									step: .1,
+									onCommit: (v) => o.updateAudioClip(c$2.id, { volume: Math.min(1, Math.max(0, v)) })
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: "djp-del",
+									title: "删除音频片段",
+									onClick: () => o.removeAudioClip(c$2.id),
+									children: "✕"
+								})
+							]
+						}, c$2.id))]
+					}, tr.id))
 				]
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -21064,6 +21565,20 @@ const CSS = `
 .djp-proj-new .djp-export { align-self: flex-end; }
 .djp-expwrap { position: relative; }
 .djp-exppop { top: 30px; }
+
+/* ---- 多轨轨道条 ---- */
+.djp-tstrip { display: flex; flex-direction: column; gap: 4px; }
+.djp-trow { display: flex; align-items: center; gap: 6px; }
+.djp-trow-name { flex: 0 0 56px; font-size: 11px; color: var(--dsw-alias-label-tertiary); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.djp-trow-lane { flex: 1; }
+.djp-trow-empty { font-size: 11px; color: var(--dsw-alias-label-tertiary); padding: 0 8px; }
+.djp-pip-block { background: var(--dsw-alias-bg-overlay); border: 0.5px dashed var(--dsw-alias-border-l4); }
+.djp-audio-block { background: var(--dsw-alias-brand-primary); opacity: 0.75; }
+.djp-audio-block .djp-track-label { color: #fff; }
+
+/* ---- 画中画/音频卡 ---- */
+.djp-card-head label.djp-field input[type='range'] { accent-color: var(--dsw-alias-brand-primary); }
+.djp-btn.djp-error { color: var(--dsw-alias-state-error-primary); }
 
 /* ---- 画布设置对话框 ---- */
 .djp-mask { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; }

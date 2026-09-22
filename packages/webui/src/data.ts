@@ -36,15 +36,32 @@ export const fmtSec = (s: number) => {
   return `${m}:${sec.toFixed(1).padStart(4, "0")}`;
 };
 
-// ---------- 演示数据 ----------
+// ---------- 空时间线（v2） ----------
+
+export const emptyTimeline = (meta?: Partial<Timeline["meta"]>): Timeline => ({
+  meta: { fps: 30, width: 1280, height: 720, ...meta },
+  version: 2,
+  videoTracks: [{ id: "v1", name: "主轨道", clips: [] }],
+  audioTracks: [],
+  overlays: [],
+});
+
+// ---------- 演示数据（v2 多轨形） ----------
 
 export const demoTimeline: Timeline = {
   meta: { fps: 30, width: 1280, height: 720 },
-  clips: [
-    { id: "c1", type: "video", src: "a.mp4", inPoint: 0.5, clipDuration: 4, transition: "fade", volume: 1 },
-    { id: "c2", type: "video", src: "a.mp4", inPoint: 6, clipDuration: 4, transition: "none", volume: 1 },
+  version: 2,
+  videoTracks: [
+    {
+      id: "v1",
+      name: "主轨道",
+      clips: [
+        { id: "c1", type: "video", src: "a.mp4", inPoint: 0.5, clipDuration: 4, transition: "fade", volume: 1 },
+        { id: "c2", type: "video", src: "a.mp4", inPoint: 6, clipDuration: 4, transition: "none", volume: 1 },
+      ],
+    },
   ],
-  audio: null,
+  audioTracks: [],
   overlays: [
     {
       text: "D剪 demo · 右侧预览可随剪辑实时更新",
@@ -93,11 +110,18 @@ export const demoSessions: Session[] = [
     ],
     timeline: {
       meta: { fps: 24, width: 960, height: 540 },
-      clips: [
-        { id: "x1", type: "video", src: "a.mp4", inPoint: 3, clipDuration: 3, transition: "none", volume: 1 },
-        { id: "x2", type: "video", src: "a.mp4", inPoint: 2, clipDuration: 2, transition: "fade", volume: 1 },
+      version: 2,
+      videoTracks: [
+        {
+          id: "v1",
+          name: "主轨道",
+          clips: [
+            { id: "x1", type: "video", src: "a.mp4", inPoint: 3, clipDuration: 3, transition: "none", volume: 1 },
+            { id: "x2", type: "video", src: "a.mp4", inPoint: 2, clipDuration: 2, transition: "fade", volume: 1 },
+          ],
+        },
       ],
-      audio: null,
+      audioTracks: [],
       overlays: [],
     },
   },

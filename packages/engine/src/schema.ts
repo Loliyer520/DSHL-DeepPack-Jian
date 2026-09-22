@@ -1,12 +1,20 @@
 import { z } from "zod";
 
-// ---------- D剪 时间线 JSON 契约 v0 ----------
+// ---------- D剪 时间线 JSON 契约 v2（多轨） ----------
 // 唯一事实源：AI 剪辑操作、WebUI 手动调整都编辑这份 JSON；渲染层吃 JSON 出 mp4。
-// clips: 按顺序串行播放；每段从素材 inPoint 秒起截取 clipDuration 秒。
-// overlays: 字幕/文字叠加层，秒为单位（与 meta.fps 换算成帧）。
+//
+// v2 归一化模型（parseTimeline 输出一律是 v2 结构）：
+//   videoTracks[0]  = 主轨道：clips 串行（Series），无 atSeconds，时长 = Σ clipDuration
+//   videoTracks[1+] = 叠加轨（画中画）：clip 带绝对 atSeconds + 可选 box（0-1 分数矩形）
+//   audioTracks     = 音频轨：clip 带 atSeconds / inPoint / duration，轨 volume×clip volume
+//   overlays        = 字幕叠加层，绝对秒区间
+//
+// v1 兼容：{clips, audio} 旧字段在 parseTimeline 自动迁移——clips → 主轨道，audio → 单clip音频轨。
+// 总时长（帧）= max(主轨道Σ、所有叠加clip末尾、所有音频clip末尾)，不由 JSON 声明。
 
 export const transitionSchema = z.enum(["none", "fade"]).default("none");
 
+// 主轨道/叠加轨通用的片段字段
 export const clipSchema = z.object({
   id: z.string(),
   type: z.enum(["video", "image"]),
@@ -15,9 +23,45 @@ export const clipSchema = z.object({
   clipDuration: z.number().positive(),
   transition: transitionSchema,
   volume: z.number().min(0).max(1).default(1),
+  // 叠加轨专用：绝对起始秒（主轨道 clip 上无意义，渲染忽略）
+  atSeconds: z.number().min(0).optional(),
+  // 叠加轨专用：画中画盒子（0-1 分数，默认右下 30%）
+  box: z
+    .object({
+      x: z.number().min(0).max(1),
+      y: z.number().min(0).max(1),
+      w: z.number().min(0.01).max(1),
+      h: z.number().min(0.01).max(1),
+    })
+    .optional(),
 });
 
-export const audioTrackSchema = z.object({
+export const videoTrackSchema = z.object({
+  id: z.string(),
+  name: z.string().optional(),
+  clips: z.array(clipSchema).default([]),
+});
+
+// 音频轨片段：绝对时间轴摆放
+export const audioClipSchema = z.object({
+  id: z.string(),
+  src: z.string(),
+  inPoint: z.number().min(0).default(0),
+  duration: z.number().positive(),
+  volume: z.number().min(0).max(1).default(1),
+  atSeconds: z.number().min(0).default(0),
+});
+
+export const audioTrackV2Schema = z.object({
+  id: z.string(),
+  name: z.string().optional(),
+  volume: z.number().min(0).max(1).default(1),
+  muted: z.boolean().default(false),
+  clips: z.array(audioClipSchema).default([]),
+});
+
+// v1 遗留字段（仅输入兼容，归一化后输出里不存在）
+export const legacyAudioSchema = z.object({
   src: z.string(),
   volume: z.number().min(0).max(1).default(1),
   startAtSeconds: z.number().min(0).default(0),
@@ -32,38 +76,113 @@ export const overlaySchema = z.object({
   color: z.string().default("#ffffff"),
 });
 
-export const timelineSchema = z.object({
-  meta: z.object({
-    fps: z.number().positive(),
-    width: z.number().int().positive(),
-    height: z.number().int().positive(),
-  }),
-  clips: z.array(clipSchema).min(1),
-  audio: audioTrackSchema.nullable().default(null),
+const metaSchema = z.object({
+  fps: z.number().positive(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+});
+
+// 输入 schema：v2 字段 + v1 遗留字段都收
+const timelineInputSchema = z.object({
+  meta: metaSchema,
+  videoTracks: z.array(videoTrackSchema).optional(),
+  audioTracks: z.array(audioTrackV2Schema).optional(),
+  clips: z.array(clipSchema).optional(),
+  audio: legacyAudioSchema.nullable().optional(),
   overlays: z.array(overlaySchema).default([]),
+});
+
+// 输出（v2 规范形）
+export const timelineSchema = z.object({
+  meta: metaSchema,
+  version: z.literal(2).default(2),
+  videoTracks: z.array(videoTrackSchema).min(1),
+  audioTracks: z.array(audioTrackV2Schema),
+  overlays: z.array(overlaySchema),
 });
 
 export type Transition = z.infer<typeof transitionSchema>;
 export type Clip = z.infer<typeof clipSchema>;
-export type AudioTrack = z.infer<typeof audioTrackSchema>;
+export type VideoTrack = z.infer<typeof videoTrackSchema>;
+export type AudioClip = z.infer<typeof audioClipSchema>;
+export type AudioTrack = z.infer<typeof audioTrackV2Schema>;
 export type Overlay = z.infer<typeof overlaySchema>;
 export type Timeline = z.infer<typeof timelineSchema>;
 
 const SEC = (fps: number, s: number) => Math.round(s * fps);
 
-// 总时长（帧）由 clips 串行求和得出，不由 JSON 声明（避免自相矛盾）
-export const timelineDurationInFrames = (t: Timeline): number =>
-  t.clips.reduce((acc, c) => acc + SEC(t.meta.fps, c.clipDuration), 0);
+const DEFAULT_BOX = { x: 0.66, y: 0.66, w: 0.3, h: 0.3 };
+export const clipBox = (c: Clip) => c.box ?? DEFAULT_BOX;
 
-// 解析 + 校验一份时间线 JSON（对象或字符串），失败抛出带路径的错误
+let trackSeq = 0;
+const autoId = (p: string) => `${p}${Date.now().toString(36)}${(trackSeq++).toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+
+// v1 → v2 迁移 + 不变量维护（至少一条视频轨）
+function normalize(input: z.infer<typeof timelineInputSchema>): Timeline {
+  let videoTracks = input.videoTracks ?? [];
+  let audioTracks = input.audioTracks ?? [];
+
+  if (!videoTracks.length && input.clips?.length) {
+    videoTracks = [{ id: "v1", name: "主轨道", clips: input.clips }];
+  }
+  if (!videoTracks.length) videoTracks = [{ id: "v1", name: "主轨道", clips: [] }];
+
+  if (!audioTracks.length && input.audio) {
+    // v1 单音频字段 → 一条音频轨一个 clip（时长先按主轨道估，渲染层会被总时长兜住）
+    const mainDur = videoTracks[0].clips.reduce((s, c) => s + c.clipDuration, 0);
+    const startAt = input.audio.startAtSeconds ?? 0;
+    audioTracks = [
+      {
+        id: "a1",
+        name: "配乐",
+        volume: input.audio.volume ?? 1,
+        muted: false,
+        clips: [
+          {
+            id: autoId("ac"),
+            src: input.audio.src,
+            inPoint: 0,
+            duration: Math.max(0.1, mainDur - startAt),
+            volume: 1,
+            atSeconds: startAt,
+          },
+        ],
+      },
+    ];
+  }
+
+  return {
+    meta: input.meta,
+    version: 2,
+    videoTracks,
+    audioTracks,
+    overlays: input.overlays,
+  };
+}
+
+// 总时长（帧）：主轨道串行求和 vs 叠加clip/音频clip 的绝对末尾，取最大
+export const timelineDurationInFrames = (t: Timeline): number => {
+  const fps = t.meta.fps;
+  let frames = t.videoTracks[0]?.clips.reduce((acc, c) => acc + SEC(fps, c.clipDuration), 0) ?? 0;
+  for (const tr of t.videoTracks.slice(1)) {
+    for (const c of tr.clips) frames = Math.max(frames, SEC(fps, (c.atSeconds ?? 0) + c.clipDuration));
+  }
+  for (const tr of t.audioTracks) {
+    if (tr.muted) continue;
+    for (const c of tr.clips) frames = Math.max(frames, SEC(fps, c.atSeconds + c.duration));
+  }
+  return Math.max(1, frames);
+};
+
+// 解析 + 校验 + 归一化（对象或字符串），失败抛出带路径的错误；v1 输入自动升级 v2
 export const parseTimeline = (input: unknown): Timeline => {
   const data = typeof input === "string" ? JSON.parse(input) : input;
-  const result = timelineSchema.safeParse(data);
+  const result = timelineInputSchema.safeParse(data);
   if (!result.success) {
     const issues = result.error.issues
       .map((i) => `  - ${i.path.join(".") || "(root)"}: ${i.message}`)
       .join("\n");
     throw new Error(`时间线 JSON 校验失败：\n${issues}`);
   }
-  return result.data;
+  return normalize(result.data);
 };

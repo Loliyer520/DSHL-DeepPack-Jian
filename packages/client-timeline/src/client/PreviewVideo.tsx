@@ -9,9 +9,9 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from 'remotion';
-import type { Clip, Timeline } from '../../../engine/src/schema';
+import { clipBox, type AudioClip, type Clip, type Timeline } from '../../../engine/src/schema';
 
-// 与 engine 的 TimelineVideo 同渲染逻辑，但 src 直接用（面板侧先转绝对 URL），
+// 与 engine 的 TimelineVideo 同渲染逻辑（v2 多轨），但 src 直接用（面板侧先转绝对 URL），
 // 不走 staticFile——官方壳里没有 remotion public 目录概念。
 
 const SEC = (fps: number, s: number) => Math.round(s * fps);
@@ -31,43 +31,81 @@ const FadeIn: React.FC<{ fade: boolean; children: React.ReactNode }> = ({ fade, 
 const ClipSegment: React.FC<{ clip: Clip }> = ({ clip }) => {
   const { fps } = useVideoConfig();
   const fade = clip.transition === 'fade';
-  if (clip.type === 'image') {
-    return (
-      <FadeIn fade={fade}>
-        <Img src={clip.src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-      </FadeIn>
-    );
-  }
-  return (
-    <FadeIn fade={fade}>
+  const inner =
+    clip.type === 'image' ? (
+      <Img src={clip.src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+    ) : (
       <OffthreadVideo
         src={clip.src}
         startFrom={SEC(fps, clip.inPoint)}
         volume={clip.volume}
         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
       />
-    </FadeIn>
+    );
+  return <FadeIn fade={fade}>{inner}</FadeIn>;
+};
+
+const PipSegment: React.FC<{ clip: Clip }> = ({ clip }) => {
+  const { fps } = useVideoConfig();
+  const box = clipBox(clip);
+  return (
+    <Sequence from={SEC(fps, clip.atSeconds ?? 0)} durationInFrames={SEC(fps, clip.clipDuration)}>
+      <div
+        style={{
+          position: 'absolute',
+          left: `${box.x * 100}%`,
+          top: `${box.y * 100}%`,
+          width: `${box.w * 100}%`,
+          height: `${box.h * 100}%`,
+          overflow: 'hidden',
+          boxShadow: '0 4px 18px rgba(0,0,0,0.45)',
+          borderRadius: 6,
+        }}
+      >
+        <ClipSegment clip={clip} />
+      </div>
+    </Sequence>
+  );
+};
+
+const AudioSegment: React.FC<{ clip: AudioClip; trackVolume: number; muted: boolean }> = ({
+  clip,
+  trackVolume,
+  muted,
+}) => {
+  const { fps } = useVideoConfig();
+  if (muted) return null;
+  return (
+    <Sequence from={SEC(fps, clip.atSeconds)} durationInFrames={SEC(fps, clip.duration)}>
+      <Audio
+        src={clip.src}
+        startFrom={SEC(fps, clip.inPoint)}
+        volume={trackVolume * clip.volume}
+      />
+    </Sequence>
   );
 };
 
 export const PreviewVideo: React.FC<{ timeline: Timeline }> = ({ timeline }) => {
   const { fps } = useVideoConfig();
+  const [mainTrack, ...overlayTracks] = timeline.videoTracks;
   return (
     <AbsoluteFill style={{ backgroundColor: '#000' }}>
       <Series>
-        {timeline.clips.map((clip) => (
+        {mainTrack.clips.map((clip) => (
           <Series.Sequence key={clip.id} durationInFrames={SEC(fps, clip.clipDuration)}>
             <ClipSegment clip={clip} />
           </Series.Sequence>
         ))}
       </Series>
-      {timeline.audio ? (
-        <Audio
-          src={timeline.audio.src}
-          volume={timeline.audio.volume}
-          startFrom={SEC(fps, timeline.audio.startAtSeconds)}
-        />
-      ) : null}
+      {overlayTracks.map((tr) =>
+        tr.clips.map((clip) => <PipSegment key={clip.id} clip={clip} />),
+      )}
+      {timeline.audioTracks.map((tr) =>
+        tr.clips.map((clip) => (
+          <AudioSegment key={clip.id} clip={clip} trackVolume={tr.volume} muted={tr.muted} />
+        )),
+      )}
       {timeline.overlays.map((ov, i) => {
         const from = SEC(fps, ov.startSeconds);
         const duration = Math.max(1, SEC(fps, ov.endSeconds - ov.startSeconds));

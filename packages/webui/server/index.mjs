@@ -7,7 +7,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DeepSeekHarness } from "@deepseek-ai/dsh-sdk-client";
 import { execFileSync } from "node:child_process";
-import { renderFrame, renderVideo } from "../../engine/dist/render.js";
+import { renderFrame, renderVideo, invalidateBundle } from "../../engine/dist/render.js";
+import { parseTimeline } from "../../engine/dist/schema.js";
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
 const PORT = Number(process.env.PORT || 5180);
@@ -172,7 +173,7 @@ const json = (res, code, obj) => {
 // 合法形：{op:"updateClip",...} / {type:"updateClip",...}；走样形：{"updateClip":{...}} 或 {"removeOverlay":0}
 const OPS_NEEDING_ID = new Set(["removeClip"]);
 const OPS_NEEDING_INDEX = new Set(["removeOverlay", "updateOverlay"]);
-const VALID_OPS = new Set(["addClip", "removeClip", "updateClip", "reorderClips", "addOverlay", "removeOverlay", "updateOverlay", "setMeta"]);
+const VALID_OPS = new Set(["addClip", "removeClip", "updateClip", "reorderClips", "addOverlay", "removeOverlay", "updateOverlay", "setMeta", "addAudio", "removeAudio", "updateAudioTrack"]);
 
 // 画布 meta 消毒：fps 1-120 整数；宽/高 16-7680 且偶数对齐（h264 要求）
 function sanitizeMetaPatch(p) {
@@ -236,6 +237,8 @@ function normalizeOps(rawOps) {
           if (name === "updateOverlay" && typeof op.patch !== "object") throw new Error("缺少 patch");
           if (name === "reorderClips" && !Array.isArray(op.order)) throw new Error("缺少 order 数组");
           if (name === "addOverlay" && typeof op.text !== "string") throw new Error("缺少 text");
+          if (name === "addAudio" && typeof op.src !== "string") throw new Error("addAudio 缺少 src");
+          if (name === "updateAudioTrack" && (typeof op.id !== "string" || typeof op.patch !== "object")) throw new Error("updateAudioTrack 缺少 id/patch");
           accepted.push(sanitizeOp(op));
           return;
         }
@@ -253,7 +256,7 @@ const DJIAN_HOME = path.join(process.env.HOME || "/root", ".djian");
 const PROJECTS_DIR = path.join(DJIAN_HOME, "projects");
 const CURRENT_FILE = path.join(DJIAN_HOME, "current");
 const LEGACY_TIMELINE = path.join(DJIAN_HOME, "timeline.json");
-const EMPTY_TIMELINE = { meta: { fps: 30, width: 1280, height: 720 }, clips: [], audio: null, overlays: [] };
+const EMPTY_TIMELINE = { meta: { fps: 30, width: 1280, height: 720 }, videoTracks: [{ id: "v1", name: "主轨道", clips: [] }], audioTracks: [], overlays: [], version: 2 };
 
 const sanitizeId = (s) => String(s ?? "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40);
 const newProjectId = () => "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -319,7 +322,10 @@ function currentProjectId() {
   return nid;
 }
 function loadTimelineFile() {
-  try { return JSON.parse(fs.readFileSync(timelinePath(currentProjectId()), "utf8")); } catch { return null; }
+  try {
+    // v1 磁盘数据经 parseTimeline 自动归一化成 v2（clips → 主轨道，audio → 音频轨）
+    return parseTimeline(JSON.parse(fs.readFileSync(timelinePath(currentProjectId()), "utf8")));
+  } catch { return null; }
 }
 function persistTimeline(t) {
   try {
@@ -335,28 +341,99 @@ const clampNum = (v, fb, min = -Infinity, max = Infinity) =>
 // 与 webui store 的剪辑原语同语义，直接落在 lastTimeline 上并持久化
 function applyOpsToTimeline(ops) {
   const t = lastTimeline ?? structuredClone(EMPTY_TIMELINE);
+  const mainTrack = () => t.videoTracks[0];
+  const findVideoClip = (id) => {
+    for (const tr of t.videoTracks) {
+      const c = tr.clips.find((x) => x.id === id);
+      if (c) return { track: tr, clip: c };
+    }
+    return null;
+  };
   for (const op of ops) {
     switch (op.op) {
-      case "addClip":
-        t.clips.push({
-          id: newClipId(), type: "video",
+      case "addClip": {
+        // track: "main"（默认）主轨道串行；track: "overlay"/"pip" 叠加轨（需 atSeconds）
+        const isOverlay = typeof op.track === "string" && /^(overlay|pip|v\d+)$/i.test(op.track) && op.track.toLowerCase() !== "main";
+        const clip = {
+          id: newClipId(),
+          type: op.type === "image" ? "image" : "video",
           src: typeof op.src === "string" ? op.src : "a.mp4",
           inPoint: clampNum(op.inPoint, 0, 0),
           clipDuration: clampNum(op.clipDuration, 3, 0.1),
           transition: op.transition === "fade" ? "fade" : "none",
           volume: clampNum(op.volume, 1, 0, 1),
+        };
+        if (isOverlay) {
+          clip.atSeconds = clampNum(op.atSeconds, 0, 0);
+          if (op.box && typeof op.box === "object") {
+            const b = op.box;
+            clip.box = {
+              x: clampNum(b.x, 0.66, 0, 1), y: clampNum(b.y, 0.66, 0, 1),
+              w: clampNum(b.w, 0.3, 0.01, 1), h: clampNum(b.h, 0.3, 0.01, 1),
+            };
+          }
+          // 找到叠加轨（按 id），没有就建一条
+          let tr = t.videoTracks.find((x) => x.id !== "v1" && (!op.track || x.id === op.track || x.name === op.track));
+          if (!tr) {
+            tr = { id: op.track && op.track !== "overlay" && op.track !== "pip" ? op.track : `v${t.videoTracks.length + 1}`, name: op.name ?? "画中画", clips: [] };
+            t.videoTracks.push(tr);
+          }
+          tr.clips.push(clip);
+        } else {
+          mainTrack().clips.push(clip);
+        }
+        break;
+      }
+      case "removeClip": {
+        for (const tr of t.videoTracks) tr.clips = tr.clips.filter((c) => c.id !== op.id);
+        // 空的叠加轨顺手清掉（主轨道保留）
+        t.videoTracks = t.videoTracks.filter((tr, i) => i === 0 || tr.clips.length > 0);
+        break;
+      }
+      case "updateClip": {
+        const hit = findVideoClip(op.id);
+        if (hit) Object.assign(hit.clip, op.patch);
+        break;
+      }
+      case "reorderClips": {
+        const tr = mainTrack();
+        const map = new Map(tr.clips.map((c) => [c.id, c]));
+        const next = op.order.map((id) => map.get(id)).filter(Boolean);
+        tr.clips = [...next, ...tr.clips.filter((c) => !op.order.includes(c.id))];
+        break;
+      }
+      case "addAudio": {
+        // 音频 clip：track 缺省建一条新轨，同名复用
+        const name = typeof op.track === "string" ? op.track : "音频";
+        let tr = t.audioTracks.find((x) => x.name === name || x.id === op.track);
+        if (!tr) {
+          tr = { id: `a${t.audioTracks.length + 1}`, name, volume: clampNum(op.trackVolume, 1, 0, 1), muted: false, clips: [] };
+          t.audioTracks.push(tr);
+        }
+        tr.clips.push({
+          id: newClipId(),
+          src: typeof op.src === "string" ? op.src : "a.mp3",
+          inPoint: clampNum(op.inPoint, 0, 0),
+          duration: clampNum(op.duration, 3, 0.1),
+          volume: clampNum(op.volume, 1, 0, 1),
+          atSeconds: clampNum(op.atSeconds, 0, 0),
         });
         break;
-      case "removeClip":
-        t.clips = t.clips.filter((c) => c.id !== op.id);
+      }
+      case "removeAudio": {
+        for (const tr of t.audioTracks) tr.clips = tr.clips.filter((c) => c.id !== op.id);
+        t.audioTracks = t.audioTracks.filter((tr) => tr.clips.length > 0);
         break;
-      case "updateClip":
-        t.clips = t.clips.map((c) => (c.id === op.id ? { ...c, ...op.patch } : c));
-        break;
-      case "reorderClips": {
-        const map = new Map(t.clips.map((c) => [c.id, c]));
-        const next = op.order.map((id) => map.get(id)).filter(Boolean);
-        t.clips = [...next, ...t.clips.filter((c) => !op.order.includes(c.id))];
+      }
+      case "updateAudioTrack": {
+        const tr = t.audioTracks.find((x) => x.id === op.id || x.name === op.id);
+        if (tr) {
+          if (op.patch && typeof op.patch === "object") {
+            if (op.patch.volume !== undefined) tr.volume = clampNum(op.patch.volume, tr.volume, 0, 1);
+            if (op.patch.muted !== undefined) tr.muted = Boolean(op.patch.muted);
+            if (op.patch.name !== undefined && typeof op.patch.name === "string") tr.name = op.patch.name.slice(0, 30);
+          }
+        }
         break;
       }
       case "addOverlay":
@@ -421,15 +498,20 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, lastTimeline ?? structuredClone(EMPTY_TIMELINE));
   }
 
-  // 剪辑面板（官方壳插件）写回整份时间线
+  // 剪辑面板（官方壳插件）写回整份时间线：v1/v2 都收，归一化成 v2 存储
   if (url.pathname === "/api/internal/timeline" && req.method === "POST") {
     const body = JSON.parse(await readBody(req));
     const t = body?.timeline ?? body;
-    if (!t?.meta || !Array.isArray(t.clips) || !Array.isArray(t.overlays)) {
+    if (!t?.meta || !(Array.isArray(t.videoTracks) || Array.isArray(t.clips)) || !Array.isArray(t.overlays ?? [])) {
       return json(res, 400, { error: "时间线格式不正确" });
     }
-    lastTimeline = t;
-    persistTimeline(t);
+    try {
+      const norm = parseTimeline(t);
+      lastTimeline = norm;
+      persistTimeline(norm);
+    } catch (e) {
+      return json(res, 400, { error: `时间线校验失败：${e.message}` });
+    }
     return json(res, 200, { ok: true });
   }
 
@@ -522,6 +604,7 @@ const server = http.createServer(async (req, res) => {
     while (fs.existsSync(path.join(dir, finalName))) finalName = `${stem}-${++n}${ext}`;
     fs.writeFileSync(path.join(dir, finalName), raw);
     const duration = assetType(finalName) === "image" ? null : probeDuration(path.join(dir, finalName));
+    invalidateBundle(); // 素材目录内容变了，下次渲染重新 bundle（否则新素材 404）
     if (duration != null) {
       try { fs.mkdirSync(thumbsPath(currentProjectId()), { recursive: true }); fs.writeFileSync(assetMetaFile(finalName), JSON.stringify({ duration })); } catch {}
     }
@@ -533,6 +616,7 @@ const server = http.createServer(async (req, res) => {
     const full = path.join(assetsPath(currentProjectId()), name);
     if (!fs.existsSync(full)) return json(res, 404, { error: "素材不存在" });
     fs.rmSync(full, { force: true });
+    invalidateBundle(); // 素材目录内容变了，下次渲染重新 bundle
     fs.rm(path.join(thumbsPath(currentProjectId()), name + ".jpg"), { force: true }, () => {});
     fs.rm(assetMetaFile(name), { force: true }, () => {});
     return json(res, 200, { ok: true });
@@ -573,9 +657,15 @@ const server = http.createServer(async (req, res) => {
   // MCP server 取合成后单帧（供 get_frame 工具；PNG base64 回传）
   if (url.pathname === "/api/internal/frame" && req.method === "POST") {
     const body = JSON.parse(await readBody(req));
-    const timeline = body?.timeline ?? lastTimeline;
+    let timeline;
+    try {
+      timeline = parseTimeline(body?.timeline ?? lastTimeline);
+    } catch (e) {
+      return json(res, 400, { error: `时间线校验失败：${e.message}` });
+    }
     const seconds = Number(body?.seconds);
-    if (!timeline?.clips?.length) return json(res, 400, { error: "时间线为空" });
+    const hasContent = timeline.videoTracks.some((tr) => tr.clips.length > 0) || timeline.audioTracks.some((tr) => tr.clips.length > 0);
+    if (!hasContent) return json(res, 400, { error: "时间线为空" });
     if (!Number.isFinite(seconds) || seconds < 0) return json(res, 400, { error: "seconds 必须是非负数字" });
     const outFile = path.join(DJIAN, "out", "frames", `frame-${Date.now()}.png`);
     try {
@@ -599,12 +689,20 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/api/export" && req.method === "POST") {
     if (exportJob?.status === "rendering") return json(res, 409, { error: "已有导出任务进行中，请稍候" });
     const body = JSON.parse(await readBody(req));
-    if (!body?.timeline?.clips?.length) return json(res, 400, { error: "时间线为空，没有可导出的内容" });
+    if (!body?.timeline) return json(res, 400, { error: "缺少 timeline" });
+    // v1/v2 都收：先归一化成 v2，再应用导出参数
+    let timelineOut;
+    try {
+      timelineOut = parseTimeline(body.timeline);
+    } catch (e) {
+      return json(res, 400, { error: `时间线校验失败：${e.message}` });
+    }
+    const hasContent = timelineOut.videoTracks.some((tr) => tr.clips.length > 0) || timelineOut.audioTracks.some((tr) => tr.clips.length > 0);
+    if (!hasContent) return json(res, 400, { error: "时间线为空，没有可导出的内容" });
     // 导出参数：scale 缩放分辨率（0.5/1/2，宽高偶数对齐）；quality 质量档 → crf
     const scale = [0.5, 1, 2].includes(Number(body.scale)) ? Number(body.scale) : 1;
     const CRF = { draft: 28, standard: 20, high: 16 };
     const crf = CRF[body?.quality] ?? undefined;
-    let timelineOut = body.timeline;
     if (scale !== 1) {
       timelineOut = structuredClone(timelineOut);
       timelineOut.meta = {

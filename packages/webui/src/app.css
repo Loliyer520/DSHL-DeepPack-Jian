@@ -766,6 +766,46 @@
   background: var(--business-primary);
 }
 
+/* ===== 多轨轨道条（v2：主轨/画中画/音频行） ===== */
+.track-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+.track-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.track-row-name {
+  flex: 0 0 52px;
+  font-size: 11px;
+  color: var(--label-secondary);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.track-row-lane {
+  flex: 1;
+  margin-top: 0;
+}
+.track-pip-block {
+  border: 0.5px dashed var(--border-l2);
+  background: var(--sidebar-fill);
+}
+[data-theme="dark"] .track-pip-block {
+  background: rgba(255, 255, 255, 0.08);
+}
+.track-audio-block {
+  background: var(--business-primary);
+  opacity: 0.78;
+}
+.track-audio-block .track-block-label {
+  color: #fff;
+}
+
 /* AI 工作中：dsh turnStatus 品牌蓝微光扫过 */
 .turn-status {
   align-self: flex-start;

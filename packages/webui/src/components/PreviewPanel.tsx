@@ -106,7 +106,7 @@ export const PreviewPanel: React.FC = () => {
       </div>
       <div className="panel-body">
         <div className="preview-stage">
-          {t.clips.length === 0 ? (
+          {t.videoTracks.every((tr) => tr.clips.length === 0) && t.audioTracks.every((tr) => tr.clips.length === 0) ? (
             <div className="preview-empty">还没有片段——在下方剪辑面板添加素材</div>
           ) : (
             <Player

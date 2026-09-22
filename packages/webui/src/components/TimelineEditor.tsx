@@ -4,6 +4,7 @@ import { fmtSec } from "../data";
 import type { Clip } from "../../../engine/src/schema";
 
 // 右下：剪辑面板（dsh 风格）——strip 标题行 + 行式编辑卡片
+// v2 多轨：片段=主轨道；画中画区（绝对时间+盒子预设）；音频区（轨音量/静音+clip）
 // 输入框照 dsh ui-primitives Input：32px 高、0.5px border-l4、8px 圆角、聚焦墨色边
 const NumberField: React.FC<{
   label: string;
@@ -82,9 +83,82 @@ const ClipRow: React.FC<{ clip: Clip; index: number }> = ({ clip, index }) => {
   );
 };
 
+const BOX_PRESETS: Array<{ label: string; box: { x: number; y: number; w: number; h: number } }> = [
+  { label: "右下 30%", box: { x: 0.66, y: 0.66, w: 0.3, h: 0.3 } },
+  { label: "左下 30%", box: { x: 0.03, y: 0.66, w: 0.3, h: 0.3 } },
+  { label: "右上 30%", box: { x: 0.66, y: 0.04, w: 0.3, h: 0.3 } },
+  { label: "左上 30%", box: { x: 0.03, y: 0.04, w: 0.3, h: 0.3 } },
+  { label: "全屏", box: { x: 0, y: 0, w: 1, h: 1 } },
+];
+
+const PipRow: React.FC<{ clip: Clip }> = ({ clip }) => {
+  const { updateClip, removeClip } = useStore();
+  return (
+    <div className="edit-card overlay-row">
+      <span className="edit-card-title" style={{ maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {clip.src}
+      </span>
+      <select
+        className="chip-select"
+        value={clip.box ? JSON.stringify(clip.box) : ""}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (!v) {
+            updateClip(clip.id, { box: undefined });
+            return;
+          }
+          const p = BOX_PRESETS.find((x) => JSON.stringify(x.box) === v);
+          if (p) updateClip(clip.id, { box: p.box });
+        }}
+      >
+        <option value="">默认（右下）</option>
+        {BOX_PRESETS.map((p) => (
+          <option key={p.label} value={JSON.stringify(p.box)}>
+            {p.label}
+          </option>
+        ))}
+      </select>
+      <NumberField label="从(s)" value={clip.atSeconds ?? 0} onCommit={(v) => updateClip(clip.id, { atSeconds: Math.max(0, v) })} />
+      <NumberField label="时长(s)" value={clip.clipDuration} min={0.1} onCommit={(v) => updateClip(clip.id, { clipDuration: v })} />
+      <button className="icon-circle danger" title="删除画中画" onClick={() => removeClip(clip.id)}>
+        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+          <path d="M2.5 2.5l8 8M10.5 2.5l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
+      </button>
+    </div>
+  );
+};
+
+const AudioRow: React.FC<{ clip: import("../../../engine/src/schema").AudioClip }> = ({ clip }) => {
+  const { removeClip, updateClip } = useStore();
+  return (
+    <div className="edit-card overlay-row">
+      <span className="edit-card-title" style={{ maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        ♪ {clip.src}
+      </span>
+      <NumberField label="从(s)" value={clip.atSeconds} onCommit={(v) => updateClip(clip.id, { atSeconds: Math.max(0, v) })} />
+      <NumberField label="时长(s)" value={clip.duration} min={0.1} onCommit={(v) => updateClip(clip.id, { duration: v })} />
+      <NumberField
+        label="音量"
+        value={clip.volume}
+        step={0.1}
+        min={0}
+        onCommit={(v) => updateClip(clip.id, { volume: Math.min(1, Math.max(0, v)) })}
+      />
+      <button className="icon-circle danger" title="删除音频片段" onClick={() => removeClip(clip.id)}>
+        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+          <path d="M2.5 2.5l8 8M10.5 2.5l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
+      </button>
+    </div>
+  );
+};
+
 export const TimelineEditor: React.FC = () => {
-  const { active, addClip, addOverlay, removeOverlay, updateOverlay, reorderClips } = useStore();
+  const { active, addClip, addPip, addAudio, addOverlay, removeOverlay, updateOverlay, reorderClips, updateAudioTrack } = useStore();
   const t = active.timeline;
+  const mainClips = t.videoTracks[0]?.clips ?? [];
+  const pipClips = t.videoTracks.slice(1).flatMap((tr) => tr.clips);
 
   // 拖拽排序：dragover 高亮目标，drop 后计算新顺序走 store（会注入系统消息）
   const onDragOver = (e: React.DragEvent) => {
@@ -98,9 +172,9 @@ export const TimelineEditor: React.FC = () => {
     if (!Number.isInteger(from)) return;
     e.preventDefault();
     const target = (e.target as HTMLElement).closest(".clip-card");
-    const to = target ? Number((target as HTMLElement).dataset.index) : t.clips.length - 1;
+    const to = target ? Number((target as HTMLElement).dataset.index) : mainClips.length - 1;
     if (!Number.isInteger(to) || from === to) return;
-    const order = t.clips.map((c) => c.id);
+    const order = mainClips.map((c) => c.id);
     const [moved] = order.splice(from, 1);
     order.splice(to, 0, moved);
     reorderClips(order);
@@ -110,24 +184,75 @@ export const TimelineEditor: React.FC = () => {
     <section className="panel-section editor">
       <div className="panel-strip">
         <span className="panel-strip-title">剪辑</span>
-        <span className="panel-strip-meta">{t.clips.length} 段 · {t.overlays.length} 字幕</span>
+        <span className="panel-strip-meta">
+          {mainClips.length} 段{pipClips.length ? ` · 画中画×${pipClips.length}` : ""}
+          {t.audioTracks.length ? ` · 音频×${t.audioTracks.reduce((s, tr) => s + tr.clips.length, 0)}` : ""} · {t.overlays.length} 字幕
+        </span>
       </div>
       <div className="panel-body editor-body">
         <div className="editor-section">
           <div className="section-head">
-            <span>片段</span>
-            <button className="icon-circle" title="添加片段" onClick={addClip}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M7 2v10M2 7h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-              </svg>
-            </button>
+            <span>片段（主轨道）</span>
+            <span style={{ display: "flex", gap: 6 }}>
+              <button className="chip-select" style={{ cursor: "pointer" }} title="加画中画叠加" onClick={addPip}>
+                画中画
+              </button>
+              <button className="icon-circle" title="添加片段" onClick={addClip}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M7 2v10M2 7h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                </svg>
+              </button>
+            </span>
           </div>
-          {t.clips.length === 0 && <div className="section-empty">空时间线</div>}
+          {mainClips.length === 0 && <div className="section-empty">主轨道空</div>}
           <div onDragOver={onDragOver} onDrop={onDrop}>
-            {t.clips.map((c, i) => (
+            {mainClips.map((c, i) => (
               <ClipRow key={c.id} clip={c} index={i} />
             ))}
           </div>
+        </div>
+
+        <div className="editor-section">
+          <div className="section-head">
+            <span>画中画</span>
+          </div>
+          {pipClips.length === 0 && <div className="section-empty">无叠加片段</div>}
+          {pipClips.map((c) => (
+            <PipRow key={c.id} clip={c} />
+          ))}
+        </div>
+
+        <div className="editor-section">
+          <div className="section-head">
+            <span>音频</span>
+            <button
+              className="chip-select"
+              style={{ cursor: "pointer" }}
+              title="加一条测试音频（a.mp4 声道）"
+              onClick={() => addAudio("a.mp4", 5)}
+            >
+              + 测试音
+            </button>
+          </div>
+          {t.audioTracks.length === 0 && <div className="section-empty">无音频轨</div>}
+          {t.audioTracks.map((tr) => (
+            <div key={tr.id}>
+              <div className="edit-card-head" style={{ padding: "2px 0" }}>
+                <span className="edit-card-title">♪ {tr.name ?? "音频"}</span>
+                <button
+                  className="chip-select"
+                  style={{ cursor: "pointer", opacity: tr.muted ? 0.5 : 1 }}
+                  title={tr.muted ? "取消静音" : "静音"}
+                  onClick={() => updateAudioTrack(tr.id, { muted: !tr.muted })}
+                >
+                  {tr.muted ? "🔇 已静音" : "🔊"}
+                </button>
+              </div>
+              {tr.clips.map((c) => (
+                <AudioRow key={c.id} clip={c} />
+              ))}
+            </div>
+          ))}
         </div>
 
         <div className="editor-section">

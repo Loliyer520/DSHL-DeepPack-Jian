@@ -24,6 +24,11 @@ const entryPoint = path.resolve(engineDir, "../src/entry.tsx");
 // 包级 bundle 缓存：同一进程内多次渲染只 bundle 一次
 let bundleCache: { assetsDir: string; url: string } | null = null;
 
+// 素材目录内容变化（上传/删除）后必须调用：bundle 是打包时快照，不失效会 404 新素材
+export function invalidateBundle(): void {
+  bundleCache = null;
+}
+
 // selectComposition 和 renderMedia 各自都会拉起浏览器，必须给同一份 Chromium 选项
 const chromiumOptions = { gl: "angle" as const };
 
