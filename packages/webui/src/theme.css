@@ -37,8 +37,12 @@
   --n-850: rgb(44, 44, 46);
   --n-75: rgb(241, 243, 245);
   --n-750: rgb(67, 69, 74);
+  --n-875: rgb(35, 35, 37);
   --bubble: var(--ds-50);
   --input-major: var(--n-00);
+  --bg-layer-1: var(--n-00);
+  --border-l4: rgba(0, 0, 0, 0.16);
+  --brand-primary: var(--n-1000);
   --label-caption: var(--n-400);
   --label-primary-dimmed: var(--n-950);
   --button-info-fill: var(--ds-500);
@@ -72,6 +76,9 @@
   --fill-active: rgba(255, 255, 255, 0.1);
   --bubble: var(--n-850);
   --input-major: var(--n-850);
+  --bg-layer-1: var(--n-875);
+  --border-l4: rgba(255, 255, 255, 0.2);
+  --brand-primary: var(--n-50);
   --label-caption: var(--n-600);
   --label-primary-dimmed: var(--n-100);
   --button-info-fill: var(--ds-400);

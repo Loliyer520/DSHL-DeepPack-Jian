@@ -452,24 +452,67 @@
   cursor: default;
 }
 
-/* ===== 右栏：预览 + 剪辑 ===== */
+/* ===== 右栏：预览 + 剪辑（照抄 dsh SidebarRight + ui-primitives Input） ===== */
 .right-col {
   min-width: 0;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  border-left: 0.5px solid var(--border-l3);
-  background: var(--sidebar-fill);
+  /* dsh 右栏与会话区同底（是页面的一栏，不是悬浮面），l4 分隔线 */
+  background: var(--bg-base);
+  border-left: 0.5px solid var(--border-l4);
 }
 
-.preview-box {
+.panel-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-section.editor {
+  flex: 1;
+  min-height: 0;
+}
+
+/* strip 标题行：dockkit 条带风格 */
+.panel-strip {
   flex: none;
-  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
   border-bottom: 0.5px solid var(--border-l2);
 }
 
+.panel-strip-title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--label-primary);
+}
+
+.panel-strip-meta {
+  margin-left: auto;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.panel-body {
+  padding: 12px;
+}
+
+.editor-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .preview-stage {
-  border-radius: 8px;
+  border-radius: 12px;
   overflow: hidden;
   background: #000;
 }
@@ -483,147 +526,157 @@
   font-size: 13px;
 }
 
-.preview-meta {
-  margin-top: 8px;
-  font-size: 11px;
-  color: var(--label-tertiary);
-  font-variant-numeric: tabular-nums;
-}
-
-.editor-box {
-  flex: 1;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
 .editor-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  height: 28px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
+  line-height: 20px;
   color: var(--label-primary);
 }
 
 .section-empty {
   padding: 10px;
-  border: 0.5px dashed var(--border-l3);
-  border-radius: 6px;
+  border: 0.5px dashed var(--border-l4);
+  border-radius: 8px;
   text-align: center;
   font-size: 12px;
+  line-height: 17px;
   color: var(--label-tertiary);
 }
 
-.text-btn {
-  border: none;
-  background: transparent;
-  color: var(--ds-500);
-  font-size: 12px;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.text-btn:hover {
-  background: var(--fill-hover);
-}
-
-.clip-row {
-  padding: 8px 10px;
-  border: 0.5px solid var(--border-l2);
-  border-radius: 8px;
-  background: var(--bg-base);
+/* 编辑卡片：hairline l2 边 + 8px 圆角 */
+.edit-card {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding: 8px;
+  border: 0.5px solid var(--border-l2);
+  border-radius: 8px;
+  background: var(--bg-base);
 }
 
-.clip-head {
+.edit-card-head {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.clip-name {
+.edit-card-title {
   flex: 1;
-  font-size: 12px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.clip-head select {
-  height: 24px;
-  border: 0.5px solid var(--border-l3);
-  border-radius: 4px;
-  background: var(--bg-base);
+  font-size: 13px;
+  line-height: 20px;
   color: var(--label-primary);
-  font-size: 12px;
 }
 
-.clip-fields {
+/* chip 下拉：照 dsh InputBar select——透明底 13px 次级字 + 右置 chevron */
+.chip-select {
+  max-width: 96px;
+  height: 28px;
+  padding: 0 20px 0 8px;
+  border: none;
+  border-radius: 8px;
+  outline: none;
+  background-color: transparent;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%2381858C' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  background-size: 12px 12px;
+  color: var(--label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  cursor: pointer;
+  appearance: none;
+}
+
+.chip-select:hover {
+  background-color: var(--interactive-bg-hover);
+}
+
+.edit-card-fields {
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
-.field {
+.num-field {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.field span {
-  font-size: 10px;
+.num-label {
+  font-size: 12px;
+  line-height: 17px;
   color: var(--label-tertiary);
 }
 
-.field input {
+/* 输入框：照抄 dsh ui-primitives Input——32px 高、0.5px l4 边、8px 圆角、聚焦墨色边 */
+.input-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 8px;
+  border: 0.5px solid var(--border-l4);
+  border-radius: 8px;
+  background: var(--bg-layer-1);
+  box-sizing: border-box;
+}
+
+.input-wrap:focus-within {
+  border-color: var(--brand-primary);
+}
+
+.input-inner {
+  flex: 1;
+  min-width: 0;
   width: 100%;
-  height: 26px;
-  padding: 0 6px;
-  border: 0.5px solid var(--border-l3);
-  border-radius: 4px;
-  background: var(--bg-base);
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 14px;
+  line-height: 22px;
   color: var(--label-primary);
-  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
 .overlay-row {
-  display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border: 0.5px solid var(--border-l2);
-  border-radius: 8px;
-  background: var(--bg-base);
+  gap: 6px;
 }
 
-.overlay-text {
+.overlay-text-wrap {
   flex: 1;
-  height: 26px;
-  padding: 0 8px;
-  border: 0.5px solid var(--border-l3);
-  border-radius: 4px;
-  background: var(--bg-base);
-  color: var(--label-primary);
-  font-size: 12px;
+  min-width: 0;
 }
 
 .overlay-range {
   flex: none;
-  font-size: 10px;
+  font-size: 12px;
+  line-height: 17px;
   color: var(--label-tertiary);
   font-variant-numeric: tabular-nums;
+}
+
+.icon-circle.danger:hover {
+  background: rgba(220, 60, 60, 0.12);
+  color: rgb(200, 50, 50);
 }
 
 /* ===== 通用 ===== */
