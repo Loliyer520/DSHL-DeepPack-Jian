@@ -161,6 +161,11 @@ function normalizeOps(rawOps) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+  // 临时请求日志：定位用户端白屏（看浏览器实际请求了什么、状态码、UA）
+  res.on("finish", () => {
+    const skip = url.pathname.startsWith("/api/export/status"); // 轮询不吵
+    if (!skip) console.log(`[req] ${req.method} ${url.pathname} → ${res.statusCode} (${(req.headers["user-agent"] ?? "").slice(0, 80)})`);
+  });
 
   if (url.pathname === "/api/health") {
     return json(res, 200, { ok: true, ai: AI_READY, model: MODEL, engine: "dsh-sdk" });
