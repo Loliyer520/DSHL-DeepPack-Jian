@@ -64,7 +64,8 @@
         serverName: djian
         transport: stdio
         command: node
-        args: ['/my/own/djian/packages/agent/mcp-server.mjs']
+        # 可移植路径（B2）：相对 dsh 进程 cwd；契约 = 启动器以 profile 根为 cwd 启动 dsh（开发态 cwd=/my/own/djian，workspaces 链接同名解析）
+        args: ['./node_modules/@djian/agent/mcp-server.mjs']
         env:
           DJIAN_WEBUI_URL: http://127.0.0.1:5180
 
@@ -81,7 +82,7 @@
         serverName: media-library
         transport: stdio
         command: node
-        args: ['/my/own/djian/packages/mcp-library/server.mjs']
+        args: ['./node_modules/@djian/mcp-media-library/server.mjs']
         env:
           MEDIA_SERVER_URL: http://127.0.0.1:5180
 

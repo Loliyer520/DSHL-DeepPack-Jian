@@ -15,6 +15,9 @@
   "profileName": "djian",
   "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"],
   "dependencies": {
-    "@djian/engine": "0.1.0"
+    "@djian/agent": "vendor:djian-agent-0.1.0.tgz",
+    "@djian/client-ui-timeline": "vendor:djian-client-ui-timeline-0.1.0.tgz",
+    "@djian/client-ui-library": "vendor:djian-client-ui-library-0.1.0.tgz",
+    "@djian/mcp-media-library": "vendor:djian-mcp-media-library-0.1.0.tgz"
   }
 }
