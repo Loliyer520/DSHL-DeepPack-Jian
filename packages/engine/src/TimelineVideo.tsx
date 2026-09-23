@@ -3,12 +3,12 @@ import {
   AbsoluteFill,
   Audio,
   Img,
-  OffthreadVideo,
-  Sequence,
   Series,
+  Sequence,
   staticFile,
   useCurrentFrame,
   useVideoConfig,
+  Video,
 } from "remotion";
 import { clipBox, evalKeyframes, type AudioClip, type Animations, type Clip, type Filter, type Timeline } from "./schema";
 
@@ -70,7 +70,10 @@ const ClipSegment: React.FC<{ clip: Clip; pip?: boolean }> = ({ clip, pip }) => 
   const inner = clip.type === "image"
     ? <Img src={staticFile(clip.src)} style={{ width: "100%", height: "100%", objectFit: "cover", filter: filterCss(clip.filter), ...anim }} />
     : (
-      <OffthreadVideo
+      // <Video> 而非 <OffthreadVideo>：OffthreadVideo 走 Rust 合成器抽帧，在这台 4GB 小机上
+      // 随机报 "No frame found at position"（2026-09-23 实测，ffmpeg 同点抽帧全 OK，
+      // 密集关键帧/缓存调优均无效）。渲染时浏览器自己 seek 解码，慢一点但稳定。
+      <Video
         src={staticFile(clip.src)}
         startFrom={SEC(fps, clip.inPoint)}
         // endAt 是素材源帧绝对位置：占时 × speed 换算成素材消耗（2x 快放 3s → 吃 6s）

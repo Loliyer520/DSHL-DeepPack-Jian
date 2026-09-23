@@ -645,9 +645,9 @@ function applyOpsToTimeline(ops) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
-  // CORS：供官方 dsh web（5190）里的剪辑面板插件跨域读写
+  // CORS：供官方 dsh web（5190/反代 5191）里的剪辑面板插件跨域读写；本机 + 服务器公网 IP 来源
   const origin = req.headers.origin ?? "";
-  if (/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) res._aco = origin;
+  if (/^https?:\/\/(127\.0\.0\.1|localhost|64\.90\.25\.108)(:\d+)?$/.test(origin)) res._aco = origin;
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
       ...(res._aco ? { "Access-Control-Allow-Origin": res._aco } : {}),
@@ -833,6 +833,74 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ok: true });
   }
   const thumbMatch = url.pathname.match(/^\/api\/assets\/([^/]+)\/thumb$/);
+
+  // ---- 在线资源库（Openverse 免 key CC 素材聚合：图片+音频；供资源库插件/MCP 工具共用）----
+  if (url.pathname === "/api/library/search" && req.method === "GET") {
+    const q = (url.searchParams.get("q") ?? "").trim();
+    const kind = url.searchParams.get("type") === "audio" ? "audio" : "image";
+    const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
+    if (!q) return json(res, 400, { error: "缺少搜索词 q" });
+    try {
+      const u = `https://api.openverse.org/v1/${kind === "audio" ? "audio" : "images"}/?q=${encodeURIComponent(q)}&page=${page}&page_size=20`;
+      const r = await fetch(u, {
+        headers: { "User-Agent": "djian-media-library/0.1 (personal video editor)" },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!r.ok) throw new Error(`Openverse HTTP ${r.status}`);
+      const d = await r.json();
+      return json(res, 200, {
+        total: d.result_count ?? 0,
+        page,
+        items: (d.results ?? []).map((x) => ({
+          id: x.id,
+          kind,
+          title: x.title ?? x.id,
+          url: x.url,
+          thumb: x.thumbnail ?? null,
+          license: x.license ?? "cc",
+          source: x.source ?? "",
+          duration: kind === "audio" && x.duration ? Math.round(x.duration / 100) / 10 : null,
+        })),
+      });
+    } catch (e) {
+      return json(res, 502, { error: `资源库查询失败：${e.message}` });
+    }
+  }
+
+  if (url.pathname === "/api/library/import" && req.method === "POST") {
+    const body = JSON.parse(await readBody(req));
+    const srcUrl = String(body?.url ?? "");
+    if (!/^https?:\/\//i.test(srcUrl)) return json(res, 400, { error: "url 必须是 http(s) 直链" });
+    let name = sanitizeAssetName(body?.name) || sanitizeAssetName(decodeURIComponent(new URL(srcUrl).pathname.split("/").pop() ?? ""));
+    if (!name) name = `lib-${Date.now().toString(36)}`;
+    if (!path.extname(name)) name += body?.kind === "audio" ? ".mp3" : ".jpg";
+    if (!assetType(name)) return json(res, 400, { error: "文件名或格式不支持（视频/图片/音频）" });
+    try {
+      const r = await fetch(srcUrl, {
+        signal: AbortSignal.timeout(60_000),
+        redirect: "follow",
+        headers: { "User-Agent": "djian-media-library/0.1" },
+      });
+      if (!r.ok) return json(res, 502, { error: `下载失败 HTTP ${r.status}` });
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (!buf.length) return json(res, 502, { error: "下载到空文件" });
+      if (buf.length > 200 * 1024 * 1024) return json(res, 413, { error: "文件超过 200MB 上限" });
+      const dir = assetsPath(currentProjectId());
+      fs.mkdirSync(dir, { recursive: true });
+      const ext = path.extname(name), stem = name.slice(0, -ext.length);
+      let n = 0, finalName = name;
+      while (fs.existsSync(path.join(dir, finalName))) finalName = `${stem}-${++n}${ext}`;
+      fs.writeFileSync(path.join(dir, finalName), buf);
+      invalidateBundle(); // 素材目录变了，下次渲染重新 bundle
+      const duration = assetType(finalName) === "image" ? null : probeDuration(path.join(dir, finalName));
+      if (duration != null) {
+        try { fs.mkdirSync(thumbsPath(currentProjectId()), { recursive: true }); fs.writeFileSync(assetMetaFile(finalName), JSON.stringify({ duration })); } catch {}
+      }
+      return json(res, 200, { ok: true, name: finalName, type: assetType(finalName), duration });
+    } catch (e) {
+      return json(res, 502, { error: `导入失败：${e.message}` });
+    }
+  }
   if (thumbMatch && req.method === "GET") {
     const name = sanitizeAssetName(decodeURIComponent(thumbMatch[1]));
     const full = path.join(assetsPath(currentProjectId()), name);
@@ -1000,18 +1068,12 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 静态文件（SPA 回退 index.html——仅对无扩展名的导航路径；
-  // 带扩展名的资源缺失必须 404，否则旧缓存 index.html 引用已重建的旧 hash 资源时会拿到 HTML 当 JS，直接白屏）
-  let filePath = path.join(DIST, url.pathname === "/" ? "index.html" : url.pathname);
-  if (!filePath.startsWith(DIST)) {
-    res.writeHead(403).end();
-    return;
-  }
+  // 独立 UI 已下线（太难看，产品形态改为官方 dsh web 壳里的剪辑面板）——本服务只留引擎 API。
+  // 带扩展名的路径仍查一次当前项目素材目录（时间线 src 裸文件名兼容，供官方壳里的预览播放器拉流）。
   const hasExt = path.extname(url.pathname) !== "";
-  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-    // 带扩展名的缺失路径再查一次当前项目素材目录（时间线 src 裸文件名兼容）
-    const inAssets = hasExt ? path.join(assetsPath(currentProjectId()), path.basename(url.pathname)) : null;
-    if (inAssets && fs.existsSync(inAssets) && !fs.statSync(inAssets).isDirectory()) {
+  if (hasExt) {
+    const inAssets = path.join(assetsPath(currentProjectId()), path.basename(url.pathname));
+    if (fs.existsSync(inAssets) && !fs.statSync(inAssets).isDirectory()) {
       res.writeHead(200, {
         "Content-Type": MIME[path.extname(inAssets)] || "application/octet-stream",
         "Cache-Control": "no-cache",
@@ -1020,23 +1082,9 @@ const server = http.createServer(async (req, res) => {
       fs.createReadStream(inAssets).pipe(res);
       return;
     }
-    if (hasExt) {
-      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }).end("not found");
-      return;
-    }
-    filePath = path.join(DIST, "index.html");
   }
-  // 缓存策略：html 每次重验证（拿新 hash 引用）；hash 指纹资源 immutable 长缓存
-  const isHtml = path.extname(filePath) === ".html";
-  const isFingerprinted = url.pathname.startsWith("/assets/");
-  const cacheControl = isHtml ? "no-cache" : isFingerprinted ? "public, max-age=31536000, immutable" : "no-cache";
-  res.writeHead(200, {
-    "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream",
-    "Cache-Control": cacheControl,
-    // 官方壳（5190）里 remotion Player 跨域拉素材时要 ACAO
-    ...(res._aco ? { "Access-Control-Allow-Origin": res._aco } : {}),
-  });
-  fs.createReadStream(filePath).pipe(res);
+  res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" })
+    .end("D剪引擎 API 服务（独立界面已下线，请从 dsh web 面板访问）");
 });
 
 server.listen(PORT, "0.0.0.0", () => {

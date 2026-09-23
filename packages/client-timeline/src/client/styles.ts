@@ -10,17 +10,23 @@ export function injectStyles() {
 }
 
 const CSS = `
-.djp-root { display: flex; flex-direction: column; gap: 12px; padding: 12px; height: 100%; overflow-y: auto; box-sizing: border-box; color: var(--dsw-alias-label-primary); font-size: 13px; }
-.djp-head { display: flex; align-items: center; gap: 8px; }
+.djp-root { display: flex; flex-direction: column; gap: 0; padding: 0; height: 100%; overflow: hidden; box-sizing: border-box; color: var(--dsw-alias-label-primary); font-size: 13px; }
+.djp-head { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; padding: 6px 10px; }
 .djp-title { font-weight: 600; font-size: 14px; }
 .djp-meta { color: var(--dsw-alias-label-tertiary); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .djp-export { border: none; border-radius: 8px; padding: 5px 12px; font-size: 12px; cursor: pointer; background: var(--dsw-alias-button-info-fill); color: #fff; text-decoration: none; display: inline-flex; align-items: center; }
 .djp-export:disabled { opacity: 0.5; cursor: default; }
 .djp-export.djp-error { background: var(--dsw-alias-state-error-primary); }
-.djp-stage { background: #000; border-radius: 10px; overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l3); }
-.djp-empty { padding: 32px 12px; text-align: center; color: var(--dsw-alias-label-tertiary); background: var(--dsw-alias-bg-layer-2); border-radius: 10px; }
-.djp-track { position: relative; display: flex; height: 44px; border-radius: 8px; overflow: hidden; background: var(--dsw-alias-bg-layer-2); border: 0.5px solid var(--dsw-alias-border-l3); cursor: pointer; }
-.djp-track-block { position: relative; min-width: 24px; border-right: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-3); display: flex; align-items: center; padding: 0 6px; overflow: hidden; }
+.djp-stage { background: #000; overflow: hidden; flex: 0 0 auto; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
+.djp-empty { padding: 32px 12px; text-align: center; color: var(--dsw-alias-label-tertiary); background: var(--dsw-alias-bg-layer-2); flex: 0 0 auto; }
+.djp-tabs { display: flex; gap: 2px; flex: 0 0 auto; padding: 0 6px; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
+.djp-tab { border: none; background: none; color: var(--dsw-alias-label-tertiary); font-size: 12px; padding: 6px 10px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.djp-tab:hover { color: var(--dsw-alias-label-primary); }
+.djp-tab.djp-on { color: var(--dsw-alias-label-primary); border-bottom-color: var(--dsw-alias-brand-primary); font-weight: 600; }
+.djp-tabwrap { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; }
+.djp-tdock { flex: 0 0 auto; border-top: 0.5px solid var(--dsw-alias-border-l3); padding: 6px 8px 4px; display: flex; flex-direction: column; gap: 4px; max-height: 38%; overflow-y: auto; }
+.djp-track { position: relative; display: flex; height: 30px; border-radius: 4px; overflow: hidden; background: var(--dsw-alias-bg-layer-2); border: 0.5px solid var(--dsw-alias-border-l3); cursor: pointer; }
+.djp-track-block { position: relative; min-width: 24px; border-right: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-3); display: flex; align-items: center; padding: 0 4px; overflow: hidden; }
 .djp-track-block.djp-fade { background: var(--dsw-alias-bg-overlay); }
 .djp-track-label { font-size: 11px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .djp-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--dsw-alias-brand-primary); pointer-events: none; }
@@ -45,7 +51,7 @@ const CSS = `
 .djp-hint { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
 
 /* ---- 项目栏 / 通用按钮 ---- */
-.djp-projbar { position: relative; display: flex; align-items: center; gap: 6px; }
+.djp-projbar { position: relative; display: flex; align-items: center; gap: 6px; flex: 0 0 auto; padding: 8px 10px 0; }
 .djp-proj-label { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
 .djp-proj-select { flex: 1; min-width: 0; height: 26px; font-size: 12px; }
 .djp-btn { border: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-radius: 7px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
@@ -62,9 +68,9 @@ const CSS = `
 .djp-exppop { top: 30px; }
 
 /* ---- 多轨轨道条 ---- */
-.djp-tstrip { display: flex; flex-direction: column; gap: 4px; }
-.djp-trow { display: flex; align-items: center; gap: 6px; }
-.djp-trow-name { flex: 0 0 56px; font-size: 11px; color: var(--dsw-alias-label-tertiary); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.djp-tstrip { display: flex; flex-direction: column; gap: 3px; }
+.djp-trow { display: flex; align-items: center; gap: 4px; }
+.djp-trow-name { flex: 0 0 46px; font-size: 10px; color: var(--dsw-alias-label-tertiary); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .djp-trow-lane { flex: 1; }
 .djp-trow-empty { font-size: 11px; color: var(--dsw-alias-label-tertiary); padding: 0 8px; }
 .djp-pip-block { background: var(--dsw-alias-bg-overlay); border: 0.5px dashed var(--dsw-alias-border-l4); }
@@ -77,6 +83,9 @@ const CSS = `
 
 /* ---- 轨道交互：拖拽/裁剪/版本历史 ---- */
 .djp-track-block { position: relative; }
+.djp-handle, .djp-pip-block, .djp-audio-block { touch-action: none; }
+.djp-ruler { position: relative; flex: 1; height: 16px; cursor: pointer; background: var(--dsw-alias-bg-layer-2); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 4px; overflow: hidden; }
+.djp-tick { position: absolute; top: 0; bottom: 0; border-left: 0.5px solid var(--dsw-alias-border-l3); padding-left: 3px; font-size: 9px; color: var(--dsw-alias-label-tertiary); line-height: 16px; pointer-events: none; white-space: nowrap; }
 .djp-handle { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 1; }
 .djp-handle.djp-hl { left: 0; border-radius: 4px 0 0 4px; }
 .djp-handle.djp-hr { right: 0; border-radius: 0 4px 4px 0; }

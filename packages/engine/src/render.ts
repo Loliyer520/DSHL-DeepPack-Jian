@@ -15,6 +15,7 @@ export interface RenderOptions {
   assetsDir: string;
   concurrency?: number; // 渲染并发，低配机器调小（默认按 CPU 核数一半）
   crf?: number; // h264 质量档：越小越清晰越大（草稿 28 / 标准 20 / 高 16）
+  offthreadVideoCacheMb?: number; // OffthreadVideo 帧缓存上限 MB（默认按可用内存自适应）
   onProgress?: (p: { rendered: number; total: number; stage: string }) => void;
 }
 
@@ -69,6 +70,13 @@ export async function renderVideo(opts: RenderOptions): Promise<{ outFile: strin
     outputLocation: opts.outFile,
     inputProps: { timeline },
     concurrency,
+    // OffthreadVideo 帧缓存：Remotion 默认按 2GB 跑，4GB 小机上会把可用内存挤爆，
+    // 合成器抽帧时帧已被逐出 → "No frame found at position" 随机失败（2026-09-23 实测）。
+    // 按当时可用内存给保守值：freemem/3，鑎在 256–600MB。
+    offthreadVideoCacheSizeInBytes:
+      opts.offthreadVideoCacheMb != null
+        ? opts.offthreadVideoCacheMb * 1024 * 1024
+        : Math.min(600 * 1024 * 1024, Math.max(256 * 1024 * 1024, Math.floor(os.freemem() / 3))),
     ...(opts.crf != null ? { crf: opts.crf } : {}),
     chromiumOptions,
     onProgress: (p) => {
