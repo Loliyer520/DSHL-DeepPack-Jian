@@ -1,1 +1,3 @@
-# profile 根覆盖层：当前为空，后续放 cordis.patch.yml 等
+# profile 根覆盖层
+# cordis.patch.yml：D剪全部运行时配置（GLM 上游+多模态模型、剪辑人格、MCP 工具、两个侧栏面板插件）
+# 单一事实源——本机开发态也用 --patch 直挂这份文件，禁止在别处另存副本

@@ -10,9 +10,25 @@
     thinking: disabled
     reasoningEffort: off
     maxTokens: 8192
+    # 双模型（2026-09-23 实测）：5.3-flash 原生多模态（喂图答「红色」✓，get_frame 截图靠它）；5.3 纯文本强模型（1210 实测只收 text）
+    # inputModalities 必须显式声明（适配器按此门控图像输入，未声明会抛 does not accept image input）
     models:
       - id: glm-5.3-flash
+        name: GLM-5.3 Flash（多模态·快）
         contextWindow: 128000
+        inputModalities: [text, image]
+        imagePixelBudget: 4194304
+        imageMaxBytes: 5242880
+      - id: glm-5.3
+        name: GLM-5.3（纯文本·更强）
+        contextWindow: 128000
+        inputModalities: [text]
+
+# 关掉 DeepSeek 生态遥测字段（dsh_plugin_packages 会遍历活跃插件包做身份解析，
+# 在我们的 GLM 上游上无用，且其 prepare 抛错导致 REQUEST_EXTENSION 整轮失败）
+- id: plugin-package-inventory-deepseek
+  config:
+    enabled: false
 
 # 剪辑助手人格（覆盖 coding 默认）
 - id: system-prompt
@@ -26,6 +42,8 @@
       不确定当前状态时用 get_timeline 先读再改；
       想确认某个时间点的实际画面（字幕位置、黑场、衔接、动画效果）时用 get_frame 看合成后的那一帧；
       纯讨论/答疑时直接回复即可。
+      素材不够时主动找：用 search_media 搜在线 CC 资源库（Openverse 聚合，图片/音频，可商用），
+      用 download_media 下载进素材库后按返回的文件名 addClip 引用；英文关键词搜得更准。
       回复保持简短中文，说明你做了什么。
       【剪辑审美硬规则】
       1. 节奏：短视频片段默认切 1.5–3 秒；超过 5 秒的单镜头主动提出切短；快切 3 段后插一个较长镜头喘息。
@@ -54,3 +72,20 @@
 - insert:
     - id: djian-timeline-ui
       name: '@djian/client-ui-timeline'
+
+# 资源库 MCP 工具（Openverse 免 key CC 素材搜索/下载；独立通用，可复用到其他整合包）
+- insert:
+    - id: mcp-media-library
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: media-library
+        transport: stdio
+        command: node
+        args: ['/my/own/djian/packages/mcp-library/server.mjs']
+        env:
+          MEDIA_SERVER_URL: http://127.0.0.1:5180
+
+# 资源库面板 web 客户端插件（用户自搜素材，右侧栏 tab）
+- insert:
+    - id: djian-library-ui
+      name: '@djian/client-ui-library'
