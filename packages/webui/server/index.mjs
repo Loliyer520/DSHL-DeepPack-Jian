@@ -7,14 +7,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DeepSeekHarness } from "@deepseek-ai/dsh-sdk-client";
 import { execFileSync } from "node:child_process";
-import { renderFrame, renderVideo, invalidateBundle } from "../../engine/dist/render.js";
-import { parseTimeline } from "../../engine/dist/schema.js";
-import { expandAnimationPreset, listAnimationPresets } from "../../engine/dist/presets.js";
+import { renderFrame, renderVideo, invalidateBundle } from "@djian/engine/dist/render.js";
+import { parseTimeline } from "@djian/engine/dist/schema.js";
+import { expandAnimationPreset, listAnimationPresets } from "@djian/engine/dist/presets.js";
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
 const PORT = Number(process.env.PORT || 5180);
-const DJIAN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const PATCH = path.join(DJIAN, "packages/agent/djian.cordis.yml");
+// 开发态使用仓库根；vendor 安装态使用 DSHL 传入的 profile 工作目录。
+// 这两种路径都不能依赖当前源码仓库的相对层级。
+const DJIAN = process.env.DJIAN_WORK || process.cwd();
+const PACK_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const PATCH = process.env.DJIAN_PATCH ||
+  (fs.existsSync(path.join(PACK_ROOT, "patch/cordis.patch.yml"))
+    ? path.join(PACK_ROOT, "patch/cordis.patch.yml")
+    : path.join(DJIAN, "packages/agent/djian.cordis.yml"));
 
 // ---- 密钥与模型路由 ----
 function loadKashicEnv() {
@@ -366,7 +372,7 @@ function currentProjectId() {
     if (legacy?.meta && Array.isArray(legacy.clips)) fs.writeFileSync(timelinePath(nid), JSON.stringify(legacy, null, 2));
   } catch {}
   try {
-    const pub = path.join(DJIAN, "packages/webui/public");
+    const pub = path.join(PACK_ROOT, "public");
     for (const f of fs.readdirSync(pub)) {
       if (/\.(mp4|mov|webm|mkv|png|jpe?g|webp|gif|mp3|wav|aac|ogg|m4a)$/i.test(f)) {
         fs.copyFileSync(path.join(pub, f), path.join(assetsPath(nid), f));

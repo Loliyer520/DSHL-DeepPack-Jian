@@ -16,8 +16,32 @@
   "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"],
   "dependencies": {
     "@djian/agent": "vendor:djian-agent-0.1.0.tgz",
+    "@djian/engine": "vendor:djian-engine-0.1.0.tgz",
     "@djian/client-ui-timeline": "vendor:djian-client-ui-timeline-0.1.0.tgz",
     "@djian/client-ui-library": "vendor:djian-client-ui-library-0.1.0.tgz",
-    "@djian/mcp-media-library": "vendor:djian-mcp-media-library-0.1.0.tgz"
-  }
+    "@djian/mcp-media-library": "vendor:djian-mcp-media-library-0.1.0.tgz",
+    "@djian/webui": "vendor:djian-webui-0.1.0.tgz",
+    "@deepseek-ai/dsh-sdk-client": "0.1.5-rc.2",
+    "@remotion/bundler": "4.0.526",
+    "@remotion/player": "4.0.526",
+    "@remotion/renderer": "4.0.526",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.526",
+    "zod": "3.23.8"
+  },
+  "services": [
+    {
+      "name": "djian-engine",
+      "command": "node",
+      "args": ["./node_modules/@djian/webui/server/index.mjs"],
+      "env": {
+        "DJIAN_PATCH": "./cordis.patch.yml"
+      },
+      "port": 5180,
+      "healthPath": "/api/health",
+      "readyTimeoutMs": 120000,
+      "required": true
+    }
+  ]
 }
