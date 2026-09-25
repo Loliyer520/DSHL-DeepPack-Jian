@@ -949,7 +949,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 400, { error: `时间线校验失败：${e.message}` });
     }
     const seconds = Number(body?.seconds);
-    const hasContent = timeline.videoTracks.some((tr) => tr.clips.length > 0) || timeline.audioTracks.some((tr) => tr.clips.length > 0);
+    const hasContent = timeline.videoTracks.some((tr) => tr.clips.length > 0) || timeline.audioTracks.some((tr) => tr.clips.length > 0) || (timeline.overlays?.length ?? 0) > 0;
     if (!hasContent) return json(res, 400, { error: "时间线为空" });
     if (!Number.isFinite(seconds) || seconds < 0) return json(res, 400, { error: "seconds 必须是非负数字" });
     const outFile = path.join(DJIAN, "out", "frames", `frame-${Date.now()}.png`);
@@ -982,7 +982,7 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       return json(res, 400, { error: `时间线校验失败：${e.message}` });
     }
-    const hasContent = timelineOut.videoTracks.some((tr) => tr.clips.length > 0) || timelineOut.audioTracks.some((tr) => tr.clips.length > 0);
+    const hasContent = timelineOut.videoTracks.some((tr) => tr.clips.length > 0) || timelineOut.audioTracks.some((tr) => tr.clips.length > 0) || (timelineOut.overlays?.length ?? 0) > 0;
     if (!hasContent) return json(res, 400, { error: "时间线为空，没有可导出的内容" });
     // 导出参数：scale 缩放分辨率（0.5/1/2，宽高偶数对齐）；quality 质量档 → crf
     const scale = [0.5, 1, 2].includes(Number(body.scale)) ? Number(body.scale) : 1;
