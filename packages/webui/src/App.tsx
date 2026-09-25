@@ -10,6 +10,20 @@ import { useStore } from "./store";
 const Shell: React.FC = () => {
   const [drawerOpen, setDrawerOpen] = useState(true);
   const { active } = useStore();
+  // 明暗主题：index.html 引导脚本已在挂载前把 data-theme 落到 <html>，这里只做切换与记忆
+  const [theme, setTheme] = useState<"dark" | "light">(() =>
+    document.documentElement.dataset.theme === "light" ? "light" : "dark",
+  );
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try {
+      localStorage.setItem("djian-theme", next);
+    } catch {
+      /* 隐私模式等场景下存不进就只在本次会话生效 */
+    }
+    setTheme(next);
+  };
 
   return (
     <div className={`frame ${drawerOpen ? "" : "drawer-closed"}`}>
@@ -22,6 +36,14 @@ const Shell: React.FC = () => {
             </button>
           )}
           <span className="topbar-title">{active.title}</span>
+          <button
+            className="icon-btn"
+            style={{ marginLeft: "auto" }}
+            title={theme === "dark" ? "切换到浅色" : "切换到暗色"}
+            onClick={toggleTheme}
+          >
+            {theme === "dark" ? "☀" : "☾"}
+          </button>
         </header>
         <ChatView />
       </main>

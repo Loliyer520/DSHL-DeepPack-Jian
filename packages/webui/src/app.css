@@ -722,16 +722,12 @@
   position: relative;
   height: 100%;
   border-right: 0.5px solid var(--border-l2);
-  background: var(--ds-50);
+  background: var(--info-soft);
   display: flex;
   align-items: center;
   padding: 0 8px;
   min-width: 0;
   overflow: hidden;
-}
-
-[data-theme="dark"] .track-block {
-  background: rgba(65, 118, 230, 0.18);
 }
 
 .track-block.has-fade {

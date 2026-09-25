@@ -52,6 +52,8 @@
   --business-primary: var(--ds-500);
   --interactive-bg-hover: rgba(38, 49, 72, 0.06);
   --elevation-soft: 0 2px 12px rgba(15, 17, 21, 0.06);
+  /* 剪辑轨道片段底色：浅色用品牌蓝浅阶，暗色降为半透明蓝（--ds-50 是固定浅蓝，不能直接用） */
+  --info-soft: var(--ds-50);
 
   /* 动效（dsh deepsuite 曲线） */
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
@@ -88,6 +90,7 @@
   --business-primary: var(--ds-400);
   --interactive-bg-hover: rgba(255, 255, 255, 0.08);
   --elevation-soft: 0 2px 12px rgba(0, 0, 0, 0.4);
+  --info-soft: rgba(65, 118, 230, 0.18);
 }
 
 html,
