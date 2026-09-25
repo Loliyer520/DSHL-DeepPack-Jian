@@ -10,7 +10,7 @@ import { z } from "zod";
 //   overlays        = 字幕叠加层，绝对秒区间
 //
 // v1 兼容：{clips, audio} 旧字段在 parseTimeline 自动迁移——clips → 主轨道，audio → 单clip音频轨。
-// 总时长（帧）= max(主轨道Σ、所有叠加clip末尾、所有音频clip末尾)，不由 JSON 声明。
+// 总时长（帧）= max(主轨道Σ、所有叠加clip末尾、所有音频clip末尾、所有字幕区间末尾)，不由 JSON 声明。
 
 export const transitionSchema = z.enum(["none", "fade"]).default("none");
 
@@ -258,6 +258,7 @@ export const timelineDurationInFrames = (t: Timeline): number => {
     if (tr.muted) continue;
     for (const c of tr.clips) frames = Math.max(frames, SEC(fps, c.atSeconds + c.duration));
   }
+  for (const ov of t.overlays) frames = Math.max(frames, SEC(fps, ov.endSeconds));
   return Math.max(1, frames);
 };
 

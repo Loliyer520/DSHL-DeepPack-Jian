@@ -3,3 +3,4 @@ dist/
 out/
 *.dspack
 .DS_Store
+*.log

@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "type": "profile",
   "name": "djian",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "displayName": {
     "zh-CN": "D剪 · AI 视频剪辑工作台",
     "en-US": "Djian · AI Video Editing Workbench"
@@ -41,7 +41,8 @@
         "./node_modules/@djian/webui/server/index.mjs"
       ],
       "env": {
-        "DJIAN_PATCH": "./cordis.patch.yml"
+        "DJIAN_PATCH": "./cordis.patch.yml",
+        "NODE_USE_ENV_PROXY": "1"
       },
       "port": 5180,
       "healthPath": "/api/health",

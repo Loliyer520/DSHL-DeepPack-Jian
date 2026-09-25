@@ -23,7 +23,7 @@ const engineDir = path.dirname(fileURLToPath(import.meta.url));
 const entryPoint = path.resolve(engineDir, "../src/entry.tsx");
 
 // 包级 bundle 缓存：同一进程内多次渲染只 bundle 一次
-let bundleCache: { assetsDir: string; url: string } | null = null;
+let bundleCache: { assetsDir: string; sig: string; url: string } | null = null;
 
 // 素材目录内容变化（上传/删除）后必须调用：bundle 是打包时快照，不失效会 404 新素材
 export function invalidateBundle(): void {
@@ -33,14 +33,31 @@ export function invalidateBundle(): void {
 // selectComposition 和 renderMedia 各自都会拉起浏览器，必须给同一份 Chromium 选项
 const chromiumOptions = { gl: "angle" as const };
 
+// 目录签名：绕过 API 直接落盘的素材变动也要能触发重新 bundle（2026-09-25 black_bg 事故）
+const assetsSignature = (dir: string): string => {
+  try {
+    return fs
+      .readdirSync(dir)
+      .map((f) => {
+        const st = fs.statSync(path.join(dir, f));
+        return `${f}:${st.size}:${Math.floor(st.mtimeMs)}`;
+      })
+      .sort()
+      .join("|");
+  } catch {
+    return "";
+  }
+};
+
 async function getBundle(assetsDir: string, onLog?: (m: string) => void): Promise<string> {
-  if (bundleCache && bundleCache.assetsDir === assetsDir) return bundleCache.url;
+  const sig = assetsSignature(assetsDir);
+  if (bundleCache && bundleCache.assetsDir === assetsDir && bundleCache.sig === sig) return bundleCache.url;
   const url = await bundle({
     entryPoint,
     publicDir: assetsDir,
     onProgress: () => {},
   });
-  bundleCache = { assetsDir, url };
+  bundleCache = { assetsDir, sig, url };
   return url;
 }
 

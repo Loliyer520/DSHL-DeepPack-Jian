@@ -145,7 +145,10 @@ function readBody(req) {
     let buf = "";
     req.on("data", (c) => {
       buf += c;
-      if (buf.length > 1_000_000) req.destroy();
+      if (buf.length > 1_000_000) {
+        req.destroy();
+        reject(new Error("请求体超过 1MB 上限")); // 只 destroy 不 reject 会让调用方永远挂起
+      }
     });
     req.on("end", () => resolve(buf));
     req.on("error", reject);
@@ -160,7 +163,10 @@ function readBodyRaw(req) {
     req.on("data", (c) => {
       chunks.push(c);
       size += c.length;
-      if (size > 512 * 1024 * 1024) req.destroy();
+      if (size > 512 * 1024 * 1024) {
+        req.destroy();
+        reject(new Error("上传超过 512MB 上限"));
+      }
     });
     req.on("end", () => resolve(Buffer.concat(chunks)));
     req.on("error", reject);
@@ -313,7 +319,8 @@ function normalizeOps(rawOps) {
 }
 
 // ---- 项目制持久化（~/.djian/projects/<id>/ 是唯一事实源）+ 服务端直接应用 ops ----
-const DJIAN_HOME = path.join(process.env.HOME || "/root", ".djian");
+// Windows 原生 HOME 常未设：fallback "/root" 会被解析成盘根 C:\root\.djian——改随 DJIAN（profile 根）落盘
+const DJIAN_HOME = process.env.HOME ? path.join(process.env.HOME, ".djian") : path.join(DJIAN, ".djian");
 const PROJECTS_DIR = path.join(DJIAN_HOME, "projects");
 const CURRENT_FILE = path.join(DJIAN_HOME, "current");
 const LEGACY_TIMELINE = path.join(DJIAN_HOME, "timeline.json");
