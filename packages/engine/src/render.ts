@@ -49,6 +49,21 @@ const assetsSignature = (dir: string): string => {
   }
 };
 
+// webpack 磁盘缓存的 buildDependencies 按内容哈希判失效：把引擎 src 挂进去，
+// 热补丁/升级只换 src 不清缓存时 bundle 也不会再吃旧代码（2026-09-25 字幕动画事故）
+const srcDir = path.resolve(engineDir, "../src");
+const srcBuildDeps = (): string[] => {
+  try {
+    return fs
+      .readdirSync(srcDir)
+      .filter((f) => /\.(ts|tsx)$/.test(f))
+      .map((f) => path.join(srcDir, f))
+      .sort();
+  } catch {
+    return [];
+  }
+};
+
 async function getBundle(assetsDir: string, onLog?: (m: string) => void): Promise<string> {
   const sig = assetsSignature(assetsDir);
   if (bundleCache && bundleCache.assetsDir === assetsDir && bundleCache.sig === sig) return bundleCache.url;
@@ -56,6 +71,16 @@ async function getBundle(assetsDir: string, onLog?: (m: string) => void): Promis
     entryPoint,
     publicDir: assetsDir,
     onProgress: () => {},
+    webpackOverride: (config) => {
+      if (config.cache && typeof config.cache === "object") {
+        const deps = (config.cache as { buildDependencies?: string[] }).buildDependencies ?? [];
+        return {
+          ...config,
+          cache: { ...config.cache, buildDependencies: [...deps, ...srcBuildDeps()] },
+        } as unknown as typeof config;
+      }
+      return config;
+    },
   });
   bundleCache = { assetsDir, sig, url };
   return url;
