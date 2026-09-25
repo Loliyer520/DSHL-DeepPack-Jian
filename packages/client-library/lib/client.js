@@ -30,7 +30,7 @@ window.__ModuleLoader__.load({
 		react = __toESM(react, 1);
 		let react_jsx_runtime = require("react/jsx-runtime");
 		//#region src/client/api.ts
-		const API_BASE = typeof window !== "undefined" && window.location ? `${window.location.protocol}//${window.location.hostname}:5192` : "http://127.0.0.1:5180";
+		const API_BASE = typeof window !== "undefined" && window.location ? `${window.location.protocol}//${window.location.hostname}:5180` : "http://127.0.0.1:5180";
 		async function searchLibrary(q, kind, page) {
 			const r = await fetch(`${API_BASE}/api/library/search?q=${encodeURIComponent(q)}&type=${kind}&page=${page}`);
 			const d = await r.json().catch(() => ({}));

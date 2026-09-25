@@ -1,8 +1,8 @@
 // D剪 引擎服务 API 客户端（与剪辑面板同一约定）
-// 浏览器端走 nginx 反代 5192 → 引擎 5180（面板可能在远程浏览器里跑，127.0.0.1 不可达）
+// DSHL 运行态：面板由 webui 服务本身（:5180）托管，同源直连；远程浏览器场景也走 5180
 export const API_BASE =
   typeof window !== 'undefined' && window.location
-    ? `${window.location.protocol}//${window.location.hostname}:5192`
+    ? `${window.location.protocol}//${window.location.hostname}:5180`
     : 'http://127.0.0.1:5180';
 
 export type LibraryKind = 'image' | 'audio';

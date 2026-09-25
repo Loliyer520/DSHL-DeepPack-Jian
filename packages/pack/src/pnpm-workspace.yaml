@@ -3,3 +3,5 @@ packages:
 
 nodeLinker: hoisted
 autoInstallPeers: true
+overrides:
+  "@deepseek-ai/cordis-plugin-hmr": 1.0.17

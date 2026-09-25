@@ -95,11 +95,16 @@ try {
   }
 
   // 回读校验：根必须有 dspack.json 与 manifest.json，dspack.json 版本为 3
+  // PATH 里的 tar.exe 可能是 Git Bash 的 GNU tar（不认 ZIP、把盘符当远程主机），
+  // 显式用 System32 的 bsdtar，并 cd 到输出目录用纯文件名避开 host:path 语法。
+  const winTar = path.join(process.env.SystemRoot || "C:\Windows", "System32", "tar.exe");
+  const tarOpts = { cwd: path.dirname(outFile), encoding: "utf-8" };
+  const outBase = path.basename(outFile);
   const listing = process.platform === "win32"
-    ? execFileSync("tar.exe", ["-t", "-f", outFile], { encoding: "utf-8" })
+    ? execFileSync(winTar, ["-t", "-f", outBase], tarOpts)
     : execFileSync("unzip", ["-l", outFile], { encoding: "utf-8" });
   const readArchive = (entry) => process.platform === "win32"
-    ? execFileSync("tar.exe", ["-xOf", outFile, entry], { encoding: "utf-8" })
+    ? execFileSync(winTar, ["-x", "-O", "-f", outBase, entry], tarOpts)
     : execFileSync("unzip", ["-p", outFile, entry], { encoding: "utf-8" });
   const dspackJson = JSON.parse(readArchive("dspack.json"));
   if (!listing.includes("manifest.json") || dspackJson.format !== "dspack" || dspackJson.version !== 3) {

@@ -1,8 +1,8 @@
 // D剪 引擎服务 API 客户端
-// 独立 webui 已下线：浏览器端走 nginx 反代 5192 → 引擎 5180（面板可能在远程浏览器里跑，127.0.0.1 不可达）
+// 独立 webui 已下线：DSHL 运行态面板由 webui 服务本身（:5180）托管，同源直连
 export const API_BASE =
   typeof window !== "undefined" && window.location
-    ? `${window.location.protocol}//${window.location.hostname}:5192`
+    ? `${window.location.protocol}//${window.location.hostname}:5180`
     : "http://127.0.0.1:5180";
 
 // 浏览器里预览用的素材绝对地址（src 相对 webui public/dist 根）
