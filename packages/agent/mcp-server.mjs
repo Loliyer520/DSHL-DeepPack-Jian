@@ -82,7 +82,8 @@ const TOOLS = [
       'removeAudio{id} / updateAudioTrack{id,patch:{volume?,muted?,name?}} / ' +
       'splitClip{id,atSeconds} —— 在全局时间轴 atSeconds 处把片段一分为二（主轨/叠加/音频 clip 均可，切点太靠边会被忽略）/ ' +
       'v3 能力：updateClip 的 patch 可设 speed（0.1-10 恒定变速，2=快放一倍，clipDuration 仍是成片占时）、filter（{brightness?,contrast?,saturate?,blur?,grayscale?,sepia?,hueRotate?}，设 {} 清空）、animations（关键帧 {x?,y?,scale?,opacity?,rotation?,volume?}: [{t,v,e?}]，t 为 clip 内相对秒，e 缓动 linear/in/out/inOut/bounce/elastic；x/y 是画布分数偏移，scale 1=原大，opacity/volume 0-1，rotation 度；设 {} 清空；给音频 clip 设 volume 包络即音量包络）、animationPreset（一键动画预设：fadeIn/slideInLeft/slideInRight/slideInUp/zoomIn/bounceIn/spinIn/fadeOut/slideOutLeft/slideOutRight/zoomOut/kenBurns/kenBurnsOut/pop/tilt/pulse/wobble/float，"none" 清除；按 clip 时长自动展开成关键帧，比手排省事优先用）/ ' +
-      'addOverlay{text,startSeconds,endSeconds,position,fontSize,color} / removeOverlay{index} / updateOverlay{index,patch} / ' +
+      '字幕动画：addOverlay 直接带 animations/animationPreset，updateOverlay 的 patch 同理（同一套关键帧与预设，t 为字幕内相对秒、出现时刻=0，通道 x/y/scale/opacity/rotation；预设按字幕时长展开，"none" 清除）/ ' +
+      'addOverlay{text,startSeconds,endSeconds,position,fontSize,color,animations?,animationPreset?} / removeOverlay{index} / updateOverlay{index,patch} / ' +
       'setMeta{patch:{fps?,width?,height?}}（调画布：帧率 1-120，宽高 16-7680 偶数）。\n' +
       "时间单位都是秒；transition 只接受 \"fade\" 或 \"none\"。总时长 = 主轨道串行与所有叠加/音频 clip 末尾的最大值。",
     inputSchema: {
@@ -100,7 +101,7 @@ const TOOLS = [
               opSchema("removeAudio", { id: { type: "string" } }, ["id"]),
               opSchema("splitClip", { id: { type: "string" }, atSeconds: { type: "number", description: "全局时间轴切点（秒）" } }, ["id", "atSeconds"]),
               opSchema("updateAudioTrack", { id: { type: "string" }, patch: { type: "object", properties: { volume: { type: "number", minimum: 0, maximum: 1 }, muted: { type: "boolean" }, name: { type: "string" } } } }, ["id", "patch"]),
-              opSchema("addOverlay", { text: { type: "string" }, startSeconds: NUM, endSeconds: NUM, position: { enum: ["top", "center", "bottom"] }, fontSize: NUM, color: { type: "string" } }, ["text", "startSeconds", "endSeconds"]),
+              opSchema("addOverlay", { text: { type: "string" }, startSeconds: NUM, endSeconds: NUM, position: { enum: ["top", "center", "bottom"] }, fontSize: NUM, color: { type: "string" }, animations: { type: "object", description: "字幕关键帧 {x,y,scale,opacity,rotation}: [{t,v,e?}]，t=字幕内相对秒（出现时刻=0）" }, animationPreset: { type: "string", enum: ["fadeIn", "slideInLeft", "slideInRight", "slideInUp", "zoomIn", "bounceIn", "spinIn", "fadeOut", "slideOutLeft", "slideOutRight", "zoomOut", "kenBurns", "kenBurnsOut", "pop", "tilt", "pulse", "wobble", "float", "none"], description: "字幕一键动画预设（按字幕时长展开成关键帧）；'none'=清除动画" } }, ["text", "startSeconds", "endSeconds"]),
               opSchema("removeOverlay", { index: { type: "integer", minimum: 0 } }, ["index"]),
               opSchema("updateOverlay", { index: { type: "integer", minimum: 0 }, patch: PATCH }, ["index", "patch"]),
               opSchema("setMeta", { patch: { type: "object", properties: { fps: { type: "integer", minimum: 1, maximum: 120 }, width: { type: "number" }, height: { type: "number" } }, required: [] } }, ["patch"]),

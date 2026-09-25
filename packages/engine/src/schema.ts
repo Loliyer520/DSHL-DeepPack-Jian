@@ -114,6 +114,8 @@ export const overlaySchema = z.object({
   position: z.enum(["top", "center", "bottom"]).default("bottom"),
   fontSize: z.number().positive().default(64),
   color: z.string().default("#ffffff"),
+  // v3：字幕关键帧动画（t = 字幕内相对秒，出现时刻=0；volume 通道对文本无意义，渲染忽略）
+  animations: animationsSchema.optional(),
 });
 
 const metaSchema = z.object({

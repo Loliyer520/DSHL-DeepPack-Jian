@@ -10,7 +10,7 @@ import {
   useVideoConfig,
   Video,
 } from "remotion";
-import { clipBox, evalKeyframes, type AudioClip, type Animations, type Clip, type Filter, type Timeline } from "./schema";
+import { clipBox, evalKeyframes, type AudioClip, type Animations, type Clip, type Filter, type Overlay, type Timeline } from "./schema";
 
 const SEC = (fps: number, s: number) => Math.round(s * fps);
 
@@ -159,6 +159,29 @@ const AudioVolumeEnv: React.FC<{
   );
 };
 
+// 字幕层：关键帧动画在文本内层应用——外层保留定位 transform（center 的 translateY），互不覆盖
+const OverlayView: React.FC<{ ov: Overlay }> = ({ ov }) => {
+  const { fps } = useVideoConfig();
+  const sec = useCurrentFrame() / fps; // 字幕内相对秒（Sequence 已提供相对时间轴）
+  const anim = animStyle(ov.animations, sec);
+  return (
+    <div style={{ position: "absolute", ...positionStyle[ov.position], width: "100%", textAlign: "center" }}>
+      <div
+        style={{
+          display: "inline-block",
+          fontSize: ov.fontSize,
+          color: ov.color,
+          fontFamily: '"Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif',
+          textShadow: "0 2px 8px rgba(0,0,0,0.85)",
+          ...anim,
+        }}
+      >
+        {ov.text}
+      </div>
+    </div>
+  );
+};
+
 // 主组件：吃时间线 JSON（v2，v1 已在 parseTimeline 归一化），出整片
 export const TimelineVideo: React.FC<{ timeline: Timeline }> = ({ timeline }) => {
   const { fps } = useVideoConfig();
@@ -193,20 +216,7 @@ export const TimelineVideo: React.FC<{ timeline: Timeline }> = ({ timeline }) =>
         return (
           <Sequence key={i} from={from} durationInFrames={duration}>
             <AbsoluteFill>
-              <div
-                style={{
-                  position: "absolute",
-                  ...positionStyle[ov.position],
-                  width: "100%",
-                  textAlign: "center",
-                  fontSize: ov.fontSize,
-                  color: ov.color,
-                  fontFamily: '"Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif',
-                  textShadow: "0 2px 8px rgba(0,0,0,0.85)",
-                }}
-              >
-                {ov.text}
-              </div>
+              <OverlayView ov={ov} />
             </AbsoluteFill>
           </Sequence>
         );

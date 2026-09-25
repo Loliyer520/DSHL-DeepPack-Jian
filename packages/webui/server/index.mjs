@@ -631,21 +631,49 @@ function applyOpsToTimeline(ops) {
         }
         break;
       }
-      case "addOverlay":
-        t.overlays.push({
+      case "addOverlay": {
+        const ov = {
           text: op.text,
           startSeconds: clampNum(op.startSeconds, 0, 0),
           endSeconds: clampNum(op.endSeconds, 3, 0),
           position: ["top", "center", "bottom"].includes(op.position) ? op.position : "bottom",
           fontSize: clampNum(op.fontSize, 48, 1),
           color: typeof op.color === "string" ? op.color : "#ffffff",
-        });
+        };
+        const oanim = sanitizeAnimations(op.animations);
+        if (oanim) ov.animations = oanim;
+        else if (typeof op.animationPreset === "string" && op.animationPreset) {
+          const expanded = expandAnimationPreset(op.animationPreset, Math.max(0.1, ov.endSeconds - ov.startSeconds));
+          if (expanded) ov.animations = expanded;
+        }
+        t.overlays.push(ov);
         break;
+      }
       case "removeOverlay":
         t.overlays = t.overlays.filter((_, i) => i !== op.index);
         break;
       case "updateOverlay":
-        t.overlays = t.overlays.map((o, i) => (i === op.index ? { ...o, ...op.patch } : o));
+        t.overlays = t.overlays.map((o, i) => {
+          if (i !== op.index) return o;
+          const { animationPreset, animations, ...rest } = op.patch ?? {};
+          const next = { ...o };
+          if (rest.text !== undefined) next.text = String(rest.text);
+          if (rest.startSeconds !== undefined) next.startSeconds = clampNum(rest.startSeconds, next.startSeconds, 0);
+          if (rest.endSeconds !== undefined) next.endSeconds = clampNum(rest.endSeconds, next.endSeconds, 0);
+          if (rest.position !== undefined && ["top", "center", "bottom"].includes(rest.position)) next.position = rest.position;
+          if (rest.fontSize !== undefined) next.fontSize = clampNum(rest.fontSize, next.fontSize, 1);
+          if (rest.color !== undefined && typeof rest.color === "string") next.color = rest.color;
+          const anim = sanitizeAnimations(animations);
+          if (anim) next.animations = anim;
+          else if (animations !== undefined) delete next.animations; // 设 {} 清空动画
+          if (animationPreset !== undefined) {
+            const dur = Math.max(0.1, next.endSeconds - next.startSeconds);
+            const expanded = animationPreset && animationPreset !== "none" ? expandAnimationPreset(animationPreset, dur) : undefined;
+            if (expanded) next.animations = expanded;
+            else delete next.animations;
+          }
+          return next;
+        });
         break;
       case "setMeta":
         Object.assign(t.meta, sanitizeMetaPatch(op.patch ?? op));
