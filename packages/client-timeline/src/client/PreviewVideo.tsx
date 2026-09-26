@@ -11,6 +11,7 @@ import {
 } from 'remotion';
 import { clipBox, type AudioClip, type Clip, type Timeline } from '../../../engine/src/schema';
 import { injectFontFaceStyle, overlayFontFamily } from '../../../engine/src/fonts';
+import { API_BASE } from './api';
 
 // 与 engine 的 TimelineVideo 同渲染逻辑（v2 多轨），但 src 直接用（面板侧先转绝对 URL），
 // 不走 staticFile——官方壳里没有 remotion public 目录概念。
@@ -91,7 +92,7 @@ export const PreviewVideo: React.FC<{ timeline: Timeline }> = ({ timeline }) => 
   const { fps } = useVideoConfig();
   const [mainTrack, ...overlayTracks] = timeline.videoTracks;
   React.useEffect(() => {
-    injectFontFaceStyle();
+    injectFontFaceStyle(`${API_BASE}/fonts`); // 面板 origin 是 dsh 宿主，必须显式指到引擎
   }, []);
   return (
     <AbsoluteFill style={{ backgroundColor: '#000' }}>

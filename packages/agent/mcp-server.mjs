@@ -2,8 +2,29 @@
 // dsh agent 通过它修改时间线；本进程只做校验+转发到 webui 后端收集，run 结束后由前端统一下发执行。
 import readline from "node:readline";
 import fs from "node:fs";
+import path from "node:path";
 
-const WEBUI = process.env.DJIAN_WEBUI_URL || "http://127.0.0.1:5180";
+// 后端端口发现链（启动器 portAutoBump 后实际端口可能不是 5180）：
+// 显式 DJIAN_WEBUI_URL → 启动器注入的 DSHL_SERVICE_PORTS JSON → 引擎落盘的
+// engine-port.json（本进程 cwd=profile 根；HOME 场景再查 ~/.djian）→ 默认 5180。
+// 每次调用重解析：端口文件在引擎重启后会被覆写，缓存会拿到旧端口。
+function webui() {
+  if (process.env.DJIAN_WEBUI_URL) return process.env.DJIAN_WEBUI_URL.replace(/\/+$/, "");
+  try {
+    const map = JSON.parse(process.env.DSHL_SERVICE_PORTS || "{}");
+    const p = Number(map["djian-engine"]);
+    if (p > 0) return `http://127.0.0.1:${p}`;
+  } catch { /* 非法 JSON 忽略 */ }
+  const candidates = [path.join(process.cwd(), ".djian", "engine-port.json")];
+  if (process.env.HOME) candidates.push(path.join(process.env.HOME, ".djian", "engine-port.json"));
+  for (const f of candidates) {
+    try {
+      const p = Number(JSON.parse(fs.readFileSync(f, "utf-8"))?.port);
+      if (p > 0) return `http://127.0.0.1:${p}`;
+    } catch { /* 文件不存在或尚未写入 */ }
+  }
+  return "http://127.0.0.1:5180";
+}
 
 const NUM = { type: "number" };
 const PATCH = {
@@ -151,7 +172,7 @@ function send(msg) {
 async function forwardOps(ops) {
   let res;
   try {
-    res = await fetch(`${WEBUI}/api/internal/ops`, {
+    res = await fetch(`${webui()}/api/internal/ops`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ops }),
@@ -160,13 +181,13 @@ async function forwardOps(ops) {
   } catch (e) {
     // 网络在请求或响应阶段中断：操作可能已生效（服务端可能已落盘但响应丢失）。
     // 探测后如实告知模型，让它先核对再补差，防止整批重发造成重复添加。
-    const reachable = await fetch(`${WEBUI}/api/health`, { signal: AbortSignal.timeout(3_000) })
+    const reachable = await fetch(`${webui()}/api/health`, { signal: AbortSignal.timeout(3_000) })
       .then((r) => r.ok)
       .catch(() => false);
     if (reachable) {
       throw new Error("网络在响应阶段中断，操作可能已经生效：请先用 get_timeline 核对当前状态，缺什么补什么，切勿整批重发（可能重复添加）");
     }
-    throw new Error("无法连接 D剪 后端（127.0.0.1:5180）：引擎可能正在启动或重启，请稍后重试");
+    throw new Error(`无法连接 D剪 后端（${webui()}）：引擎可能正在启动或重启，请稍后重试`);
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `webui HTTP ${res.status}`);
@@ -175,7 +196,7 @@ async function forwardOps(ops) {
 
 async function fetchTimeline() {
   const go = () =>
-    fetch(`${WEBUI}/api/internal/timeline`, { signal: AbortSignal.timeout(10_000) }).then(async (res) => {
+    fetch(`${webui()}/api/internal/timeline`, { signal: AbortSignal.timeout(10_000) }).then(async (res) => {
       if (!res.ok) throw new Error(`webui HTTP ${res.status}`);
       return res.json();
     });
@@ -190,7 +211,7 @@ async function fetchTimeline() {
 // 通用 GET/POST JSON（项目/素材工具用）
 async function apiJson(pathname, body) {
   const go = async () => {
-    const res = await fetch(`${WEBUI}${pathname}`, {
+    const res = await fetch(`${webui()}${pathname}`, {
       method: body === undefined ? "GET" : "POST",
       headers: body === undefined ? {} : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -209,7 +230,7 @@ async function apiJson(pathname, body) {
 }
 
 async function fetchFrame(seconds) {
-  const res = await fetch(`${WEBUI}/api/internal/frame`, {
+  const res = await fetch(`${webui()}/api/internal/frame`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ seconds }),

@@ -1291,4 +1291,8 @@ const server = http.createServer(async (req, res) => {
 server.keepAliveTimeout = 0;
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`djian webui server on :${PORT} (ai=${AI_READY}, model=${MODEL}, engine=dsh-sdk)`);
+  // 端口落盘：启动器 portAutoBump 后实际端口可能不是 5180，MCP/面板按此文件（或 DSHL_SERVICE_PORTS env）发现真实端口
+  try {
+    fs.writeFileSync(path.join(DJIAN_HOME, "engine-port.json"), JSON.stringify({ port: PORT, pid: process.pid, startedAt: new Date().toISOString() }));
+  } catch { /* 数据目录不可写不应阻断启动 */ }
 });

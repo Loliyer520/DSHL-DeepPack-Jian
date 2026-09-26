@@ -30,7 +30,39 @@ window.__ModuleLoader__.load({
 		react = __toESM(react, 1);
 		let react_jsx_runtime = require("react/jsx-runtime");
 		//#region src/client/api.ts
-		const API_BASE = typeof window !== "undefined" && window.location ? `${window.location.protocol}//${window.location.hostname}:5180` : "http://127.0.0.1:5180";
+		const DEFAULT_PORT = 5180;
+		const PORT_CACHE_KEY = "djian.enginePort";
+		const hostBase = () => typeof window !== "undefined" && window.location ? `${window.location.protocol}//${window.location.hostname}` : "http://127.0.0.1";
+		let API_BASE = (() => {
+			try {
+				const cached = Number(window.localStorage.getItem(PORT_CACHE_KEY));
+				if (cached > 0) return `${hostBase()}:${cached}`;
+			} catch {}
+			return `${hostBase()}:${DEFAULT_PORT}`;
+		})();
+		let discovery = null;
+		function ensureEngineBase() {
+			if (typeof window === "undefined") return Promise.resolve();
+			discovery ?? (discovery = (async () => {
+				let cached = 0;
+				try {
+					cached = Number(window.localStorage.getItem(PORT_CACHE_KEY));
+				} catch {}
+				const candidates = cached > 0 ? [cached] : [];
+				for (let p = DEFAULT_PORT; p <= 5190; p++) if (!candidates.includes(p)) candidates.push(p);
+				for (const p of candidates) try {
+					if ((await fetch(`${hostBase()}:${p}/api/health`, { signal: AbortSignal.timeout(1500) })).ok) {
+						try {
+							window.localStorage.setItem(PORT_CACHE_KEY, String(p));
+						} catch {}
+						API_BASE = `${hostBase()}:${p}`;
+						return;
+					}
+				} catch {}
+			})());
+			return discovery;
+		}
+		ensureEngineBase();
 		async function searchLibrary(q, kind, page) {
 			const r = await fetch(`${API_BASE}/api/library/search?q=${encodeURIComponent(q)}&type=${kind}&page=${page}`);
 			const d = await r.json().catch(() => ({}));

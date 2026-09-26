@@ -17,7 +17,27 @@ import readline from "node:readline";
 import fs from "node:fs";
 import path from "node:path";
 
-const SERVER = (process.env.MEDIA_SERVER_URL || "http://127.0.0.1:5180").replace(/\/+$/, "");
+// D剪 服务端口发现链（启动器 portAutoBump 后实际端口可能不是 5180）：
+// 显式 MEDIA_SERVER_URL → 启动器注入的 DSHL_SERVICE_PORTS JSON → 引擎落盘的
+// engine-port.json（本进程 cwd=profile 根；HOME 场景再查 ~/.djian）→ 默认 5180。
+// 每次调用重解析：端口文件在引擎重启后会被覆写，缓存会拿到旧端口。
+function resolveServerBase() {
+  if (process.env.MEDIA_SERVER_URL) return process.env.MEDIA_SERVER_URL.replace(/\/+$/, "");
+  try {
+    const map = JSON.parse(process.env.DSHL_SERVICE_PORTS || "{}");
+    const p = Number(map["djian-engine"]);
+    if (p > 0) return `http://127.0.0.1:${p}`;
+  } catch { /* 非法 JSON 忽略 */ }
+  const candidates = [path.join(process.cwd(), ".djian", "engine-port.json")];
+  if (process.env.HOME) candidates.push(path.join(process.env.HOME, ".djian", "engine-port.json"));
+  for (const f of candidates) {
+    try {
+      const p = Number(JSON.parse(fs.readFileSync(f, "utf-8"))?.port);
+      if (p > 0) return `http://127.0.0.1:${p}`;
+    } catch { /* 文件不存在或尚未写入 */ }
+  }
+  return "http://127.0.0.1:5180";
+}
 const FALLBACK_DIR = process.env.MEDIA_DOWNLOAD_DIR || path.resolve(process.cwd(), "media-downloads");
 const OPENVERSE = "https://api.openverse.org/v1";
 const UA = "mcp-media-library/0.1";
@@ -78,7 +98,7 @@ async function downloadMedia({ url, name, kind }) {
   if (!/^https?:\/\//i.test(String(url))) throw new Error("url 必须是 http(s) 直链");
   // 优先：D剪 服务端入库（自动进当前项目 assets + invalidateBundle）
   try {
-    const r = await fetch(`${SERVER}/api/library/import`, {
+    const r = await fetch(`${resolveServerBase()}/api/library/import`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url, name, kind }),

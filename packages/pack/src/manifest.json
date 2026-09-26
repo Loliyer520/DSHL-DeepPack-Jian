@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "type": "profile",
   "name": "djian",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "displayName": {
     "zh-CN": "D剪 · AI 视频剪辑工作台",
     "en-US": "Djian · AI Video Editing Workbench"
@@ -45,6 +45,7 @@
         "NODE_USE_ENV_PROXY": "1"
       },
       "port": 5180,
+      "portAutoBump": true,
       "healthPath": "/api/health",
       "readyTimeoutMs": 120000,
       "required": true

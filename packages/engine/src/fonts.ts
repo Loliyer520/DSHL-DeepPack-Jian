@@ -23,16 +23,22 @@ export const fontById = (id: string | undefined): DjianFont | undefined => FONTS
 // 系统兜底栈：字体缺字/未设 fontFamily 时回落
 export const FALLBACK_STACK = '"Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif';
 
-export const fontsBaseUrl = (): string => {
+// 字体伺服 base：显式 base 参数（面板按 API_BASE 传）> DJIAN_FONTS_BASE env >
+// 浏览器同源相对路径 "/fonts"（渲染 bundle 由 webui 本身伺服，同源即天然连对端口；
+// 面板 origin 是 dsh 宿主，不能用它）> Node 兜底 5180。
+export const fontsBaseUrl = (base?: string): string => {
+  if (base) return base.replace(/\/+$/, "");
   const envBase = typeof process !== "undefined" ? (process.env as { DJIAN_FONTS_BASE?: string }).DJIAN_FONTS_BASE : undefined;
-  return envBase || "http://127.0.0.1:5180/fonts";
+  if (envBase) return envBase.replace(/\/+$/, "");
+  if (typeof window !== "undefined" && window.location) return "/fonts"; // 同源相对：渲染 bundle 由 webui 伺服，天然连对端口
+  return "http://127.0.0.1:5180/fonts";
 };
 
-export function fontFaceCss(): string {
-  const base = fontsBaseUrl();
+export function fontFaceCss(base?: string): string {
+  const b = fontsBaseUrl(base);
   return FONTS.map(
     (f) =>
-      `@font-face{font-family:"${f.family}";src:url("${base}/${f.file}") format("woff2");font-weight:${f.weights};font-display:block;}`,
+      `@font-face{font-family:"${f.family}";src:url("${b}/${f.file}") format("woff2");font-weight:${f.weights};font-display:block;}`,
   ).join("\n");
 }
 
@@ -43,11 +49,12 @@ export const overlayFontFamily = (id: string | undefined): string => {
 };
 
 // 浏览器环境把 @font-face 注入 document（渲染 bundle 与面板预览共用；幂等）
+// base 缺省时：渲染 bundle（origin=webui）走同源 "/fonts"；面板应显式传 `${API_BASE}/fonts`
 let styleInjected = false;
-export const injectFontFaceStyle = (): void => {
+export const injectFontFaceStyle = (base?: string): void => {
   if (styleInjected || typeof document === "undefined") return;
   styleInjected = true;
   const style = document.createElement("style");
-  style.textContent = fontFaceCss();
+  style.textContent = fontFaceCss(base);
   document.head.appendChild(style);
 };

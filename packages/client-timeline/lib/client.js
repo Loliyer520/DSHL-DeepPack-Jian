@@ -20069,25 +20069,136 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		];
 		const fontById = (id) => FONTS.find((f) => f.id === id);
 		const FALLBACK_STACK = "\"Noto Sans CJK SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif";
-		const fontsBaseUrl = () => {
-			return (typeof process !== "undefined" ? process.env.DJIAN_FONTS_BASE : void 0) || "http://127.0.0.1:5180/fonts";
+		const fontsBaseUrl = (base) => {
+			if (base) return base.replace(/\/+$/, "");
+			const envBase = typeof process !== "undefined" ? process.env.DJIAN_FONTS_BASE : void 0;
+			if (envBase) return envBase.replace(/\/+$/, "");
+			if (typeof window !== "undefined" && window.location) return "/fonts";
+			return "http://127.0.0.1:5180/fonts";
 		};
-		function fontFaceCss() {
-			const base = fontsBaseUrl();
-			return FONTS.map((f) => `@font-face{font-family:"${f.family}";src:url("${base}/${f.file}") format("woff2");font-weight:${f.weights};font-display:block;}`).join("\n");
+		function fontFaceCss(base) {
+			const b = fontsBaseUrl(base);
+			return FONTS.map((f) => `@font-face{font-family:"${f.family}";src:url("${b}/${f.file}") format("woff2");font-weight:${f.weights};font-display:block;}`).join("\n");
 		}
 		const overlayFontFamily = (id) => {
 			const f = fontById(id);
 			return f ? `"${f.family}", ${FALLBACK_STACK}` : FALLBACK_STACK;
 		};
 		let styleInjected = false;
-		const injectFontFaceStyle = () => {
+		const injectFontFaceStyle = (base) => {
 			if (styleInjected || typeof document === "undefined") return;
 			styleInjected = true;
 			const style = document.createElement("style");
-			style.textContent = fontFaceCss();
+			style.textContent = fontFaceCss(base);
 			document.head.appendChild(style);
 		};
+		//#endregion
+		//#region src/client/api.ts
+		const DEFAULT_PORT = 5180;
+		const PORT_CACHE_KEY = "djian.enginePort";
+		const hostBase = () => typeof window !== "undefined" && window.location ? `${window.location.protocol}//${window.location.hostname}` : "http://127.0.0.1";
+		let API_BASE = (() => {
+			try {
+				const cached = Number(window.localStorage.getItem(PORT_CACHE_KEY));
+				if (cached > 0) return `${hostBase()}:${cached}`;
+			} catch {}
+			return `${hostBase()}:${DEFAULT_PORT}`;
+		})();
+		let exportDownloadUrl = `${API_BASE}/api/export/download`;
+		let discovery = null;
+		function ensureEngineBase() {
+			if (typeof window === "undefined") return Promise.resolve();
+			discovery ?? (discovery = (async () => {
+				let cached = 0;
+				try {
+					cached = Number(window.localStorage.getItem(PORT_CACHE_KEY));
+				} catch {}
+				const candidates = cached > 0 ? [cached] : [];
+				for (let p = DEFAULT_PORT; p <= 5190; p++) if (!candidates.includes(p)) candidates.push(p);
+				for (const p of candidates) try {
+					if ((await fetch(`${hostBase()}:${p}/api/health`, { signal: AbortSignal.timeout(1500) })).ok) {
+						try {
+							window.localStorage.setItem(PORT_CACHE_KEY, String(p));
+						} catch {}
+						API_BASE = `${hostBase()}:${p}`;
+						exportDownloadUrl = `${API_BASE}/api/export/download`;
+						return;
+					}
+				} catch {}
+			})());
+			return discovery;
+		}
+		ensureEngineBase();
+		const assetUrl = (src) => /^(?:[a-z]+:)?\/\//i.test(src) ? src : `${API_BASE}/${src.replace(/^\/+/, "")}`;
+		async function getTimeline(sessionId, peek = false) {
+			const q = sessionId ? `?session=${encodeURIComponent(sessionId)}${peek ? "&peek=1" : ""}` : "";
+			const r = await fetch(`${API_BASE}/api/internal/timeline${q}`);
+			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+			return r.json();
+		}
+		async function putTimeline(t, sessionId) {
+			const r = await fetch(`${API_BASE}/api/internal/timeline`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(sessionId ? {
+					timeline: t,
+					sessionId
+				} : t)
+			});
+			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+		}
+		async function getExportStatus() {
+			return (await fetch(`${API_BASE}/api/export/status`)).json();
+		}
+		async function startExportWith(timeline, opts) {
+			const r = await fetch(`${API_BASE}/api/export`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					timeline,
+					scale: opts.scale ?? 1,
+					quality: opts.quality ?? "standard"
+				})
+			});
+			if (r.status !== 202) {
+				const d = await r.json().catch(() => ({}));
+				throw new Error(d.error ?? `HTTP ${r.status}`);
+			}
+		}
+		async function sessionProject(sessionId) {
+			const r = await fetch(`${API_BASE}/api/session-project`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ sessionId })
+			});
+			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+			return (await r.json()).project ?? null;
+		}
+		async function listFonts() {
+			const r = await fetch(`${API_BASE}/api/fonts`);
+			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+			return (await r.json()).fonts ?? [];
+		}
+		async function listAssets() {
+			const r = await fetch(`${API_BASE}/api/assets`);
+			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+			return (await r.json()).assets ?? [];
+		}
+		async function uploadAsset(file) {
+			const r = await fetch(`${API_BASE}/api/assets?name=${encodeURIComponent(file.name)}`, {
+				method: "POST",
+				headers: { "Content-Type": "application/octet-stream" },
+				body: file
+			});
+			const d = await r.json().catch(() => ({}));
+			if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
+			return d;
+		}
+		async function deleteAsset(name) {
+			const r = await fetch(`${API_BASE}/api/assets/${encodeURIComponent(name)}`, { method: "DELETE" });
+			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+		}
+		const assetThumbUrl = (name) => `${API_BASE}/api/assets/${encodeURIComponent(name)}/thumb`;
 		//#endregion
 		//#region src/client/PreviewVideo.tsx
 		const SEC = (fps, s) => Math.round(s * fps);
@@ -20170,7 +20281,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			const { fps } = useVideoConfig();
 			const [mainTrack, ...overlayTracks] = timeline.videoTracks;
 			react.default.useEffect(() => {
-				injectFontFaceStyle();
+				injectFontFaceStyle(`${API_BASE}/fonts`);
 			}, []);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(AbsoluteFill, {
 				style: { backgroundColor: "#000" },
@@ -20216,80 +20327,6 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		const seekToSeconds = (seconds, fps) => {
 			playerBus.ref?.seekTo(Math.round(seconds * fps));
 		};
-		//#endregion
-		//#region src/client/api.ts
-		const API_BASE = typeof window !== "undefined" && window.location ? `${window.location.protocol}//${window.location.hostname}:5180` : "http://127.0.0.1:5180";
-		const assetUrl = (src) => /^(?:[a-z]+:)?\/\//i.test(src) ? src : `${API_BASE}/${src.replace(/^\/+/, "")}`;
-		async function getTimeline(sessionId, peek = false) {
-			const q = sessionId ? `?session=${encodeURIComponent(sessionId)}${peek ? "&peek=1" : ""}` : "";
-			const r = await fetch(`${API_BASE}/api/internal/timeline${q}`);
-			if (!r.ok) throw new Error(`HTTP ${r.status}`);
-			return r.json();
-		}
-		async function putTimeline(t, sessionId) {
-			const r = await fetch(`${API_BASE}/api/internal/timeline`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(sessionId ? {
-					timeline: t,
-					sessionId
-				} : t)
-			});
-			if (!r.ok) throw new Error(`HTTP ${r.status}`);
-		}
-		async function getExportStatus() {
-			return (await fetch(`${API_BASE}/api/export/status`)).json();
-		}
-		const exportDownloadUrl = `${API_BASE}/api/export/download`;
-		async function startExportWith(timeline, opts) {
-			const r = await fetch(`${API_BASE}/api/export`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					timeline,
-					scale: opts.scale ?? 1,
-					quality: opts.quality ?? "standard"
-				})
-			});
-			if (r.status !== 202) {
-				const d = await r.json().catch(() => ({}));
-				throw new Error(d.error ?? `HTTP ${r.status}`);
-			}
-		}
-		async function sessionProject(sessionId) {
-			const r = await fetch(`${API_BASE}/api/session-project`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ sessionId })
-			});
-			if (!r.ok) throw new Error(`HTTP ${r.status}`);
-			return (await r.json()).project ?? null;
-		}
-		async function listFonts() {
-			const r = await fetch(`${API_BASE}/api/fonts`);
-			if (!r.ok) throw new Error(`HTTP ${r.status}`);
-			return (await r.json()).fonts ?? [];
-		}
-		async function listAssets() {
-			const r = await fetch(`${API_BASE}/api/assets`);
-			if (!r.ok) throw new Error(`HTTP ${r.status}`);
-			return (await r.json()).assets ?? [];
-		}
-		async function uploadAsset(file) {
-			const r = await fetch(`${API_BASE}/api/assets?name=${encodeURIComponent(file.name)}`, {
-				method: "POST",
-				headers: { "Content-Type": "application/octet-stream" },
-				body: file
-			});
-			const d = await r.json().catch(() => ({}));
-			if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
-			return d;
-		}
-		async function deleteAsset(name) {
-			const r = await fetch(`${API_BASE}/api/assets/${encodeURIComponent(name)}`, { method: "DELETE" });
-			if (!r.ok) throw new Error(`HTTP ${r.status}`);
-		}
-		const assetThumbUrl = (name) => `${API_BASE}/api/assets/${encodeURIComponent(name)}/thumb`;
 		//#endregion
 		//#region src/client/useHistory.ts
 		function useHistory(timeline, mutate) {

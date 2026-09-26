@@ -98,8 +98,8 @@
         command: node
         # 可移植路径（B2）：相对 dsh 进程 cwd；契约 = 启动器以 profile 根为 cwd 启动 dsh（开发态 cwd=/my/own/djian，workspaces 链接同名解析）
         args: ['./node_modules/@djian/agent/mcp-server.mjs']
-        env:
-          DJIAN_WEBUI_URL: http://127.0.0.1:5180
+        # 不写死 DJIAN_WEBUI_URL：端口由发现链解析（DSHL_SERVICE_PORTS env →
+        # .djian/engine-port.json → 5180），启动器 portAutoBump 后也能连对
         # 工具调用超时（默认 60s=-32001）：get_frame 冷打包 ~20s+浏览器，留 180s 余量
         toolCallTimeoutMs: 180000
 
@@ -118,9 +118,10 @@
         command: node
         args: ['./node_modules/@djian/mcp-media-library/server.mjs']
         env:
-          MEDIA_SERVER_URL: http://127.0.0.1:5180
           # Openverse 直连外网：用户机须走 HTTP(S)_PROXY（子进程继承父 env），Node fetch 要此开关才用代理
           NODE_USE_ENV_PROXY: "1"
+        # 不写死 MEDIA_SERVER_URL：端口由发现链解析（DSHL_SERVICE_PORTS env →
+        # .djian/engine-port.json → 5180），启动器 portAutoBump 后也能连对
         # download_media 经 webui 代理下载，慢链路下 60s 默认超时会截断
         toolCallTimeoutMs: 180000
 
