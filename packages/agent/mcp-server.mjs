@@ -5,22 +5,29 @@ import fs from "node:fs";
 import path from "node:path";
 
 // 后端端口发现链（启动器 portAutoBump 后实际端口可能不是 5180）：
-// 显式 DJIAN_WEBUI_URL → 启动器注入的 DSHL_SERVICE_PORTS JSON → 引擎落盘的
-// engine-port.json（本进程 cwd=profile 根；HOME 场景再查 ~/.djian）→ 默认 5180。
+// 显式 DJIAN_WEBUI_URL → 启动器注入的 DSHL_SERVICE_PORTS JSON → profile 根
+// .dshl-service-ports.json（启动器写的全服务契约）→ 引擎自落盘的
+// engine-port.json（cwd=profile 根；HOME 场景再查 ~/.djian）→ 默认 5180。
 // 每次调用重解析：端口文件在引擎重启后会被覆写，缓存会拿到旧端口。
 function webui() {
   if (process.env.DJIAN_WEBUI_URL) return process.env.DJIAN_WEBUI_URL.replace(/\/+$/, "");
+  const fromMap = (map) => {
+    const p = Number(map?.["djian-engine"] ?? map?.port);
+    return p > 0 ? `http://127.0.0.1:${p}` : null;
+  };
   try {
-    const map = JSON.parse(process.env.DSHL_SERVICE_PORTS || "{}");
-    const p = Number(map["djian-engine"]);
-    if (p > 0) return `http://127.0.0.1:${p}`;
+    const viaEnv = fromMap(JSON.parse(process.env.DSHL_SERVICE_PORTS || "{}"));
+    if (viaEnv) return viaEnv;
   } catch { /* 非法 JSON 忽略 */ }
-  const candidates = [path.join(process.cwd(), ".djian", "engine-port.json")];
-  if (process.env.HOME) candidates.push(path.join(process.env.HOME, ".djian", "engine-port.json"));
-  for (const f of candidates) {
+  const files = [
+    path.join(process.cwd(), ".dshl-service-ports.json"),
+    path.join(process.cwd(), ".djian", "engine-port.json"),
+  ];
+  if (process.env.HOME) files.push(path.join(process.env.HOME, ".djian", "engine-port.json"));
+  for (const f of files) {
     try {
-      const p = Number(JSON.parse(fs.readFileSync(f, "utf-8"))?.port);
-      if (p > 0) return `http://127.0.0.1:${p}`;
+      const viaFile = fromMap(JSON.parse(fs.readFileSync(f, "utf-8")));
+      if (viaFile) return viaFile;
     } catch { /* 文件不存在或尚未写入 */ }
   }
   return "http://127.0.0.1:5180";
