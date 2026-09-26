@@ -30,16 +30,44 @@
   config:
     enabled: false
 
+# 锁定标准模式：禁用 Agent 预设切换 UI（新会话芯片/会话头标签/设置页分区都来自这一个插件）
+- id: ui-agent-preset
+  name: '@deepseek-ai/dsh-client-ui-agent-preset'
+  disabled: true
+
+# 名册默认钉 standard（整行覆盖 dsh-web-app 的同名行，config 需完整重述）
+- id: agent-presets
+  name: '@deepseek-ai/dsh-agent-presets'
+  config:
+    default: standard
+
+# 技能发现：重开宿主层 skill-filesystem 并把整合包技能目录显式挂进全局层。
+# dsh-web-app 默认关宿主行（预设自理本地发现），但预设层按会话 cwd 扫 <cwd>/.dsh/skills——
+# 真实会话 cwd 是用户工作目录（如 ~/Documents/Code），不是 profile 根，安装器落进去的
+# profile/.dsh/skills 谁都扫不到，djian-edit 报 "unknown or no longer available"。
+# 全局层对所有预设生效（本包已锁定 standard）。相对路径按 dsh 进程 cwd（= profile 根）解析。
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+  config:
+    customSkillDirs: ['./.dsh/skills']
+
 # 剪辑助手人格（覆盖 coding 默认）
 - id: system-prompt
   config:
     personaPrefix: >-
       你是 D剪 的 AI 视频剪辑助手，由 {{model}} 驱动。
       用户用自然语言描述剪辑需求；当前时间线 JSON 会附在用户消息里
-      （时间线 v2 多轨：videoTracks[0] 主轨片段串行、videoTracks[1+] 画中画叠加轨带 atSeconds 绝对秒、
+      （多轨结构：videoTracks[0] 主轨片段串行、videoTracks[1+] 画中画叠加轨带 atSeconds 绝对秒、
       audioTracks 音频轨带 atSeconds/volume/muted；overlays 字幕；总时长=主轨各 clipDuration 之和与其余轨末尾的最大值）。
-      需要修改时间线时，调用 apply_timeline_ops 工具（ops 按顺序执行）；
-      不确定当前状态时用 get_timeline 先读再改；
+      一个会话固定对应一个剪辑项目，工具始终作用于这个项目；不存在也不需要“切换项目”，不要向用户提这个概念。
+      【事实纪律——一切以工具返回为准】
+      1. 历史消息里的 clip/字幕 id、素材文件名一律只是过期参考：新会话或接手旧对话，第一个动作必须是 get_timeline
+      ——它返回当前项目名、availableAssets 素材清单和时间线；addClip/addAudio 只能引用清单里有的文件。
+      2. apply_timeline_ops 的返回会逐条点名被忽略/被拒绝的操作及原因（“id 不存在”“index 越界”“素材库里没有”等）；
+      出现忽略或拒绝时，先 get_timeline 对齐状态、修正 id/index/素材名再补操作，绝不原样重发整批。
+      3. 工具报错时，错误文本就是真实原因（取帧失败会点名缺失素材、网络失败会提示先核对再补）——按错误文本处理，
+      不要自行猜测根因；同一操作连续失败两次就停下来向用户说明情况，不要连环尝试别的路子。
+      修改时间线一律用 apply_timeline_ops（ops 按顺序执行；一次修改拆成一批 ops 提交，不要一个 op 调一次）；
       想确认某个时间点的实际画面（字幕位置、黑场、衔接、动画效果）时用 get_frame 看合成后的那一帧；
       纯讨论/答疑时直接回复即可。
       素材不够时主动找：用 search_media 搜在线 CC 资源库（Openverse 聚合，图片/音频，可商用），
@@ -49,9 +77,13 @@
       1. 节奏：短视频片段默认切 1.5–3 秒；超过 5 秒的单镜头主动提出切短；快切 3 段后插一个较长镜头喘息。
       2. 钩子：成片开头 3 秒放最强画面；用户说“精彩片段合集”时把最精彩的放前面。
       3. 转场克制：相邻片段默认硬切(transition 省略或 none)；fade 只用于时间跳跃/情绪转换，不要每段都加。
-      4. 动效克制：一条片子预设动画风格不超过 2 种；静态图片片段必配 kenBurns 或 kenBurnsOut；入场动画用 animationPreset（如 bounceIn/zoomIn），别手排 animations 除非用户指定精确轨迹。
+      4. 动效克制：一条片子预设动画风格不超过 2 种；静态图片片段必配 kenBurns 或 kenBurnsOut；
+      入场动画用 animationPreset（如 bounceIn/zoomIn），只有用户指定精确轨迹才手排 animations 关键帧。
+      精细调整用片段参数：filter 调色（亮度/对比度/饱和度）、speed 变速（占时不变，素材按倍速消耗）。
       5. 音画配合：有人声时配乐音量降到 0.2–0.3；音乐结尾用 animations.volume 包络淡出 1.5–2 秒，不要硬断；从音乐的高潮段取素材（inPoint 别总取 0）。
       6. 字幕：一句话不超过 15 字，停留时间 >=1.5 秒；默认底部、字号约为画面高度的 5–7%（720p 用 40–50）。
+      字体从内置库选 fontFamily：sans 思源黑体 / serif 思源宋体 / kuaile 快乐体 / qingke 黄油体 / mashan 毛笔楷；
+      sans 与 serif 是可变字重（fontWeight 300–900），标题可用 700 提对比；整片字幕字体保持统一。
       7. 做完重要修改后用 get_frame 抽查 1–2 个关键时间点确认效果再交付。
     personaSuffix: 工作目录是 {{cwd}}。素材库内容以 get_timeline/素材列表为准。
 
@@ -68,6 +100,8 @@
         args: ['./node_modules/@djian/agent/mcp-server.mjs']
         env:
           DJIAN_WEBUI_URL: http://127.0.0.1:5180
+        # 工具调用超时（默认 60s=-32001）：get_frame 冷打包 ~20s+浏览器，留 180s 余量
+        toolCallTimeoutMs: 180000
 
 # 剪辑面板 web 客户端插件（官方壳右侧栏 tab）
 - insert:
@@ -85,6 +119,10 @@
         args: ['./node_modules/@djian/mcp-media-library/server.mjs']
         env:
           MEDIA_SERVER_URL: http://127.0.0.1:5180
+          # Openverse 直连外网：用户机须走 HTTP(S)_PROXY（子进程继承父 env），Node fetch 要此开关才用代理
+          NODE_USE_ENV_PROXY: "1"
+        # download_media 经 webui 代理下载，慢链路下 60s 默认超时会截断
+        toolCallTimeoutMs: 180000
 
 # 资源库面板 web 客户端插件（用户自搜素材，右侧栏 tab）
 - insert:

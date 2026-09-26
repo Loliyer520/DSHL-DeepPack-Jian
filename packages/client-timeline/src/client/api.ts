@@ -9,17 +9,21 @@ export const API_BASE =
 export const assetUrl = (src: string) =>
   /^(?:[a-z]+:)?\/\//i.test(src) ? src : `${API_BASE}/${src.replace(/^\/+/, '')}`;
 
-export async function getTimeline<T>(): Promise<T> {
-  const r = await fetch(`${API_BASE}/api/internal/timeline`);
+// peek=1：隐藏面板的窥探轮询——服务端只读本会话项目，不翻动全局 current（防多会话串项目）
+export async function getTimeline<T>(sessionId?: string, peek = false): Promise<T> {
+  const q = sessionId
+    ? `?session=${encodeURIComponent(sessionId)}${peek ? '&peek=1' : ''}`
+    : '';
+  const r = await fetch(`${API_BASE}/api/internal/timeline${q}`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
-export async function putTimeline(t: unknown): Promise<void> {
+export async function putTimeline(t: unknown, sessionId?: string): Promise<void> {
   const r = await fetch(`${API_BASE}/api/internal/timeline`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(t),
+    body: JSON.stringify(sessionId ? { timeline: t, sessionId } : t),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
 }
@@ -63,6 +67,30 @@ export async function startExportWith(timeline: unknown, opts: { scale?: number;
 }
 
 // ---- 项目管理 ----
+// 会话=项目：面板挂载时绑定（幂等），返回该 dsh 会话固定使用的项目
+export async function sessionProject(sessionId: string): Promise<ProjectInfo | null> {
+  const r = await fetch(`${API_BASE}/api/session-project`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const d = (await r.json()) as { project?: ProjectInfo };
+  return d.project ?? null;
+}
+
+// 内置字幕字体（与 engine fonts.ts 同源，经 webui /api/fonts 提供）
+export interface DjianFontInfo {
+  id: 'sans' | 'serif' | 'kuaile' | 'qingke' | 'mashan' | string;
+  label: string;
+  variable: boolean;
+}
+export async function listFonts(): Promise<DjianFontInfo[]> {
+  const r = await fetch(`${API_BASE}/api/fonts`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return ((await r.json()) as { fonts: DjianFontInfo[] }).fonts ?? [];
+}
+
 export interface ProjectInfo {
   id: string;
   name: string;

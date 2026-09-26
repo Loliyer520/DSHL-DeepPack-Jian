@@ -2,6 +2,7 @@ import { bundle } from "@remotion/bundler";
 import { renderMedia, renderStill, selectComposition } from "@remotion/renderer";
 import path from "node:path";
 import fs from "node:fs";
+import crypto from "node:crypto";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { parseTimeline, timelineDurationInFrames, type Timeline } from "./schema.js";
@@ -49,38 +50,50 @@ const assetsSignature = (dir: string): string => {
   }
 };
 
-// webpack 磁盘缓存的 buildDependencies 按内容哈希判失效：把引擎 src 挂进去，
-// 热补丁/升级只换 src 不清缓存时 bundle 也不会再吃旧代码（2026-09-25 字幕动画事故）
+// webpack 磁盘缓存不能靠 buildDependencies 失效：Remotion 在 webpackOverride 之后才组装
+// cache 配置（computeHashAndFinalConfig 整体覆盖 cache 键），override 里塞的东西会被丢弃；
+// 且引擎 src 位于 node_modules 下，webpack managedPaths 视为不可变，换 src 不触发重编译。
+// （2026-09-25 热补丁事故：0.1.7 的 buildDependencies 方案实测无效，bundle 仍出旧代码）
+// 改为打包前按 src 内容签名手动清缓存目录。
 const srcDir = path.resolve(engineDir, "../src");
-const srcBuildDeps = (): string[] => {
+const webpackCacheDir = path.resolve(engineDir, "../node_modules/.cache/webpack");
+const srcSignature = (): string => {
   try {
     return fs
       .readdirSync(srcDir)
       .filter((f) => /\.(ts|tsx)$/.test(f))
-      .map((f) => path.join(srcDir, f))
-      .sort();
+      .map((f) => {
+        const st = fs.statSync(path.join(srcDir, f));
+        return `${f}:${st.size}:${crypto.createHash("md5").update(fs.readFileSync(path.join(srcDir, f))).digest("hex")}`;
+      })
+      .sort()
+      .join("|");
   } catch {
-    return [];
+    return "";
   }
+};
+const ensureFreshWebpackCache = (): void => {
+  const sig = srcSignature();
+  if (!sig) return;
+  const marker = path.join(webpackCacheDir, ".djian-src-sig");
+  try {
+    if (fs.readFileSync(marker, "utf8") === sig) return;
+  } catch {
+    /* 标记缺失视为过期 */
+  }
+  fs.rmSync(webpackCacheDir, { recursive: true, force: true });
+  fs.mkdirSync(webpackCacheDir, { recursive: true });
+  fs.writeFileSync(marker, sig);
 };
 
 async function getBundle(assetsDir: string, onLog?: (m: string) => void): Promise<string> {
   const sig = assetsSignature(assetsDir);
   if (bundleCache && bundleCache.assetsDir === assetsDir && bundleCache.sig === sig) return bundleCache.url;
+  ensureFreshWebpackCache();
   const url = await bundle({
     entryPoint,
     publicDir: assetsDir,
     onProgress: () => {},
-    webpackOverride: (config) => {
-      if (config.cache && typeof config.cache === "object") {
-        const deps = (config.cache as { buildDependencies?: string[] }).buildDependencies ?? [];
-        return {
-          ...config,
-          cache: { ...config.cache, buildDependencies: [...deps, ...srcBuildDeps()] },
-        } as unknown as typeof config;
-      }
-      return config;
-    },
   });
   bundleCache = { assetsDir, sig, url };
   return url;

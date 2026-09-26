@@ -10,6 +10,7 @@ import {
   useVideoConfig,
 } from 'remotion';
 import { clipBox, type AudioClip, type Clip, type Timeline } from '../../../engine/src/schema';
+import { injectFontFaceStyle, overlayFontFamily } from '../../../engine/src/fonts';
 
 // 与 engine 的 TimelineVideo 同渲染逻辑（v2 多轨），但 src 直接用（面板侧先转绝对 URL），
 // 不走 staticFile——官方壳里没有 remotion public 目录概念。
@@ -89,6 +90,9 @@ const AudioSegment: React.FC<{ clip: AudioClip; trackVolume: number; muted: bool
 export const PreviewVideo: React.FC<{ timeline: Timeline }> = ({ timeline }) => {
   const { fps } = useVideoConfig();
   const [mainTrack, ...overlayTracks] = timeline.videoTracks;
+  React.useEffect(() => {
+    injectFontFaceStyle();
+  }, []);
   return (
     <AbsoluteFill style={{ backgroundColor: '#000' }}>
       <Series>
@@ -120,7 +124,8 @@ export const PreviewVideo: React.FC<{ timeline: Timeline }> = ({ timeline }) => 
                   textAlign: 'center',
                   fontSize: ov.fontSize,
                   color: ov.color,
-                  fontFamily: '"Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif',
+                  fontFamily: overlayFontFamily(ov.fontFamily),
+                  ...(ov.fontWeight ? { fontWeight: ov.fontWeight } : {}),
                   textShadow: '0 2px 8px rgba(0,0,0,0.85)',
                 }}
               >

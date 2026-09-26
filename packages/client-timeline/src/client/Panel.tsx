@@ -10,7 +10,7 @@ import {
 import { ANIMATION_PRESETS, expandAnimationPreset } from '../../../engine/src/presets';
 import { PreviewVideo } from './PreviewVideo';
 import { playerBus, seekToSeconds } from './bus';
-import { assetUrl, getTimeline, putTimeline, uploadAsset, type AssetInfo } from './api';
+import { assetUrl, getTimeline, listFonts, putTimeline, uploadAsset, type AssetInfo, type DjianFontInfo } from './api';
 import { useHistory } from './useHistory';
 import { ProjectBar } from './ProjectBar';
 import { CanvasDialog } from './CanvasDialog';
@@ -21,7 +21,10 @@ import { HistoryDialog } from './HistoryDialog';
 const fmtSec = (s: number) => `${s.toFixed(1)}s`;
 
 // ---------- 时间线同步：2s 轮询服务端（干净时），本地编辑防抖 600ms 写回 ----------
-function useTimelineSync() {
+// sessionId：dsh 会话 id。轮询带过去 = 服务端幂等绑定「会话→项目」并自动切换到该项目
+// 面板不可见时降级为 peek 轮询：只读本会话项目，不让服务端翻动全局 current——
+// 否则多个挂着的面板（后台会话）互相把 current 来回翻，AI 的 ops 会落到别的项目上。
+function useTimelineSync(sessionId?: string, rootRef?: React.RefObject<HTMLElement | null>) {
   const [timeline, setTimeline] = useState<Timeline | null>(null);
   const serverJson = useRef('');
   const dirty = useRef(false);
@@ -31,10 +34,17 @@ function useTimelineSync() {
   useEffect(() => {
     let stop = false;
     let timer = 0;
+    // document.hidden 覆盖独立 webview 最小化/切走；offsetParent 覆盖同文档里 CSS 隐藏的后台面
+    const isVisible = () => {
+      if (typeof document !== 'undefined' && document.hidden) return false;
+      const el = rootRef?.current;
+      if (el && el.offsetParent === null && el.getClientRects().length === 0) return false;
+      return true;
+    };
     const tick = async () => {
       if (!dirty.current) {
         try {
-          const t = await getTimeline<Timeline>();
+          const t = await getTimeline<Timeline>(sessionId, !isVisible());
           const j = JSON.stringify(t);
           if (!stop && j !== serverJson.current) {
             serverJson.current = j;
@@ -47,48 +57,57 @@ function useTimelineSync() {
       if (!stop) timer = window.setTimeout(tick, 2000);
     };
     void tick();
+    // webview 级可见性恢复时立刻补一轮（不等 2s 间隔，尽快把全局 current 拉回本会话项目）
+    const onVis = () => {
+      if (!document.hidden) void tick();
+    };
+    document.addEventListener('visibilitychange', onVis);
     return () => {
       stop = true;
       window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVis);
     };
-  }, []);
+  }, [sessionId]);
 
-  const mutate = useCallback((fn: (t: Timeline) => Timeline) => {
-    setTimeline((cur) => {
-      if (!cur) return cur;
-      const next = fn(cur);
-      dirty.current = true;
-      pendingPush.current = next;
-      if (pushTimer.current) window.clearTimeout(pushTimer.current);
-      pushTimer.current = window.setTimeout(() => {
-        const t = pendingPush.current;
-        if (!t) return;
-        putTimeline(t)
-          .then(() => {
-            serverJson.current = JSON.stringify(t);
-          })
-          .catch(() => {
-            // 写失败：标记回干净，让下一轮轮询拉回服务端版本
-          })
-          .finally(() => {
-            dirty.current = false;
-          });
-      }, 600);
-      return next;
-    });
-  }, []);
+  const mutate = useCallback(
+    (fn: (t: Timeline) => Timeline) => {
+      setTimeline((cur) => {
+        if (!cur) return cur;
+        const next = fn(cur);
+        dirty.current = true;
+        pendingPush.current = next;
+        if (pushTimer.current) window.clearTimeout(pushTimer.current);
+        pushTimer.current = window.setTimeout(() => {
+          const t = pendingPush.current;
+          if (!t) return;
+          putTimeline(t, sessionId)
+            .then(() => {
+              serverJson.current = JSON.stringify(t);
+            })
+            .catch(() => {
+              // 写失败：标记回干净，让下一轮轮询拉回服务端版本
+            })
+            .finally(() => {
+              dirty.current = false;
+            });
+        }, 600);
+        return next;
+      });
+    },
+    [sessionId],
+  );
 
-  // 项目切换后强制重拉（绕过 dirty 与缓存比较）
+  // 会话切换（= 换项目）或外部修改后强制重拉（绕过 dirty 与缓存比较）
   const reload = useCallback(async () => {
     try {
-      const t = await getTimeline<Timeline>();
+      const t = await getTimeline<Timeline>(sessionId);
       serverJson.current = JSON.stringify(t);
       dirty.current = false;
       setTimeline(t);
     } catch {
       // 静默
     }
-  }, []);
+  }, [sessionId]);
 
   return { timeline, mutate, reload };
 }
@@ -287,25 +306,30 @@ const FILTER_PRESETS: { label: string; filter: Exclude<Clip['filter'], undefined
 ];
 
 // 动画预设下拉：展开成关键帧落库（存储层不存预设名）；「无动画」清空 animations
+// duration/anims 由调用方给：视频 clip 与字幕 overlay 共用
 const ANIM_GROUPS = ['入场', '出场', '组合', '循环'] as const;
-const AnimSelect: React.FC<{ clip: Clip; onCommit: (anims: Clip['animations']) => void }> = ({ clip, onCommit }) => (
+const AnimSelect: React.FC<{
+  duration: number;
+  anims?: Clip['animations'];
+  onCommit: (anims: Clip['animations']) => void;
+}> = ({ duration, anims, onCommit }) => (
   <select
     className="djp-select"
     value=""
-    title={clip.animations ? '动画（已生效，可换或清除）' : '动画'}
+    title={anims ? '动画（已生效，可换或清除）' : '动画'}
     onChange={(e) => {
       const key = e.target.value;
       if (key === '__clear') {
         onCommit({});
         return;
       }
-      const anims = expandAnimationPreset(key, clip.clipDuration ?? 1);
-      if (anims) onCommit(anims);
+      const expanded = expandAnimationPreset(key, duration ?? 1);
+      if (expanded) onCommit(expanded);
       e.target.value = '';
     }}
   >
     <option value="">✨ 动画…</option>
-    {clip.animations && Object.keys(clip.animations).length > 0 && <option value="__clear">✕ 清除动画</option>}
+    {anims && Object.keys(anims).length > 0 && <option value="__clear">✕ 清除动画</option>}
     {ANIM_GROUPS.map((g) => (
       <optgroup key={g} label={g}>
         {Object.entries(ANIMATION_PRESETS)
@@ -696,15 +720,39 @@ const TrackStrip: React.FC<{
 };
 
 // ---------- 主面板 ----------
-export const Panel: React.FC = () => {
-  const { timeline, mutate, reload } = useTimelineSync();
+export const Panel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const { timeline, mutate, reload } = useTimelineSync(sessionId, rootRef);
   const hist = useHistory(timeline, mutate);
+  const prevSession = useRef(sessionId);
+  useEffect(() => {
+    // 会话切换（= 换项目）：历史栈按新项目清空重来
+    if (sessionId !== prevSession.current) {
+      prevSession.current = sessionId;
+      hist.clear();
+      void reload();
+    }
+  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
   const o = ops(hist.commit);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [histOpen, setHistOpen] = useState(false);
   const [tab, setTab] = useState<'assets' | 'clips' | 'pip' | 'audio' | 'subs'>('clips');
+  const [fonts, setFonts] = useState<DjianFontInfo[]>([]);
   const audioFileRef = useRef<HTMLInputElement>(null);
   const playheadRef = useRef(0);
+
+  // 内置字体列表（字幕下拉用；引擎没起就空列表，走系统字体）
+  useEffect(() => {
+    let stop = false;
+    listFonts()
+      .then((f) => {
+        if (!stop) setFonts(f);
+      })
+      .catch(() => {});
+    return () => {
+      stop = true;
+    };
+  }, []);
 
   // 快捷键：Ctrl+Z/Shift+Z/Y 撤销重做；空格 播放/暂停；S 分割；←/→ ±1s（Shift ±0.1s）（输入框聚焦时不抢）
   const splitRef = useRef<() => void>(() => {});
@@ -735,7 +783,7 @@ export const Panel: React.FC = () => {
   }, [hist.undo, hist.redo, timeline?.meta.fps]);
 
   if (!timeline) {
-    return <div className="djp-root"><div className="djp-empty">连接剪辑引擎中…（5180）</div></div>;
+    return <div className="djp-root" ref={rootRef}><div className="djp-empty">连接剪辑引擎中…（5180）</div></div>;
   }
   const t = timeline;
   const durationInFrames = Math.max(1, timelineDurationInFrames(t));
@@ -841,8 +889,8 @@ export const Panel: React.FC = () => {
   };
 
   return (
-    <div className="djp-root">
-      <ProjectBar onSwitched={() => { hist.clear(); void reload(); }} />
+    <div className="djp-root" ref={rootRef}>
+      <ProjectBar sessionId={sessionId} />
       <div className="djp-head">
         <span className="djp-title">剪辑</span>
         <button className="djp-iconbtn" title="撤销（Ctrl+Z）" disabled={!hist.canUndo} onClick={hist.undo}>↺</button>
@@ -954,7 +1002,7 @@ export const Panel: React.FC = () => {
                   onCommit={(v) => o.updateClip(c.id, { speed: Math.min(10, Math.max(0.1, v)) })}
                 />
                 <FilterSelect value={c.filter} onCommit={(f) => o.updateClip(c.id, { filter: f })} />
-                <AnimSelect clip={c} onCommit={(anims) => o.updateClip(c.id, { animations: anims })} />
+                <AnimSelect duration={c.clipDuration} anims={c.animations} onCommit={(anims) => o.updateClip(c.id, { animations: anims })} />
               </div>
             </div>
           ))}
@@ -993,7 +1041,7 @@ export const Panel: React.FC = () => {
             <NumberField label="时长" value={c.clipDuration} min={0.1} onCommit={(v) => o.updateClip(c.id, { clipDuration: v })} />
             <NumberField label="速度" value={c.speed ?? 1} step={0.25} min={0.1} onCommit={(v) => o.updateClip(c.id, { speed: Math.min(10, Math.max(0.1, v)) })} />
             <FilterSelect value={c.filter} onCommit={(f) => o.updateClip(c.id, { filter: f })} />
-            <AnimSelect clip={c} onCommit={(anims) => o.updateClip(c.id, { animations: anims })} />
+            <AnimSelect duration={c.clipDuration} anims={c.animations} onCommit={(anims) => o.updateClip(c.id, { animations: anims })} />
             <button className="djp-btn" title="在播放头处分割" onClick={() => o.splitClip(c.id, Math.round(playheadRef.current * 100) / 100)}>✂</button>
             <button className="djp-del" title="删除画中画" onClick={() => o.removeClip(c.id)}>✕</button>
           </div>
@@ -1070,28 +1118,75 @@ export const Panel: React.FC = () => {
           <span>字幕</span>
           <button className="djp-add" title="添加字幕" onClick={o.addOverlay}>+</button>
         </div>
-        {t.overlays.length === 0 && <div className="djp-hint">无字幕</div>}
+        {t.overlays.length === 0 && <div className="djp-hint">无字幕——「+」加一条，或让 AI 配字幕</div>}
         {t.overlays.map((ov, i) => (
-          <div className="djp-card djp-overlay-row" key={i}>
-            <input
-              type="text"
-              defaultValue={ov.text}
-              key={ov.text + i}
-              onBlur={(e) => {
-                if (e.target.value !== ov.text) o.updateOverlay(i, { text: e.target.value });
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-              }}
-            />
-            <NumberField label="从" value={ov.startSeconds} onCommit={(v) => o.updateOverlay(i, { startSeconds: v })} />
-            <NumberField
-              label="到"
-              value={ov.endSeconds}
-              min={0.1}
-              onCommit={(v) => o.updateOverlay(i, { endSeconds: v })}
-            />
-            <button className="djp-del" title="删除字幕" onClick={() => o.removeOverlay(i)}>✕</button>
+          <div className="djp-card djp-sub-card" key={i}>
+            <div className="djp-card-head">
+              <span className="djp-idx">#{i + 1}</span>
+              <input
+                className="djp-sub-text"
+                type="text"
+                defaultValue={ov.text}
+                key={ov.text + i}
+                onBlur={(e) => {
+                  if (e.target.value !== ov.text) o.updateOverlay(i, { text: e.target.value });
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                }}
+              />
+              <button className="djp-del" title="删除字幕" onClick={() => o.removeOverlay(i)}>✕</button>
+            </div>
+            <div className="djp-fields">
+              <NumberField label="从" value={ov.startSeconds} onCommit={(v) => o.updateOverlay(i, { startSeconds: v })} />
+              <NumberField label="到" value={ov.endSeconds} min={0.1} onCommit={(v) => o.updateOverlay(i, { endSeconds: v })} />
+              <NumberField label="字号" value={ov.fontSize} min={8} onCommit={(v) => o.updateOverlay(i, { fontSize: v })} />
+              <select
+                className="djp-select"
+                value={ov.position}
+                onChange={(e) => o.updateOverlay(i, { position: e.target.value as Overlay['position'] })}
+                title="位置"
+              >
+                <option value="top">顶部</option>
+                <option value="center">居中</option>
+                <option value="bottom">底部</option>
+              </select>
+              <select
+                className="djp-select djp-fontsel"
+                value={ov.fontFamily ?? ''}
+                onChange={(e) => o.updateOverlay(i, { fontFamily: e.target.value || undefined })}
+                title="字体（清除 = 系统默认）"
+              >
+                <option value="">系统字体</option>
+                {fonts.map((f) => (
+                  <option key={f.id} value={f.id}>{f.label}</option>
+                ))}
+              </select>
+              {(fonts.find((f) => f.id === (ov.fontFamily ?? ''))?.variable) && (
+                <select
+                  className="djp-select"
+                  value={ov.fontWeight ?? 400}
+                  onChange={(e) => o.updateOverlay(i, { fontWeight: Number(e.target.value) })}
+                  title="字重"
+                >
+                  {[300, 400, 500, 700, 900].map((w) => (
+                    <option key={w} value={w}>{w}</option>
+                  ))}
+                </select>
+              )}
+              <label className="djp-color" title="颜色">
+                <input
+                  type="color"
+                  value={/^#[0-9a-fA-F]{6}$/.test(ov.color) ? ov.color : '#ffffff'}
+                  onChange={(e) => o.updateOverlay(i, { color: e.target.value })}
+                />
+              </label>
+              <AnimSelect
+                duration={Math.max(0.1, ov.endSeconds - ov.startSeconds)}
+                anims={ov.animations}
+                onCommit={(anims) => o.updateOverlay(i, { animations: anims })}
+              />
+            </div>
           </div>
         ))}
       </div>

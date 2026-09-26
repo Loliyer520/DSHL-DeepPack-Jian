@@ -46,7 +46,12 @@ export function apply(ctx: any) {
 
   ctx.slots.inject('sidebar.right.pane.tab', () =>
     ctx.slots.register(
-      { name: 'sidebar.right.pane.tab', key: 'djian.timeline' },
+      {
+        name: 'sidebar.right.pane.tab',
+        key: 'djian.timeline',
+        // 会话作用域槽位：注入工厂收 sessionId，会话=项目绑定的客户端侧入口
+        inject: (sessionId: string) => ({ sessionId }),
+      },
       Panel,
     ),
   );

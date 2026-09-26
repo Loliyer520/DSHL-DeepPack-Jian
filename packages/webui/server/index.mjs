@@ -5,11 +5,13 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { DeepSeekHarness } from "@deepseek-ai/dsh-sdk-client";
 import { execFileSync } from "node:child_process";
 import { renderFrame, renderVideo, invalidateBundle } from "@djian/engine/dist/render.js";
 import { parseTimeline } from "@djian/engine/dist/schema.js";
 import { expandAnimationPreset, listAnimationPresets } from "@djian/engine/dist/presets.js";
+import { FONTS, fontById } from "@djian/engine/dist/fonts.js";
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
 const PORT = Number(process.env.PORT || 5180);
@@ -17,6 +19,15 @@ const PORT = Number(process.env.PORT || 5180);
 // 这两种路径都不能依赖当前源码仓库的相对层级。
 const DJIAN = process.env.DJIAN_WORK || process.cwd();
 const PACK_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// 内置字体目录：vendor 安装态 = node_modules/@djian/engine/fonts，开发态经 workspaces 解析
+const FONTS_DIR = (() => {
+  try {
+    const require2 = createRequire(import.meta.url);
+    return path.join(path.dirname(require2.resolve("@djian/engine/package.json")), "fonts");
+  } catch {
+    return path.join(PACK_ROOT, "engine-fonts");
+  }
+})();
 const PATCH = process.env.DJIAN_PATCH ||
   (fs.existsSync(path.join(PACK_ROOT, "patch/cordis.patch.yml"))
     ? path.join(PACK_ROOT, "patch/cordis.patch.yml")
@@ -304,6 +315,8 @@ function normalizeOps(rawOps) {
           if (name === "reorderClips" && !Array.isArray(op.order)) throw new Error("缺少 order 数组");
           if (name === "addOverlay" && typeof op.text !== "string") throw new Error("缺少 text");
           if (name === "addAudio" && typeof op.src !== "string") throw new Error("addAudio 缺少 src");
+          if ((name === "addClip" || name === "addAudio") && typeof op.src === "string" && !fs.existsSync(path.join(assetsPath(currentProjectId()), op.src)))
+            throw new Error(`素材库里没有「${op.src}」（素材按项目隔离，其他项目的同名素材不通用）：先 asset_list 确认，缺了用 search_media/download_media 下载后再 addClip`);
           if (name === "updateAudioTrack" && (typeof op.id !== "string" || typeof op.patch !== "object")) throw new Error("updateAudioTrack 缺少 id/patch");
           if (name === "splitClip" && (typeof op.id !== "string" || !Number.isFinite(Number(op.atSeconds)))) throw new Error("splitClip 缺少 id/atSeconds");
           accepted.push(sanitizeOp(op));
@@ -323,6 +336,7 @@ function normalizeOps(rawOps) {
 const DJIAN_HOME = process.env.HOME ? path.join(process.env.HOME, ".djian") : path.join(DJIAN, ".djian");
 const PROJECTS_DIR = path.join(DJIAN_HOME, "projects");
 const CURRENT_FILE = path.join(DJIAN_HOME, "current");
+const SESSIONS_FILE = path.join(DJIAN_HOME, "sessions.json"); // dsh sessionId -> djian projectId（会话=项目）
 const LEGACY_TIMELINE = path.join(DJIAN_HOME, "timeline.json");
 const EMPTY_TIMELINE = { meta: { fps: 30, width: 1280, height: 720 }, videoTracks: [{ id: "v1", name: "主轨道", clips: [] }], audioTracks: [], overlays: [], version: 2 };
 
@@ -331,6 +345,14 @@ const newProjectId = () => "p" + Date.now().toString(36) + Math.random().toStrin
 const projectDir = (id) => path.join(PROJECTS_DIR, id);
 const timelinePath = (id) => path.join(projectDir(id), "timeline.json");
 const assetsPath = (id) => path.join(projectDir(id), "assets");
+// 时间线引用了当前项目素材库中不存在的 src 时，渲染会以误导性的「Format error」失败——收集出来供报错提示
+const collectMissingAssets = (timeline) => {
+  const dir = assetsPath(currentProjectId());
+  const srcs = new Set();
+  for (const tr of timeline.videoTracks ?? []) for (const c of tr.clips) if (c.src) srcs.add(c.src);
+  for (const tr of timeline.audioTracks ?? []) for (const c of tr.clips) if (c.src) srcs.add(c.src);
+  return [...srcs].filter((s) => !fs.existsSync(path.join(dir, String(s))));
+};
 const thumbsPath = (id) => path.join(projectDir(id), ".thumbs");
 
 function readProjectMeta(id) {
@@ -389,10 +411,63 @@ function currentProjectId() {
   setCurrentProject(nid);
   return nid;
 }
+// ---- 会话=项目绑定（每个 dsh 会话固定一个 djian 项目；面板按 sessionId 自动切换） ----
+function sessionProjects() {
+  try {
+    const m = JSON.parse(fs.readFileSync(SESSIONS_FILE, "utf8"));
+    return m && typeof m === "object" && !Array.isArray(m) ? m : {};
+  } catch {
+    return {};
+  }
+}
+function saveSessionProjects(map) {
+  try {
+    fs.mkdirSync(DJIAN_HOME, { recursive: true });
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(map, null, 2));
+  } catch (e) {
+    console.warn("sessions.json 写入失败:", e.message);
+  }
+}
+// 幂等：已绑定 → 切到该项目；未绑定 → 继承未被占用的当前项目，否则新建。
+// switchCurrent=false 时只建/取绑定，不翻动全局 current 与 lastTimeline（隐藏面板 peek）。
+// 返回绑定的项目 id（switchCurrent 时保证全局 current 已对齐、lastTimeline 已重载）。
+function ensureSessionProject(sessionId, { switchCurrent = true } = {}) {
+  const sid = sanitizeId(sessionId);
+  if (!sid) return currentProjectId();
+  const map = sessionProjects();
+  const bound = map[sid];
+  if (bound && fs.existsSync(timelinePath(bound))) {
+    if (switchCurrent && bound !== currentProjectId()) {
+      setCurrentProject(bound);
+      lastTimeline = loadTimelineFile();
+    }
+    return bound;
+  }
+  const cur = currentProjectId();
+  const taken = new Set(Object.values(map));
+  let id;
+  if (!taken.has(cur)) {
+    id = cur; // 首个会话直接继承现有项目（老用户数据不丢）
+  } else {
+    id = createProject(`剪辑 ${new Date().toISOString().slice(0, 10)}`);
+    if (switchCurrent) lastTimeline = structuredClone(EMPTY_TIMELINE);
+  }
+  map[sid] = id;
+  saveSessionProjects(map);
+  if (switchCurrent && id !== cur) setCurrentProject(id);
+  return id;
+}
+
 function loadTimelineFile() {
   try {
     // v1 磁盘数据经 parseTimeline 自动归一化成 v2（clips → 主轨道，audio → 音频轨）
     return parseTimeline(JSON.parse(fs.readFileSync(timelinePath(currentProjectId()), "utf8")));
+  } catch { return null; }
+}
+// 按项目 id 直读（不翻动全局 current/lastTimeline）——隐藏面板的 peek 轮询用
+function loadTimelineFor(id) {
+  try {
+    return parseTimeline(JSON.parse(fs.readFileSync(timelinePath(id), "utf8")));
   } catch { return null; }
 }
 function persistTimeline(t) {
@@ -449,6 +524,7 @@ const clampNum = (v, fb, min = -Infinity, max = Infinity) =>
 // 与 webui store 的剪辑原语同语义，直接落在 lastTimeline 上并持久化
 function applyOpsToTimeline(ops) {
   const t = lastTimeline ?? structuredClone(EMPTY_TIMELINE);
+  const ignored = []; // 格式合法但没产生效果的操作（id 不存在、index 越界、切点太靠边）——上报给模型，防止它以为改成功了
   const mainTrack = () => t.videoTracks[0];
   const findVideoClip = (id) => {
     for (const tr of t.videoTracks) {
@@ -503,9 +579,11 @@ function applyOpsToTimeline(ops) {
         break;
       }
       case "removeClip": {
+        const before = t.videoTracks.reduce((n, tr) => n + tr.clips.length, 0);
         for (const tr of t.videoTracks) tr.clips = tr.clips.filter((c) => c.id !== op.id);
         // 空的叠加轨顺手清掉（主轨道保留）
         t.videoTracks = t.videoTracks.filter((tr, i) => i === 0 || tr.clips.length > 0);
+        if (t.videoTracks.reduce((n, tr) => n + tr.clips.length, 0) === before) ignored.push({ op: "removeClip", id: op.id, reason: "id 不存在" });
         break;
       }
       case "updateClip": {
@@ -527,12 +605,16 @@ function applyOpsToTimeline(ops) {
             if (expanded) target.animations = expanded;
             else delete target.animations; // ""/none = 清除动画
           }
+        } else {
+          ignored.push({ op: "updateClip", id: op.id, reason: "id 不存在（视频/音频轨均无此 clip）" });
         }
         break;
       }
       case "reorderClips": {
         const tr = mainTrack();
         const map = new Map(tr.clips.map((c) => [c.id, c]));
+        const unknown = op.order.filter((id) => !map.has(id));
+        if (unknown.length) ignored.push({ op: "reorderClips", id: unknown.join(","), reason: `order 含不存在的 id：${unknown.join("、")}` });
         const next = op.order.map((id) => map.get(id)).filter(Boolean);
         tr.clips = [...next, ...tr.clips.filter((c) => !op.order.includes(c.id))];
         break;
@@ -561,8 +643,10 @@ function applyOpsToTimeline(ops) {
         break;
       }
       case "removeAudio": {
+        const before = t.audioTracks.reduce((n, tr) => n + tr.clips.length, 0);
         for (const tr of t.audioTracks) tr.clips = tr.clips.filter((c) => c.id !== op.id);
         t.audioTracks = t.audioTracks.filter((tr) => tr.clips.length > 0);
+        if (t.audioTracks.reduce((n, tr) => n + tr.clips.length, 0) === before) ignored.push({ op: "removeAudio", id: op.id, reason: "id 不存在" });
         break;
       }
       case "updateAudioTrack": {
@@ -573,6 +657,8 @@ function applyOpsToTimeline(ops) {
             if (op.patch.muted !== undefined) tr.muted = Boolean(op.patch.muted);
             if (op.patch.name !== undefined && typeof op.patch.name === "string") tr.name = op.patch.name.slice(0, 30);
           }
+        } else {
+          ignored.push({ op: "updateAudioTrack", id: op.id, reason: "音频轨不存在" });
         }
         break;
       }
@@ -601,7 +687,10 @@ function applyOpsToTimeline(ops) {
             start = clip.atSeconds ?? 0;
           }
           const off = at - start;
-          if (!(off > 0.05) || off >= clip.clipDuration - 0.05) break; // 切点太靠边，忽略
+          if (!(off > 0.05) || off >= clip.clipDuration - 0.05) {
+            ignored.push({ op: "splitClip", id: op.id, reason: `切点太靠边（须落在片段内部，两侧各留 0.05s；片段占时 ${clip.clipDuration}s）` });
+            break;
+          }
           const left = { ...clip, clipDuration: off };
           const right = {
             ...clip,
@@ -616,7 +705,10 @@ function applyOpsToTimeline(ops) {
         } else if (hitA) {
           const { track, clip } = hitA;
           const off = at - clip.atSeconds;
-          if (!(off > 0.05) || off >= clip.duration - 0.05) break;
+          if (!(off > 0.05) || off >= clip.duration - 0.05) {
+            ignored.push({ op: "splitClip", id: op.id, reason: `切点太靠边（须落在片段内部，两侧各留 0.05s）` });
+            break;
+          }
           const left = { ...clip, duration: off };
           const right = {
             ...clip,
@@ -628,6 +720,8 @@ function applyOpsToTimeline(ops) {
           if (clip.animations) right.animations = shiftAnims(clip.animations, off);
           const idx = track.clips.findIndex((c) => c.id === clip.id);
           track.clips.splice(idx, 1, left, right);
+        } else {
+          ignored.push({ op: "splitClip", id: op.id, reason: "id 不存在（视频/音频轨均无此 clip）" });
         }
         break;
       }
@@ -639,6 +733,8 @@ function applyOpsToTimeline(ops) {
           position: ["top", "center", "bottom"].includes(op.position) ? op.position : "bottom",
           fontSize: clampNum(op.fontSize, 48, 1),
           color: typeof op.color === "string" ? op.color : "#ffffff",
+          ...(fontById(op.fontFamily) ? { fontFamily: op.fontFamily } : {}),
+          ...(Number.isInteger(op.fontWeight) ? { fontWeight: Math.min(900, Math.max(100, op.fontWeight)) } : {}),
         };
         const oanim = sanitizeAnimations(op.animations);
         if (oanim) ov.animations = oanim;
@@ -650,9 +746,14 @@ function applyOpsToTimeline(ops) {
         break;
       }
       case "removeOverlay":
-        t.overlays = t.overlays.filter((_, i) => i !== op.index);
+        if (op.index < 0 || op.index >= t.overlays.length) ignored.push({ op: "removeOverlay", index: op.index, reason: t.overlays.length === 0 ? "index 越界（当前没有任何字幕）" : `index 越界（当前 0..${t.overlays.length - 1}）` });
+        else t.overlays = t.overlays.filter((_, i) => i !== op.index);
         break;
       case "updateOverlay":
+        if (op.index < 0 || op.index >= t.overlays.length) {
+          ignored.push({ op: "updateOverlay", index: op.index, reason: t.overlays.length === 0 ? "index 越界（当前没有任何字幕）" : `index 越界（当前 0..${t.overlays.length - 1}）` });
+          break;
+        }
         t.overlays = t.overlays.map((o, i) => {
           if (i !== op.index) return o;
           const { animationPreset, animations, ...rest } = op.patch ?? {};
@@ -663,6 +764,14 @@ function applyOpsToTimeline(ops) {
           if (rest.position !== undefined && ["top", "center", "bottom"].includes(rest.position)) next.position = rest.position;
           if (rest.fontSize !== undefined) next.fontSize = clampNum(rest.fontSize, next.fontSize, 1);
           if (rest.color !== undefined && typeof rest.color === "string") next.color = rest.color;
+          if (rest.fontFamily !== undefined) {
+            if (fontById(rest.fontFamily)) next.fontFamily = rest.fontFamily;
+            else delete next.fontFamily; // ""/未知 id = 清除，回系统默认
+          }
+          if (rest.fontWeight !== undefined) {
+            if (Number.isFinite(Number(rest.fontWeight))) next.fontWeight = Math.min(900, Math.max(100, Math.round(Number(rest.fontWeight))));
+            else delete next.fontWeight;
+          }
           const anim = sanitizeAnimations(animations);
           if (anim) next.animations = anim;
           else if (animations !== undefined) delete next.animations; // 设 {} 清空动画
@@ -682,6 +791,7 @@ function applyOpsToTimeline(ops) {
   }
   lastTimeline = t;
   persistTimeline(t);
+  return ignored;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -712,17 +822,24 @@ const server = http.createServer(async (req, res) => {
     const body = JSON.parse(await readBody(req));
     const { accepted, rejected } = normalizeOps(body.ops);
     pendingOps.push(...accepted);
+    let ignored = [];
     if (accepted.length) {
       // AI 改时间线前自动快照（历史/ 可回溯）
       saveSnapshot(`AI: ${accepted.map((o) => o.op).join(", ")}`);
-      applyOpsToTimeline(accepted); // 服务端直接落时间线（事实源）
+      ignored = applyOpsToTimeline(accepted); // 服务端直接落时间线（事实源）；返回没生效的操作
     }
-    return json(res, 200, { accepted: accepted.length, rejected });
+    const pid = currentProjectId();
+    return json(res, 200, { accepted: accepted.length, ignored, rejected, project: { id: pid, name: listProjects().find((p) => p.id === pid)?.name } });
   }
 
   // 动画预设列表（面板下拉用）
   if (url.pathname === "/api/animation-presets" && req.method === "GET") {
     return json(res, 200, { presets: listAnimationPresets() });
+  }
+
+  // 内置字体列表（面板/MCP 参考）
+  if (url.pathname === "/api/fonts" && req.method === "GET") {
+    return json(res, 200, { fonts: FONTS.map(({ id, label, weights }) => ({ id, label, variable: weights.includes(" ") })) });
   }
 
   // 版本历史：列表 / 恢复（恢复前对当前状态保底快照，可来回切）
@@ -745,14 +862,23 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // MCP server 读当前时间线
+  // MCP server 读当前时间线；面板轮询带 ?session= → 幂等绑定会话→项目并自动切换。
+  // peek=1（隐藏面板）：只读本会话项目，不翻动全局 current——否则多个挂着的面板互相把
+  // current 来回翻，MCP ops（跟全局 current 走）会落到别的项目上（2026-09-25 串项目事故）。
   if (url.pathname === "/api/internal/timeline" && req.method === "GET") {
+    const sid = url.searchParams.get("session");
+    if (sid) {
+      const peek = url.searchParams.get("peek") === "1";
+      const pid = ensureSessionProject(sid, { switchCurrent: !peek });
+      if (peek) return json(res, 200, loadTimelineFor(pid) ?? structuredClone(EMPTY_TIMELINE));
+    }
     return json(res, 200, lastTimeline ?? structuredClone(EMPTY_TIMELINE));
   }
 
   // 剪辑面板（官方壳插件）写回整份时间线：v1/v2 都收，归一化成 v2 存储
   if (url.pathname === "/api/internal/timeline" && req.method === "POST") {
     const body = JSON.parse(await readBody(req));
+    if (body?.sessionId) ensureSessionProject(body.sessionId);
     const t = body?.timeline ?? body;
     if (!t?.meta || !(Array.isArray(t.videoTracks) || Array.isArray(t.clips)) || !Array.isArray(t.overlays ?? [])) {
       return json(res, 400, { error: "时间线格式不正确" });
@@ -803,6 +929,37 @@ const server = http.createServer(async (req, res) => {
     setCurrentProject(id);
     lastTimeline = loadTimelineFile();
     return json(res, 200, { ok: true, current: id });
+  }
+
+  // 会话→项目绑定（面板挂载时调用；幂等）：返回该会话绑定的项目。
+  // 只建绑定、不翻动全局 current（切项目是面板可见轮询的职责，挂载可能发生在后台面板）
+  if (url.pathname === "/api/session-project" && req.method === "POST") {
+    const body = JSON.parse(await readBody(req));
+    const sid = sanitizeId(body?.sessionId);
+    if (!sid) return json(res, 400, { error: "缺少 sessionId" });
+    const id = ensureSessionProject(sid, { switchCurrent: false });
+    const p = listProjects().find((x) => x.id === id) ?? { id, name: id, createdAt: null, meta: null };
+    return json(res, 200, { ok: true, project: p });
+  }
+
+  // 内置字幕字体（engine/fonts/*.woff2；渲染浏览器与面板预览统一从这里拉）
+  const fontMatch = url.pathname.match(/^\/fonts\/([\w.-]+\.woff2)$/);
+  if (fontMatch) {
+    const font = FONTS.find((f) => f.file === fontMatch[1]);
+    const file = font && path.join(FONTS_DIR, font.file);
+    if (!file || !fs.existsSync(file)) return json(res, 404, { error: "字体不存在" });
+    const st = fs.statSync(file);
+    const etag = `"${st.size}-${Math.floor(st.mtimeMs)}"`;
+    if (req.headers["if-none-match"] === etag) return res.writeHead(304, { ETag: etag }).end();
+    res.writeHead(200, {
+      "Content-Type": "font/woff2",
+      "Content-Length": st.size,
+      "Cache-Control": "no-cache",
+      ETag: etag,
+      ...(res._aco ? { "Access-Control-Allow-Origin": res._aco } : {}),
+    });
+    fs.createReadStream(file).pipe(res);
+    return;
   }
 
   // ---- 素材库（当前项目 assets/）----
@@ -1001,7 +1158,8 @@ const server = http.createServer(async (req, res) => {
         stats,
       });
     } catch (e) {
-      return json(res, 500, { error: `取帧失败：${e.message}` });
+      const missing = collectMissingAssets(timeline);
+      return json(res, 500, { error: `取帧失败：${e.message}${missing.length ? `。时间线引用了当前项目素材库中不存在的文件：${missing.join("、")}（素材按项目隔离）——用 removeClip/removeAudio 删掉引用，或重新下载素材后再 addClip` : ""}` });
     }
   }
 
@@ -1128,6 +1286,9 @@ const server = http.createServer(async (req, res) => {
     .end("D剪引擎 API 服务（独立界面已下线，请从 dsh web 面板访问）");
 });
 
+// 不主动掐空闲 keep-alive 连接（默认 5s）：MCP 客户端在模型思考间隙复用连接时，
+// 会撞上服务端掐线竞态——请求已落盘生效但响应丢失，客户端报 fetch failed 且有整批重发风险。
+server.keepAliveTimeout = 0;
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`djian webui server on :${PORT} (ai=${AI_READY}, model=${MODEL}, engine=dsh-sdk)`);
 });

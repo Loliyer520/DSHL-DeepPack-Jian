@@ -16112,7 +16112,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		};
 		(0, react.forwardRef)(ThumbnailFn);
 		//#endregion
-		//#region ../engine/node_modules/.pnpm/zod@3.23.8/node_modules/zod/lib/index.mjs
+		//#region ../../node_modules/zod/lib/index.mjs
 		var util;
 		(function(util) {
 			util.assertEqual = (val) => val;
@@ -19827,7 +19827,10 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				"bottom"
 			]).default("bottom"),
 			fontSize: z.number().positive().default(64),
-			color: z.string().default("#ffffff")
+			color: z.string().default("#ffffff"),
+			fontFamily: z.string().optional(),
+			fontWeight: z.number().int().min(100).max(900).optional(),
+			animations: animationsSchema.optional()
 		});
 		const metaSchema = z.object({
 			fps: z.number().positive(),
@@ -19865,6 +19868,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				if (tr.muted) continue;
 				for (const c of tr.clips) frames = Math.max(frames, SEC$1(fps, c.atSeconds + c.duration));
 			}
+			for (const ov of t.overlays) frames = Math.max(frames, SEC$1(fps, ov.endSeconds));
 			return Math.max(1, frames);
 		};
 		//#endregion
@@ -20025,6 +20029,66 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			return p ? p.expand(Math.max(.1, dur)) : void 0;
 		};
 		//#endregion
+		//#region ../engine/src/fonts.ts
+		const FONTS = [
+			{
+				id: "sans",
+				label: "思源黑体",
+				family: "Djian Noto Sans SC",
+				file: "notosanssc.woff2",
+				weights: "100 900"
+			},
+			{
+				id: "serif",
+				label: "思源宋体",
+				family: "Djian Noto Serif SC",
+				file: "notoserifsc.woff2",
+				weights: "100 900"
+			},
+			{
+				id: "kuaile",
+				label: "快乐体",
+				family: "Djian ZCOOL KuaiLe",
+				file: "zcoolkuaile.woff2",
+				weights: "400"
+			},
+			{
+				id: "qingke",
+				label: "黄油体",
+				family: "Djian ZCOOL QingKe",
+				file: "zcoolqingke.woff2",
+				weights: "400"
+			},
+			{
+				id: "mashan",
+				label: "毛笔楷",
+				family: "Djian Ma Shan Zheng",
+				file: "mashanzheng.woff2",
+				weights: "400"
+			}
+		];
+		const fontById = (id) => FONTS.find((f) => f.id === id);
+		const FALLBACK_STACK = "\"Noto Sans CJK SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif";
+		const fontsBaseUrl = () => {
+			return (typeof process !== "undefined" ? process.env.DJIAN_FONTS_BASE : void 0) || "http://127.0.0.1:5180/fonts";
+		};
+		function fontFaceCss() {
+			const base = fontsBaseUrl();
+			return FONTS.map((f) => `@font-face{font-family:"${f.family}";src:url("${base}/${f.file}") format("woff2");font-weight:${f.weights};font-display:block;}`).join("\n");
+		}
+		const overlayFontFamily = (id) => {
+			const f = fontById(id);
+			return f ? `"${f.family}", ${FALLBACK_STACK}` : FALLBACK_STACK;
+		};
+		let styleInjected = false;
+		const injectFontFaceStyle = () => {
+			if (styleInjected || typeof document === "undefined") return;
+			styleInjected = true;
+			const style = document.createElement("style");
+			style.textContent = fontFaceCss();
+			document.head.appendChild(style);
+		};
+		//#endregion
 		//#region src/client/PreviewVideo.tsx
 		const SEC = (fps, s) => Math.round(s * fps);
 		const positionStyle = {
@@ -20105,6 +20169,9 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		const PreviewVideo = ({ timeline }) => {
 			const { fps } = useVideoConfig();
 			const [mainTrack, ...overlayTracks] = timeline.videoTracks;
+			react.default.useEffect(() => {
+				injectFontFaceStyle();
+			}, []);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(AbsoluteFill, {
 				style: { backgroundColor: "#000" },
 				children: [
@@ -20132,7 +20199,8 @@ Check that all your Remotion packages are on the same version. If your dependenc
 									textAlign: "center",
 									fontSize: ov.fontSize,
 									color: ov.color,
-									fontFamily: "\"Noto Sans CJK SC\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif",
+									fontFamily: overlayFontFamily(ov.fontFamily),
+									...ov.fontWeight ? { fontWeight: ov.fontWeight } : {},
 									textShadow: "0 2px 8px rgba(0,0,0,0.85)"
 								},
 								children: ov.text
@@ -20152,16 +20220,20 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		//#region src/client/api.ts
 		const API_BASE = typeof window !== "undefined" && window.location ? `${window.location.protocol}//${window.location.hostname}:5180` : "http://127.0.0.1:5180";
 		const assetUrl = (src) => /^(?:[a-z]+:)?\/\//i.test(src) ? src : `${API_BASE}/${src.replace(/^\/+/, "")}`;
-		async function getTimeline() {
-			const r = await fetch(`${API_BASE}/api/internal/timeline`);
+		async function getTimeline(sessionId, peek = false) {
+			const q = sessionId ? `?session=${encodeURIComponent(sessionId)}${peek ? "&peek=1" : ""}` : "";
+			const r = await fetch(`${API_BASE}/api/internal/timeline${q}`);
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 			return r.json();
 		}
-		async function putTimeline(t) {
+		async function putTimeline(t, sessionId) {
 			const r = await fetch(`${API_BASE}/api/internal/timeline`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(t)
+				body: JSON.stringify(sessionId ? {
+					timeline: t,
+					sessionId
+				} : t)
 			});
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 		}
@@ -20184,30 +20256,19 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				throw new Error(d.error ?? `HTTP ${r.status}`);
 			}
 		}
-		async function listProjects() {
-			const r = await fetch(`${API_BASE}/api/projects`);
-			if (!r.ok) throw new Error(`HTTP ${r.status}`);
-			return r.json();
-		}
-		async function createProject(name, meta) {
-			const r = await fetch(`${API_BASE}/api/projects`, {
+		async function sessionProject(sessionId) {
+			const r = await fetch(`${API_BASE}/api/session-project`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					name,
-					meta
-				})
+				body: JSON.stringify({ sessionId })
 			});
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
-			return r.json();
+			return (await r.json()).project ?? null;
 		}
-		async function switchProject(id) {
-			const r = await fetch(`${API_BASE}/api/current`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ id })
-			});
+		async function listFonts() {
+			const r = await fetch(`${API_BASE}/api/fonts`);
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+			return (await r.json()).fonts ?? [];
 		}
 		async function listAssets() {
 			const r = await fetch(`${API_BASE}/api/assets`);
@@ -20276,6 +20337,52 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		}
 		//#endregion
 		//#region src/client/ProjectBar.tsx
+		const ProjectBar = ({ sessionId }) => {
+			const [project, setProject] = (0, react.useState)(null);
+			(0, react.useEffect)(() => {
+				if (!sessionId) return;
+				let stop = false;
+				sessionProject(sessionId).then((p) => {
+					if (!stop) setProject(p);
+				}).catch(() => {});
+				return () => {
+					stop = true;
+				};
+			}, [sessionId]);
+			if (!project) return null;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "djp-projbar",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "djp-proj-icon",
+						"aria-hidden": true,
+						children: "▣"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "djp-proj-name",
+						title: project.id,
+						children: project.name
+					}),
+					project.meta && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "djp-proj-badge",
+						children: [
+							project.meta.width,
+							"×",
+							project.meta.height,
+							" · ",
+							project.meta.fps,
+							"fps"
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "djp-proj-tag",
+						children: "本会话项目"
+					})
+				]
+			});
+		};
+		//#endregion
+		//#region src/client/CanvasDialog.tsx
 		const CANVAS_PRESETS = [
 			{
 				key: "1080p",
@@ -20323,116 +20430,6 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				}
 			}
 		];
-		const ProjectBar = ({ onSwitched }) => {
-			const [projects, setProjects] = (0, react.useState)([]);
-			const [current, setCurrent] = (0, react.useState)("");
-			const [creating, setCreating] = (0, react.useState)(false);
-			const [name, setName] = (0, react.useState)("");
-			const [preset, setPreset] = (0, react.useState)("1080p");
-			const [busy, setBusy] = (0, react.useState)(false);
-			const refresh = async () => {
-				try {
-					const r = await listProjects();
-					setProjects(r.projects);
-					setCurrent(r.current);
-				} catch {}
-			};
-			(0, react.useEffect)(() => {
-				refresh();
-			}, []);
-			const onSwitch = async (id) => {
-				if (!id || id === current || busy) return;
-				setBusy(true);
-				try {
-					await switchProject(id);
-					setCurrent(id);
-					onSwitched();
-				} catch {} finally {
-					setBusy(false);
-				}
-			};
-			const onCreate = async () => {
-				if (busy) return;
-				setBusy(true);
-				try {
-					const p = CANVAS_PRESETS.find((x) => x.key === preset) ?? CANVAS_PRESETS[0];
-					await switchProject((await createProject(name.trim() || "未命名项目", p.meta)).id);
-					setCreating(false);
-					setName("");
-					await refresh();
-					onSwitched();
-				} catch {} finally {
-					setBusy(false);
-				}
-			};
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "djp-projbar",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "djp-proj-label",
-						children: "项目"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
-						className: "djp-select djp-proj-select",
-						value: current,
-						disabled: busy,
-						onChange: (e) => void onSwitch(e.target.value),
-						children: projects.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("option", {
-							value: p.id,
-							children: [p.name, p.meta ? `（${p.meta.width}×${p.meta.height}）` : ""]
-						}, p.id))
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						className: "djp-add",
-						title: "新建项目",
-						onClick: () => setCreating((v) => !v),
-						children: "+"
-					}),
-					creating && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "djp-pop djp-proj-new",
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-								type: "text",
-								placeholder: "项目名称",
-								value: name,
-								autoFocus: true,
-								onChange: (e) => setName(e.target.value),
-								onKeyDown: (e) => {
-									if (e.key === "Enter") onCreate();
-									if (e.key === "Escape") setCreating(false);
-								}
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
-								className: "djp-select",
-								value: preset,
-								onChange: (e) => setPreset(e.target.value),
-								children: CANVAS_PRESETS.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("option", {
-									value: p.key,
-									children: [
-										p.label,
-										"（",
-										p.meta.width,
-										"×",
-										p.meta.height,
-										"@",
-										p.meta.fps,
-										"）"
-									]
-								}, p.key))
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								className: "djp-export",
-								disabled: busy,
-								onClick: () => void onCreate(),
-								children: "创建"
-							})
-						]
-					})
-				]
-			});
-		};
-		//#endregion
-		//#region src/client/CanvasDialog.tsx
 		const CanvasDialog = ({ t, onApply, onClose }) => {
 			const [width, setWidth] = (0, react.useState)(t.meta.width);
 			const [height, setHeight] = (0, react.useState)(t.meta.height);
@@ -20916,7 +20913,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		//#endregion
 		//#region src/client/Panel.tsx
 		const fmtSec = (s) => `${s.toFixed(1)}s`;
-		function useTimelineSync() {
+		function useTimelineSync(sessionId, rootRef) {
 			const [timeline, setTimeline] = (0, react.useState)(null);
 			const serverJson = (0, react.useRef)("");
 			const dirty = (0, react.useRef)(false);
@@ -20925,9 +20922,15 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			(0, react.useEffect)(() => {
 				let stop = false;
 				let timer = 0;
+				const isVisible = () => {
+					if (typeof document !== "undefined" && document.hidden) return false;
+					const el = rootRef?.current;
+					if (el && el.offsetParent === null && el.getClientRects().length === 0) return false;
+					return true;
+				};
 				const tick = async () => {
 					if (!dirty.current) try {
-						const t = await getTimeline();
+						const t = await getTimeline(sessionId, !isVisible());
 						const j = JSON.stringify(t);
 						if (!stop && j !== serverJson.current) {
 							serverJson.current = j;
@@ -20937,11 +20940,16 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					if (!stop) timer = window.setTimeout(tick, 2e3);
 				};
 				tick();
+				const onVis = () => {
+					if (!document.hidden) tick();
+				};
+				document.addEventListener("visibilitychange", onVis);
 				return () => {
 					stop = true;
 					window.clearTimeout(timer);
+					document.removeEventListener("visibilitychange", onVis);
 				};
-			}, []);
+			}, [sessionId]);
 			return {
 				timeline,
 				mutate: (0, react.useCallback)((fn) => {
@@ -20954,7 +20962,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 						pushTimer.current = window.setTimeout(() => {
 							const t = pendingPush.current;
 							if (!t) return;
-							putTimeline(t).then(() => {
+							putTimeline(t, sessionId).then(() => {
 								serverJson.current = JSON.stringify(t);
 							}).catch(() => {}).finally(() => {
 								dirty.current = false;
@@ -20962,15 +20970,15 @@ Check that all your Remotion packages are on the same version. If your dependenc
 						}, 600);
 						return next;
 					});
-				}, []),
+				}, [sessionId]),
 				reload: (0, react.useCallback)(async () => {
 					try {
-						const t = await getTimeline();
+						const t = await getTimeline(sessionId);
 						serverJson.current = JSON.stringify(t);
 						dirty.current = false;
 						setTimeline(t);
 					} catch {}
-				}, [])
+				}, [sessionId])
 			};
 		}
 		const clipId = () => "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -21246,18 +21254,18 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			"组合",
 			"循环"
 		];
-		const AnimSelect = ({ clip, onCommit }) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+		const AnimSelect = ({ duration, anims, onCommit }) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
 			className: "djp-select",
 			value: "",
-			title: clip.animations ? "动画（已生效，可换或清除）" : "动画",
+			title: anims ? "动画（已生效，可换或清除）" : "动画",
 			onChange: (e) => {
 				const key = e.target.value;
 				if (key === "__clear") {
 					onCommit({});
 					return;
 				}
-				const anims = expandAnimationPreset(key, clip.clipDuration ?? 1);
-				if (anims) onCommit(anims);
+				const expanded = expandAnimationPreset(key, duration ?? 1);
+				if (expanded) onCommit(expanded);
 				e.target.value = "";
 			},
 			children: [
@@ -21265,7 +21273,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					value: "",
 					children: "✨ 动画…"
 				}),
-				clip.animations && Object.keys(clip.animations).length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+				anims && Object.keys(anims).length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
 					value: "__clear",
 					children: "✕ 清除动画"
 				}),
@@ -21674,15 +21682,34 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				]
 			});
 		};
-		const Panel = () => {
-			const { timeline, mutate, reload } = useTimelineSync();
+		const Panel = ({ sessionId }) => {
+			const rootRef = (0, react.useRef)(null);
+			const { timeline, mutate, reload } = useTimelineSync(sessionId, rootRef);
 			const hist = useHistory(timeline, mutate);
+			const prevSession = (0, react.useRef)(sessionId);
+			(0, react.useEffect)(() => {
+				if (sessionId !== prevSession.current) {
+					prevSession.current = sessionId;
+					hist.clear();
+					reload();
+				}
+			}, [sessionId]);
 			const o = ops(hist.commit);
 			const [canvasOpen, setCanvasOpen] = (0, react.useState)(false);
 			const [histOpen, setHistOpen] = (0, react.useState)(false);
 			const [tab, setTab] = (0, react.useState)("clips");
+			const [fonts, setFonts] = (0, react.useState)([]);
 			const audioFileRef = (0, react.useRef)(null);
 			const playheadRef = (0, react.useRef)(0);
+			(0, react.useEffect)(() => {
+				let stop = false;
+				listFonts().then((f) => {
+					if (!stop) setFonts(f);
+				}).catch(() => {});
+				return () => {
+					stop = true;
+				};
+			}, []);
 			const splitRef = (0, react.useRef)(() => {});
 			(0, react.useEffect)(() => {
 				const onKey = (e) => {
@@ -21720,6 +21747,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			]);
 			if (!timeline) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "djp-root",
+				ref: rootRef,
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "djp-empty",
 					children: "连接剪辑引擎中…（5180）"
@@ -21882,11 +21910,9 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			};
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "djp-root",
+				ref: rootRef,
 				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectBar, { onSwitched: () => {
-						hist.clear();
-						reload();
-					} }),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectBar, { sessionId }),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "djp-head",
 						children: [
@@ -22107,7 +22133,8 @@ Check that all your Remotion packages are on the same version. If your dependenc
 														onCommit: (f) => o.updateClip(c.id, { filter: f })
 													}),
 													/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnimSelect, {
-														clip: c,
+														duration: c.clipDuration,
+														anims: c.animations,
 														onCommit: (anims) => o.updateClip(c.id, { animations: anims })
 													})
 												]
@@ -22178,7 +22205,8 @@ Check that all your Remotion packages are on the same version. If your dependenc
 												onCommit: (f) => o.updateClip(c.id, { filter: f })
 											}),
 											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnimSelect, {
-												clip: c,
+												duration: c.clipDuration,
+												anims: c.animations,
 												onCommit: (anims) => o.updateClip(c.id, { animations: anims })
 											}),
 											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
@@ -22326,39 +22354,120 @@ Check that all your Remotion packages are on the same version. If your dependenc
 									}),
 									t.overlays.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 										className: "djp-hint",
-										children: "无字幕"
+										children: "无字幕——「+」加一条，或让 AI 配字幕"
 									}),
 									t.overlays.map((ov, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "djp-card djp-overlay-row",
-										children: [
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-												type: "text",
-												defaultValue: ov.text,
-												onBlur: (e) => {
-													if (e.target.value !== ov.text) o.updateOverlay(i, { text: e.target.value });
-												},
-												onKeyDown: (e) => {
-													if (e.key === "Enter") e.target.blur();
-												}
-											}, ov.text + i),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
-												label: "从",
-												value: ov.startSeconds,
-												onCommit: (v) => o.updateOverlay(i, { startSeconds: v })
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
-												label: "到",
-												value: ov.endSeconds,
-												min: .1,
-												onCommit: (v) => o.updateOverlay(i, { endSeconds: v })
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-												className: "djp-del",
-												title: "删除字幕",
-												onClick: () => o.removeOverlay(i),
-												children: "✕"
-											})
-										]
+										className: "djp-card djp-sub-card",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "djp-card-head",
+											children: [
+												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+													className: "djp-idx",
+													children: ["#", i + 1]
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+													className: "djp-sub-text",
+													type: "text",
+													defaultValue: ov.text,
+													onBlur: (e) => {
+														if (e.target.value !== ov.text) o.updateOverlay(i, { text: e.target.value });
+													},
+													onKeyDown: (e) => {
+														if (e.key === "Enter") e.target.blur();
+													}
+												}, ov.text + i),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+													className: "djp-del",
+													title: "删除字幕",
+													onClick: () => o.removeOverlay(i),
+													children: "✕"
+												})
+											]
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "djp-fields",
+											children: [
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+													label: "从",
+													value: ov.startSeconds,
+													onCommit: (v) => o.updateOverlay(i, { startSeconds: v })
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+													label: "到",
+													value: ov.endSeconds,
+													min: .1,
+													onCommit: (v) => o.updateOverlay(i, { endSeconds: v })
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+													label: "字号",
+													value: ov.fontSize,
+													min: 8,
+													onCommit: (v) => o.updateOverlay(i, { fontSize: v })
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+													className: "djp-select",
+													value: ov.position,
+													onChange: (e) => o.updateOverlay(i, { position: e.target.value }),
+													title: "位置",
+													children: [
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+															value: "top",
+															children: "顶部"
+														}),
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+															value: "center",
+															children: "居中"
+														}),
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+															value: "bottom",
+															children: "底部"
+														})
+													]
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+													className: "djp-select djp-fontsel",
+													value: ov.fontFamily ?? "",
+													onChange: (e) => o.updateOverlay(i, { fontFamily: e.target.value || void 0 }),
+													title: "字体（清除 = 系统默认）",
+													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+														value: "",
+														children: "系统字体"
+													}), fonts.map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+														value: f.id,
+														children: f.label
+													}, f.id))]
+												}),
+												fonts.find((f) => f.id === (ov.fontFamily ?? ""))?.variable && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
+													className: "djp-select",
+													value: ov.fontWeight ?? 400,
+													onChange: (e) => o.updateOverlay(i, { fontWeight: Number(e.target.value) }),
+													title: "字重",
+													children: [
+														300,
+														400,
+														500,
+														700,
+														900
+													].map((w) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+														value: w,
+														children: w
+													}, w))
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", {
+													className: "djp-color",
+													title: "颜色",
+													children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+														type: "color",
+														value: /^#[0-9a-fA-F]{6}$/.test(ov.color) ? ov.color : "#ffffff",
+														onChange: (e) => o.updateOverlay(i, { color: e.target.value })
+													})
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnimSelect, {
+													duration: Math.max(.1, ov.endSeconds - ov.startSeconds),
+													anims: ov.animations,
+													onCommit: (anims) => o.updateOverlay(i, { animations: anims })
+												})
+											]
+										})]
 									}, i))
 								]
 							})
@@ -22414,114 +22523,136 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			document.head.appendChild(el);
 		}
 		const CSS = `
+/* ---- 骨架 ---- */
 .djp-root { display: flex; flex-direction: column; gap: 0; padding: 0; height: 100%; overflow: hidden; box-sizing: border-box; color: var(--dsw-alias-label-primary); font-size: 13px; }
-.djp-head { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; padding: 6px 10px; }
-.djp-title { font-weight: 600; font-size: 14px; }
-.djp-meta { color: var(--dsw-alias-label-tertiary); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.djp-export { border: none; border-radius: 8px; padding: 5px 12px; font-size: 12px; cursor: pointer; background: var(--dsw-alias-button-info-fill); color: #fff; text-decoration: none; display: inline-flex; align-items: center; }
-.djp-export:disabled { opacity: 0.5; cursor: default; }
-.djp-export.djp-error { background: var(--dsw-alias-state-error-primary); }
-.djp-stage { background: #000; overflow: hidden; flex: 0 0 auto; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
-.djp-empty { padding: 32px 12px; text-align: center; color: var(--dsw-alias-label-tertiary); background: var(--dsw-alias-bg-layer-2); flex: 0 0 auto; }
-.djp-tabs { display: flex; gap: 2px; flex: 0 0 auto; padding: 0 6px; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
-.djp-tab { border: none; background: none; color: var(--dsw-alias-label-tertiary); font-size: 12px; padding: 6px 10px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-.djp-tab:hover { color: var(--dsw-alias-label-primary); }
-.djp-tab.djp-on { color: var(--dsw-alias-label-primary); border-bottom-color: var(--dsw-alias-brand-primary); font-weight: 600; }
-.djp-tabwrap { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; }
-.djp-tdock { flex: 0 0 auto; border-top: 0.5px solid var(--dsw-alias-border-l3); padding: 6px 8px 4px; display: flex; flex-direction: column; gap: 4px; max-height: 38%; overflow-y: auto; }
-.djp-track { position: relative; display: flex; height: 30px; border-radius: 4px; overflow: hidden; background: var(--dsw-alias-bg-layer-2); border: 0.5px solid var(--dsw-alias-border-l3); cursor: pointer; }
-.djp-track-block { position: relative; min-width: 24px; border-right: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-3); display: flex; align-items: center; padding: 0 4px; overflow: hidden; }
-.djp-track-block.djp-fade { background: var(--dsw-alias-bg-overlay); }
-.djp-track-label { font-size: 11px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.djp-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--dsw-alias-brand-primary); pointer-events: none; }
-.djp-playhead::before { content: ''; position: absolute; top: 0; left: -4px; border: 5px solid transparent; border-top-color: var(--dsw-alias-brand-primary); }
-.djp-section { display: flex; flex-direction: column; gap: 6px; }
-.djp-section-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; }
-.djp-add { border: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-radius: 50%; width: 22px; height: 22px; cursor: pointer; font-size: 14px; line-height: 1; }
-.djp-card { background: var(--dsw-alias-bg-layer-2); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
-.djp-card-head { display: flex; align-items: center; gap: 6px; }
-.djp-drag { cursor: grab; color: var(--dsw-alias-label-tertiary); letter-spacing: -2px; user-select: none; }
-.djp-card-title { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.djp-select { border: 0.5px solid var(--dsw-alias-border-l4); background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); border-radius: 6px; font-size: 11px; height: 24px; }
-.djp-del { border: none; background: none; color: var(--dsw-alias-label-tertiary); cursor: pointer; font-size: 14px; padding: 2px 6px; border-radius: 6px; }
-.djp-del:hover { color: var(--dsw-alias-state-error-primary); }
-.djp-fields { display: flex; gap: 8px; flex-wrap: wrap; }
-.djp-field { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--dsw-alias-label-tertiary); }
-.djp-field input { width: 56px; height: 26px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 6px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 12px; padding: 0 6px; box-sizing: border-box; }
-.djp-field input:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
-.djp-overlay-row { display: flex; align-items: center; gap: 6px; }
-.djp-overlay-row input[type='text'] { flex: 1; min-width: 0; height: 26px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 6px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 12px; padding: 0 8px; box-sizing: border-box; }
-.djp-range { font-size: 11px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
-.djp-hint { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
 
-/* ---- 项目栏 / 通用按钮 ---- */
-.djp-projbar { position: relative; display: flex; align-items: center; gap: 6px; flex: 0 0 auto; padding: 8px 10px 0; }
-.djp-proj-label { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
-.djp-proj-select { flex: 1; min-width: 0; height: 26px; font-size: 12px; }
-.djp-btn { border: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-radius: 7px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
-.djp-btn:disabled { opacity: 0.5; cursor: default; }
-.djp-iconbtn { border: none; background: none; color: var(--dsw-alias-label-tertiary); cursor: pointer; font-size: 15px; padding: 2px 4px; border-radius: 6px; line-height: 1; }
+/* ---- 项目条（会话=项目，只展示）---- */
+.djp-projbar { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; padding: 8px 12px 0; min-height: 30px; }
+.djp-proj-icon { color: var(--dsw-alias-brand-primary); font-size: 12px; line-height: 1; }
+.djp-proj-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.djp-proj-badge { flex: 0 0 auto; font-size: 10.5px; color: var(--dsw-alias-label-tertiary); background: var(--dsw-alias-bg-layer-2); border-radius: 999px; padding: 2px 8px; font-variant-numeric: tabular-nums; }
+.djp-proj-tag { margin-left: auto; flex: 0 0 auto; font-size: 10px; color: var(--dsw-alias-label-quaternary); }
+
+/* ---- 工具栏 ---- */
+.djp-head { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; padding: 6px 12px; }
+.djp-title { font-weight: 600; font-size: 14px; margin-right: 2px; }
+.djp-meta { color: var(--dsw-alias-label-tertiary); font-size: 11.5px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.djp-iconbtn { border: none; background: none; color: var(--dsw-alias-label-tertiary); cursor: pointer; font-size: 15px; padding: 3px 5px; border-radius: 7px; line-height: 1; transition: background .12s, color .12s; }
 .djp-iconbtn:hover:not(:disabled) { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); }
 .djp-iconbtn:disabled { opacity: 0.35; cursor: default; }
+.djp-btn { border: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; transition: background .12s, border-color .12s; height: 26px; box-sizing: border-box; }
+.djp-btn:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.djp-btn:disabled { opacity: 0.5; cursor: default; }
+.djp-btn.djp-error { color: var(--dsw-alias-state-error-primary); }
+.djp-export { border: none; border-radius: 8px; padding: 5px 14px; font-size: 12px; cursor: pointer; background: var(--dsw-alias-button-info-fill); color: #fff; text-decoration: none; display: inline-flex; align-items: center; height: 26px; box-sizing: border-box; }
+.djp-export:disabled { opacity: 0.5; cursor: default; }
+.djp-export.djp-error { background: var(--dsw-alias-state-error-primary); }
+.djp-add { border: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-radius: 8px; width: 26px; height: 26px; cursor: pointer; font-size: 14px; line-height: 1; }
+.djp-add:hover { background: var(--dsw-alias-interactive-bg-hover); }
 
-/* ---- 弹层（项目新建 / 导出参数）---- */
-.djp-pop { position: absolute; top: 30px; right: 0; z-index: 30; display: flex; flex-direction: column; gap: 8px; background: var(--dsw-alias-bg-layer-1); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 10px; padding: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.18); min-width: 220px; }
-.djp-proj-new input { height: 28px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 6px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 12px; padding: 0 8px; }
-.djp-proj-new .djp-export { align-self: flex-end; }
-.djp-expwrap { position: relative; }
-.djp-exppop { top: 30px; }
+/* ---- 舞台与空态 ---- */
+.djp-stage { background: #000; overflow: hidden; flex: 0 0 auto; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
+.djp-empty { padding: 36px 12px; text-align: center; color: var(--dsw-alias-label-tertiary); background: var(--dsw-alias-bg-layer-2); flex: 0 0 auto; }
 
-/* ---- 多轨轨道条 ---- */
+/* ---- 分段式 tab ---- */
+.djp-tabs { display: flex; gap: 2px; flex: 0 0 auto; padding: 4px 10px; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
+.djp-tab { border: none; background: none; color: var(--dsw-alias-label-tertiary); font-size: 12px; padding: 5px 11px; cursor: pointer; border-radius: 999px; transition: background .12s, color .12s; }
+.djp-tab:hover { color: var(--dsw-alias-label-primary); }
+.djp-tab.djp-on { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); font-weight: 600; }
+.djp-tabwrap { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; }
+
+/* ---- 内容卡 ---- */
+.djp-section { display: flex; flex-direction: column; gap: 8px; }
+.djp-section-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 12.5px; color: var(--dsw-alias-label-secondary); }
+.djp-card { background: var(--dsw-alias-bg-layer-2); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 12px; padding: 9px 11px; display: flex; flex-direction: column; gap: 7px; transition: border-color .12s; }
+.djp-card:hover { border-color: var(--dsw-alias-border-l4); }
+.djp-card-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.djp-idx { flex: 0 0 auto; font-size: 10px; color: var(--dsw-alias-label-tertiary); background: var(--dsw-alias-bg-layer-3); border-radius: 999px; padding: 2px 7px; font-variant-numeric: tabular-nums; }
+.djp-drag { cursor: grab; color: var(--dsw-alias-label-quaternary); letter-spacing: -2px; user-select: none; }
+.djp-card-title { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.djp-del { border: none; background: none; color: var(--dsw-alias-label-tertiary); cursor: pointer; font-size: 13px; padding: 2px 6px; border-radius: 6px; }
+.djp-del:hover { color: var(--dsw-alias-state-error-primary); }
+
+/* ---- 表单件 ---- */
+.djp-fields { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
+.djp-field { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+.djp-field input { width: 56px; height: 26px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 12px; padding: 0 7px; box-sizing: border-box; }
+.djp-field input:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
+.djp-select { border: 0.5px solid var(--dsw-alias-border-l4); background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); border-radius: 8px; font-size: 11.5px; height: 26px; padding: 0 6px; cursor: pointer; }
+.djp-select:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
+.djp-color { display: inline-flex; }
+.djp-color input { width: 26px; height: 26px; padding: 0; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 7px; background: var(--dsw-alias-bg-layer-1); cursor: pointer; }
+.djp-hint { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+
+/* ---- 字幕卡（堆叠式：文本行 + 参数行）---- */
+.djp-sub-card { gap: 6px; }
+.djp-sub-text { flex: 1; min-width: 0; height: 28px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 13px; padding: 0 9px; box-sizing: border-box; }
+.djp-sub-text:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
+.djp-overlay-row { display: flex; align-items: center; gap: 6px; }
+.djp-overlay-row input[type='text'] { flex: 1; min-width: 0; height: 26px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 12px; padding: 0 8px; box-sizing: border-box; }
+
+/* ---- 多轨轨道条（底部坞）---- */
+.djp-tdock { flex: 0 0 auto; border-top: 0.5px solid var(--dsw-alias-border-l3); padding: 8px 10px 5px; display: flex; flex-direction: column; gap: 4px; max-height: 38%; overflow-y: auto; background: var(--dsw-alias-bg-layer-1); }
 .djp-tstrip { display: flex; flex-direction: column; gap: 3px; }
-.djp-trow { display: flex; align-items: center; gap: 4px; }
-.djp-trow-name { flex: 0 0 46px; font-size: 10px; color: var(--dsw-alias-label-tertiary); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.djp-trow { display: flex; align-items: center; gap: 5px; }
+.djp-trow-name { flex: 0 0 44px; font-size: 10px; color: var(--dsw-alias-label-tertiary); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .djp-trow-lane { flex: 1; }
 .djp-trow-empty { font-size: 11px; color: var(--dsw-alias-label-tertiary); padding: 0 8px; }
-.djp-pip-block { background: var(--dsw-alias-bg-overlay); border: 0.5px dashed var(--dsw-alias-border-l4); }
-.djp-audio-block { background: var(--dsw-alias-brand-primary); opacity: 0.75; }
-.djp-audio-block .djp-track-label { color: #fff; }
-
-/* ---- 画中画/音频卡 ---- */
-.djp-card-head label.djp-field input[type='range'] { accent-color: var(--dsw-alias-brand-primary); }
-.djp-btn.djp-error { color: var(--dsw-alias-state-error-primary); }
-
-/* ---- 轨道交互：拖拽/裁剪/版本历史 ---- */
-.djp-track-block { position: relative; }
-.djp-handle, .djp-pip-block, .djp-audio-block { touch-action: none; }
+.djp-track { position: relative; display: flex; height: 30px; border-radius: 6px; overflow: hidden; background: var(--dsw-alias-bg-layer-2); border: 0.5px solid var(--dsw-alias-border-l3); cursor: pointer; }
+.djp-track-block { position: relative; min-width: 24px; border-right: 1px solid var(--dsw-alias-bg-layer-1); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 16%, var(--dsw-alias-bg-layer-3)); box-shadow: inset 2px 0 0 var(--dsw-alias-brand-primary); display: flex; align-items: center; padding: 0 4px 0 7px; overflow: hidden; }
+.djp-track-block.djp-fade { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 7%, var(--dsw-alias-bg-layer-3)); }
+.djp-track-label { font-size: 10.5px; color: var(--dsw-alias-label-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.djp-pip-block { background: color-mix(in srgb, var(--dsw-static-neutral-bluish-400, #7c8cf8) 22%, var(--dsw-alias-bg-layer-3)); border: 0.5px dashed var(--dsw-alias-border-l4); box-shadow: inset 2px 0 0 var(--dsw-static-neutral-bluish-400, #7c8cf8); }
+.djp-audio-block { background: color-mix(in srgb, #34c77b 26%, var(--dsw-alias-bg-layer-3)); opacity: 1; box-shadow: inset 2px 0 0 #34c77b; }
 .djp-ruler { position: relative; flex: 1; height: 16px; cursor: pointer; background: var(--dsw-alias-bg-layer-2); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 4px; overflow: hidden; }
 .djp-tick { position: absolute; top: 0; bottom: 0; border-left: 0.5px solid var(--dsw-alias-border-l3); padding-left: 3px; font-size: 9px; color: var(--dsw-alias-label-tertiary); line-height: 16px; pointer-events: none; white-space: nowrap; }
-.djp-handle { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 1; }
+.djp-playhead { position: absolute; top: 0; bottom: 0; width: 1.5px; background: var(--dsw-alias-state-error-primary); pointer-events: none; z-index: 3; }
+.djp-playhead::before { content: ''; position: absolute; top: 0; left: -3.5px; border: 4.5px solid transparent; border-top-color: var(--dsw-alias-state-error-primary); }
+
+/* ---- 轨道交互 ---- */
+.djp-handle, .djp-pip-block, .djp-audio-block { touch-action: none; }
+.djp-handle { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 2; }
 .djp-handle.djp-hl { left: 0; border-radius: 4px 0 0 4px; }
 .djp-handle.djp-hr { right: 0; border-radius: 0 4px 4px 0; }
 .djp-handle:hover { background: rgba(255, 255, 255, 0.35); }
 .djp-pip-block, .djp-audio-block { cursor: grab; }
-.djp-dragging { opacity: 0.8; outline: 1px solid var(--dsw-alias-brand-primary); cursor: grabbing !important; z-index: 2; }
+.djp-dragging { opacity: 0.85; outline: 1.5px solid var(--dsw-alias-brand-primary); cursor: grabbing !important; z-index: 2; }
+
+/* ---- 弹层（导出参数等）---- */
+.djp-pop { position: absolute; top: 32px; right: 0; z-index: 30; display: flex; flex-direction: column; gap: 8px; background: var(--dsw-alias-bg-layer-1); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 12px; padding: 11px; box-shadow: 0 8px 24px rgba(0,0,0,0.18); min-width: 220px; }
+.djp-expwrap { position: relative; }
+.djp-exppop { top: 32px; }
+.djp-error { color: var(--dsw-alias-state-error-primary); font-size: 12px; margin-top: 6px; }
+
+/* ---- 版本历史 ---- */
 .djp-hist-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow: auto; margin-top: 8px; }
-.djp-hist-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; }
+.djp-hist-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 9px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 9px; }
 .djp-hist-meta { display: flex; gap: 8px; min-width: 0; align-items: center; }
 .djp-hist-time { font-size: 11px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
 .djp-hist-label { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.djp-error { color: var(--dsw-alias-state-error-primary); font-size: 12px; margin-top: 6px; }
 
-/* ---- 画布设置对话框 ---- */
+/* ---- 对话框 ---- */
 .djp-mask { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; }
-.djp-dialog { width: 300px; background: var(--dsw-alias-bg-layer-1); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.djp-dialog { width: 300px; background: var(--dsw-alias-bg-layer-1); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
 .djp-dialog-title { font-weight: 600; font-size: 13px; }
 .djp-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .djp-preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.djp-preset { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; border: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-radius: 8px; padding: 7px 9px; font-size: 12px; cursor: pointer; }
+.djp-preset { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; border: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-radius: 9px; padding: 7px 9px; font-size: 12px; cursor: pointer; }
 .djp-preset span { font-size: 10px; color: var(--dsw-alias-label-tertiary); }
 .djp-preset.djp-on { border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-overlay); }
 
 /* ---- 素材库 ---- */
 .djp-assets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.djp-asset { position: relative; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 8px; overflow: hidden; background: var(--dsw-alias-bg-layer-2); }
+.djp-asset { position: relative; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 9px; overflow: hidden; background: var(--dsw-alias-bg-layer-2); }
 .djp-asset-thumb { width: 100%; aspect-ratio: 16/10; object-fit: cover; display: block; background: #000; }
 .djp-asset-audio { display: flex; align-items: center; justify-content: center; font-size: 22px; color: var(--dsw-alias-label-tertiary); }
 .djp-asset-name { font-size: 10px; color: var(--dsw-alias-label-tertiary); padding: 4px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .djp-asset-acts { position: absolute; top: 4px; right: 4px; display: none; gap: 4px; }
 .djp-asset:hover .djp-asset-acts { display: flex; }
 .djp-asset-acts button { border: none; border-radius: 6px; padding: 3px 7px; font-size: 11px; cursor: pointer; background: rgba(0,0,0,0.62); color: #fff; }
+
+/* ---- 音量滑杆 ---- */
+.djp-card-head label.djp-field input[type='range'] { accent-color: var(--dsw-alias-brand-primary); width: 70; }
 `;
 		//#endregion
 		//#region src/client/index.tsx
@@ -22561,7 +22692,8 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			}), "djian-timeline: tab type");
 			ctx.slots.inject("sidebar.right.pane.tab", () => ctx.slots.register({
 				name: "sidebar.right.pane.tab",
-				key: "djian.timeline"
+				key: "djian.timeline",
+				inject: (sessionId) => ({ sessionId })
 			}, Panel));
 		}
 		//#endregion

@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "type": "profile",
   "name": "djian",
-  "version": "0.1.7",
+  "version": "1.1.0",
   "displayName": {
     "zh-CN": "D剪 · AI 视频剪辑工作台",
     "en-US": "Djian · AI Video Editing Workbench"
@@ -53,6 +53,9 @@
   "settings": {
     "ui-theme": {
       "preference": "dark"
+    },
+    "agent-presets": {
+      "default": "standard"
     }
   }
 }

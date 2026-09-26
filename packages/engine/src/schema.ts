@@ -114,6 +114,9 @@ export const overlaySchema = z.object({
   position: z.enum(["top", "center", "bottom"]).default("bottom"),
   fontSize: z.number().positive().default(64),
   color: z.string().default("#ffffff"),
+  // v4：字体（内置字体库 id，见 fonts.ts；省略 = 系统默认栈）
+  fontFamily: z.string().optional(),
+  fontWeight: z.number().int().min(100).max(900).optional(),
   // v3：字幕关键帧动画（t = 字幕内相对秒，出现时刻=0；volume 通道对文本无意义，渲染忽略）
   animations: animationsSchema.optional(),
 });

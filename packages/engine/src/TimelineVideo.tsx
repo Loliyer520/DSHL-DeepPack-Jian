@@ -9,8 +9,11 @@ import {
   useCurrentFrame,
   useVideoConfig,
   Video,
+  delayRender,
+  continueRender,
 } from "remotion";
 import { clipBox, evalKeyframes, type AudioClip, type Animations, type Clip, type Filter, type Overlay, type Timeline } from "./schema";
+import { fontById, injectFontFaceStyle, overlayFontFamily } from "./fonts";
 
 const SEC = (fps: number, s: number) => Math.round(s * fps);
 
@@ -159,6 +162,25 @@ const AudioVolumeEnv: React.FC<{
   );
 };
 
+// 内置字体：取帧/渲染前等字体真正就位，避免首帧回落系统字体
+const FontGate: React.FC<{ timeline: Timeline }> = ({ timeline }) => {
+  React.useEffect(() => {
+    injectFontFaceStyle();
+    const used = [...new Set(timeline.overlays.map((ov) => ov.fontFamily).filter((v): v is string => Boolean(v)))]
+      .map((id) => fontById(id))
+      .filter((f): f is NonNullable<typeof f> => Boolean(f));
+    if (used.length === 0 || !document.fonts) return;
+    const handle = delayRender(`djian-fonts:${used.map((f) => f.id).join(",")}`);
+    const loads = used.map((f) =>
+      document.fonts.load(`400 48px "${f.family}"`).catch(() => {
+        /* 字体拉不到就让浏览器走系统回退，不卡渲染 */
+      }),
+    );
+    void Promise.all(loads).then(() => continueRender(handle));
+  }, [timeline]);
+  return null;
+};
+
 // 字幕层：关键帧动画在文本内层应用——外层保留定位 transform（center 的 translateY），互不覆盖
 const OverlayView: React.FC<{ ov: Overlay }> = ({ ov }) => {
   const { fps } = useVideoConfig();
@@ -171,7 +193,8 @@ const OverlayView: React.FC<{ ov: Overlay }> = ({ ov }) => {
           display: "inline-block",
           fontSize: ov.fontSize,
           color: ov.color,
-          fontFamily: '"Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif',
+          fontFamily: overlayFontFamily(ov.fontFamily),
+          ...(ov.fontWeight ? { fontWeight: ov.fontWeight } : {}),
           textShadow: "0 2px 8px rgba(0,0,0,0.85)",
           ...anim,
         }}
@@ -189,6 +212,7 @@ export const TimelineVideo: React.FC<{ timeline: Timeline }> = ({ timeline }) =>
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
+      <FontGate timeline={timeline} />
       {/* 主轨道：串行 */}
       <Series>
         {mainTrack.clips.map((clip) => (

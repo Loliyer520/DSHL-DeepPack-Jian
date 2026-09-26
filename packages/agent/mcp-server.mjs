@@ -62,6 +62,8 @@ const PATCH = {
     position: { enum: ["top", "center", "bottom"] },
     fontSize: NUM,
     color: { type: "string" },
+    fontFamily: { enum: ["sans", "serif", "kuaile", "qingke", "mashan"], description: "字幕字体：sans=思源黑体 serif=思源宋体 kuaile=快乐体（可爱） qingke=黄油体（海报标题） mashan=毛笔楷（书法）" },
+    fontWeight: { type: "integer", minimum: 100, maximum: 900, description: "字重 100-900（思源黑/宋是可变字体）；快乐体/黄油体/毛笔楷只有 400" },
   },
 };
 const opSchema = (op, props, required = []) => ({
@@ -82,10 +84,10 @@ const TOOLS = [
       'removeAudio{id} / updateAudioTrack{id,patch:{volume?,muted?,name?}} / ' +
       'splitClip{id,atSeconds} —— 在全局时间轴 atSeconds 处把片段一分为二（主轨/叠加/音频 clip 均可，切点太靠边会被忽略）/ ' +
       'v3 能力：updateClip 的 patch 可设 speed（0.1-10 恒定变速，2=快放一倍，clipDuration 仍是成片占时）、filter（{brightness?,contrast?,saturate?,blur?,grayscale?,sepia?,hueRotate?}，设 {} 清空）、animations（关键帧 {x?,y?,scale?,opacity?,rotation?,volume?}: [{t,v,e?}]，t 为 clip 内相对秒，e 缓动 linear/in/out/inOut/bounce/elastic；x/y 是画布分数偏移，scale 1=原大，opacity/volume 0-1，rotation 度；设 {} 清空；给音频 clip 设 volume 包络即音量包络）、animationPreset（一键动画预设：fadeIn/slideInLeft/slideInRight/slideInUp/zoomIn/bounceIn/spinIn/fadeOut/slideOutLeft/slideOutRight/zoomOut/kenBurns/kenBurnsOut/pop/tilt/pulse/wobble/float，"none" 清除；按 clip 时长自动展开成关键帧，比手排省事优先用）/ ' +
-      '字幕动画：addOverlay 直接带 animations/animationPreset，updateOverlay 的 patch 同理（同一套关键帧与预设，t 为字幕内相对秒、出现时刻=0，通道 x/y/scale/opacity/rotation；预设按字幕时长展开，"none" 清除）/ ' +
+      '字幕动画：addOverlay 直接带 animations/animationPreset，updateOverlay 的 patch 同理（同一套关键帧与预设，t 为字幕内相对秒、出现时刻=0，通道 x/y/scale/opacity/rotation；预设按字幕时长展开，"none" 清除）；字幕字体 fontFamily 可选 sans(思源黑体)/serif(思源宋体)/kuaile(快乐体)/qingke(黄油体)/mashan(毛笔楷)，fontWeight 100-900（黑/宋可变）/ ' +
       'addOverlay{text,startSeconds,endSeconds,position,fontSize,color,animations?,animationPreset?} / removeOverlay{index} / updateOverlay{index,patch} / ' +
       'setMeta{patch:{fps?,width?,height?}}（调画布：帧率 1-120，宽高 16-7680 偶数）。\n' +
-      "时间单位都是秒；transition 只接受 \"fade\" 或 \"none\"。总时长 = 主轨道串行与所有叠加/音频 clip 末尾的最大值。",
+      "时间单位都是秒；transition 只接受 \"fade\" 或 \"none\"。总时长 = 主轨道串行与所有叠加/音频 clip 末尾的最大值。返回会逐条点名被忽略（id/index 无效）和被拒绝（格式/素材不合法）的操作及原因；全部没生效时标错并要求先 get_timeline 核对。",
     inputSchema: {
       type: "object",
       properties: {
@@ -101,7 +103,7 @@ const TOOLS = [
               opSchema("removeAudio", { id: { type: "string" } }, ["id"]),
               opSchema("splitClip", { id: { type: "string" }, atSeconds: { type: "number", description: "全局时间轴切点（秒）" } }, ["id", "atSeconds"]),
               opSchema("updateAudioTrack", { id: { type: "string" }, patch: { type: "object", properties: { volume: { type: "number", minimum: 0, maximum: 1 }, muted: { type: "boolean" }, name: { type: "string" } } } }, ["id", "patch"]),
-              opSchema("addOverlay", { text: { type: "string" }, startSeconds: NUM, endSeconds: NUM, position: { enum: ["top", "center", "bottom"] }, fontSize: NUM, color: { type: "string" }, animations: { type: "object", description: "字幕关键帧 {x,y,scale,opacity,rotation}: [{t,v,e?}]，t=字幕内相对秒（出现时刻=0）" }, animationPreset: { type: "string", enum: ["fadeIn", "slideInLeft", "slideInRight", "slideInUp", "zoomIn", "bounceIn", "spinIn", "fadeOut", "slideOutLeft", "slideOutRight", "zoomOut", "kenBurns", "kenBurnsOut", "pop", "tilt", "pulse", "wobble", "float", "none"], description: "字幕一键动画预设（按字幕时长展开成关键帧）；'none'=清除动画" } }, ["text", "startSeconds", "endSeconds"]),
+              opSchema("addOverlay", { text: { type: "string" }, startSeconds: NUM, endSeconds: NUM, position: { enum: ["top", "center", "bottom"] }, fontSize: NUM, color: { type: "string" }, fontFamily: { enum: ["sans", "serif", "kuaile", "qingke", "mashan"], description: "字幕字体：sans=思源黑体 serif=思源宋体 kuaile=快乐体（可爱） qingke=黄油体（海报标题） mashan=毛笔楷（书法）" }, fontWeight: { type: "integer", minimum: 100, maximum: 900 }, animations: { type: "object", description: "字幕关键帧 {x,y,scale,opacity,rotation}: [{t,v,e?}]，t=字幕内相对秒（出现时刻=0）" }, animationPreset: { type: "string", enum: ["fadeIn", "slideInLeft", "slideInRight", "slideInUp", "zoomIn", "bounceIn", "spinIn", "fadeOut", "slideOutLeft", "slideOutRight", "zoomOut", "kenBurns", "kenBurnsOut", "pop", "tilt", "pulse", "wobble", "float", "none"], description: "字幕一键动画预设（按字幕时长展开成关键帧）；'none'=清除动画" } }, ["text", "startSeconds", "endSeconds"]),
               opSchema("removeOverlay", { index: { type: "integer", minimum: 0 } }, ["index"]),
               opSchema("updateOverlay", { index: { type: "integer", minimum: 0 }, patch: PATCH }, ["index", "patch"]),
               opSchema("setMeta", { patch: { type: "object", properties: { fps: { type: "integer", minimum: 1, maximum: 120 }, width: { type: "number" }, height: { type: "number" } }, required: [] } }, ["patch"]),
@@ -114,36 +116,13 @@ const TOOLS = [
   },
   {
     name: "get_timeline",
-    description: "读取当前时间线的最新 JSON（v2 多轨：videoTracks[0] 主轨串行、叠加轨 PiP、audioTracks、overlays）。修改前后都可以调用以确认状态。",
+    description: "读取当前状态：返回 { project（当前项目 id/名称）, availableAssets（当前项目素材库文件清单——addClip/addAudio 只能引用这里有的文件名）, timeline（v2 多轨 JSON：videoTracks[0] 主轨串行、叠加轨 PiP、audioTracks、overlays） }。修改前后、新会话开始时都应调用以对齐状态；id/index/素材名一律以此返回为准，历史消息里的引用可能已过期。",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "project_list",
-    description: "列出所有剪辑项目（id/名称/画布参数），并标明当前活跃项目。",
+    description: "列出当前绑定的剪辑项目（一个 dsh 会话固定绑定一个项目，由面板自动管理，模型不能切换）。返回项目 id/名称/画布参数。",
     inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "project_create",
-    description: "新建剪辑项目。可指定名称与画布预设（1080p/720p/竖屏 9:16/方形 1:1/4K）或自定义宽高帧率。创建后不会自动切换，需要时用 project_switch。",
-    inputSchema: {
-      type: "object",
-      properties: {
-        name: { type: "string", description: "项目名称" },
-        preset: { enum: ["1080p", "720p", "vertical", "square", "4k"], description: "画布预设（与自定义参数二选一）" },
-        width: { type: "number" },
-        height: { type: "number" },
-        fps: { type: "integer", minimum: 1, maximum: 120 },
-      },
-    },
-  },
-  {
-    name: "project_switch",
-    description: "切换当前活跃剪辑项目。之后 get_timeline / apply_timeline_ops / get_frame 都作用于该项目。",
-    inputSchema: {
-      type: "object",
-      properties: { id: { type: "string", description: "项目 id（project_list 返回）" } },
-      required: ["id"],
-    },
   },
   {
     name: "asset_list",
@@ -170,33 +149,63 @@ function send(msg) {
 }
 
 async function forwardOps(ops) {
-  const res = await fetch(`${WEBUI}/api/internal/ops`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ops }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!res.ok) throw new Error(`webui HTTP ${res.status}`);
-  return res.json();
+  let res;
+  try {
+    res = await fetch(`${WEBUI}/api/internal/ops`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ops }),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (e) {
+    // 网络在请求或响应阶段中断：操作可能已生效（服务端可能已落盘但响应丢失）。
+    // 探测后如实告知模型，让它先核对再补差，防止整批重发造成重复添加。
+    const reachable = await fetch(`${WEBUI}/api/health`, { signal: AbortSignal.timeout(3_000) })
+      .then((r) => r.ok)
+      .catch(() => false);
+    if (reachable) {
+      throw new Error("网络在响应阶段中断，操作可能已经生效：请先用 get_timeline 核对当前状态，缺什么补什么，切勿整批重发（可能重复添加）");
+    }
+    throw new Error("无法连接 D剪 后端（127.0.0.1:5180）：引擎可能正在启动或重启，请稍后重试");
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `webui HTTP ${res.status}`);
+  return data;
 }
 
 async function fetchTimeline() {
-  const res = await fetch(`${WEBUI}/api/internal/timeline`, { signal: AbortSignal.timeout(10_000) });
-  if (!res.ok) throw new Error(`webui HTTP ${res.status}`);
-  return res.json();
+  const go = () =>
+    fetch(`${WEBUI}/api/internal/timeline`, { signal: AbortSignal.timeout(10_000) }).then(async (res) => {
+      if (!res.ok) throw new Error(`webui HTTP ${res.status}`);
+      return res.json();
+    });
+  try {
+    return await go();
+  } catch (e) {
+    if (e instanceof TypeError) return go(); // 网络抖动（连接层失败）重试一次
+    throw e;
+  }
 }
 
 // 通用 GET/POST JSON（项目/素材工具用）
 async function apiJson(pathname, body) {
-  const res = await fetch(`${WEBUI}${pathname}`, {
-    method: body === undefined ? "GET" : "POST",
-    headers: body === undefined ? {} : { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(15_000),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `webui HTTP ${res.status}`);
-  return data;
+  const go = async () => {
+    const res = await fetch(`${WEBUI}${pathname}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: body === undefined ? {} : { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `webui HTTP ${res.status}`);
+    return data;
+  };
+  try {
+    return await go();
+  } catch (e) {
+    if (e instanceof TypeError) return go(); // 网络抖动（连接层失败）重试一次
+    throw e;
+  }
 }
 
 async function fetchFrame(seconds) {
@@ -206,13 +215,14 @@ async function fetchFrame(seconds) {
     body: JSON.stringify({ seconds }),
     signal: AbortSignal.timeout(120_000), // 首次取帧要拉浏览器，留足时间
   });
-  if (!res.ok) throw new Error(`webui HTTP ${res.status}`);
-  return res.json();
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `webui HTTP ${res.status}`);
+  return data;
 }
 
 const rl = readline.createInterface({ input: process.stdin });
 rl.on("line", async (line) => {
-  try { fs.appendFileSync("/tmp/djian-mcp.log", line + "\n"); } catch {}
+  try { fs.appendFileSync("/tmp/djian-mcp.log", `${new Date().toISOString()} ${line}\n`); } catch {}
   let msg;
   try {
     msg = JSON.parse(line);
@@ -245,40 +255,44 @@ rl.on("line", async (line) => {
           const ops = Array.isArray(args.ops) ? args.ops : [];
           const r = await forwardOps(ops);
           const rejected = r.rejected ?? [];
-          if (rejected.length > 0 && (r.accepted ?? 0) === 0) {
+          const ignored = r.ignored ?? [];
+          const applied = Math.max(0, (r.accepted ?? ops.length) - ignored.length);
+          const detail = [
+            ignored.length ? `忽略 ${ignored.length} 个（${ignored.map((x) => `${x.op}${x.id ? ` ${x.id}` : x.index !== undefined ? ` #${x.index}` : ""}：${x.reason}`).join("；")}）` : "",
+            rejected.length ? `拒绝 ${rejected.length} 个（${rejected.map((x) => `#${x.index} ${x.reason}`).join("；")}）` : "",
+          ].filter(Boolean).join("；");
+          if (applied === 0 && ops.length > 0) {
             return reply({
-              content: [{ type: "text", text: `全部 ${rejected.length} 个操作都被拒绝：${rejected.map((x) => `#${x.index} ${x.reason}`).join("；")}。请严格按 {"op":"操作名",...} 格式重试。` }],
+              content: [{ type: "text", text: `没有操作被应用${detail ? "：" + detail : ""}。先 get_timeline 核对当前状态（id/index/素材名以它返回为准），修正后再提交。` }],
               isError: true,
             });
           }
-          const note = rejected.length > 0 ? `；被拒绝 ${rejected.length} 个（${rejected.map((x) => `#${x.index} ${x.reason}`).join("；")}）` : "";
           return reply({
-            content: [{ type: "text", text: `已应用 ${r.accepted ?? ops.length} 个剪辑操作${note}。可用 get_timeline 确认。` }],
+            content: [{ type: "text", text: `已应用 ${applied} 个操作${detail ? `（${detail}）` : ""}。项目：${r.project?.name ?? r.project?.id ?? "?"}。` }],
           });
         }
         if (name === "get_timeline") {
           const t = await fetchTimeline();
-          return reply({ content: [{ type: "text", text: JSON.stringify(t) }] });
+          const [assets, projects] = await Promise.all([
+            apiJson("/api/assets").catch(() => ({ assets: [] })),
+            apiJson("/api/projects").catch(() => ({})),
+          ]);
+          const cur = projects.projects?.find((p) => p.id === projects.current);
+          return reply({
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                project: cur ? { id: cur.id, name: cur.name } : null,
+                availableAssets: (assets.assets ?? []).map((a) => `${a.name}${a.duration ? `(${a.duration}s)` : ""}`),
+                timeline: t,
+              }),
+            }],
+          });
         }
         if (name === "project_list") {
           const r = await apiJson("/api/projects");
-          return reply({ content: [{ type: "text", text: JSON.stringify(r) }] });
-        }
-        if (name === "project_create") {
-          const PRESETS = {
-            "1080p": { width: 1920, height: 1080, fps: 30 },
-            "720p": { width: 1280, height: 720, fps: 30 },
-            vertical: { width: 1080, height: 1920, fps: 30 },
-            square: { width: 1080, height: 1080, fps: 30 },
-            "4k": { width: 3840, height: 2160, fps: 30 },
-          };
-          const meta = PRESETS[args.preset] ?? { width: args.width, height: args.height, fps: args.fps };
-          const r = await apiJson("/api/projects", { name: args.name, meta });
-          return reply({ content: [{ type: "text", text: `已创建项目「${r.name}」（id: ${r.id}）。用 project_switch 切换过去。` }] });
-        }
-        if (name === "project_switch") {
-          const r = await apiJson("/api/current", { id: args.id });
-          return reply({ content: [{ type: "text", text: r.ok ? `已切换到项目 ${r.current}。` : "切换失败" }], isError: !r.ok });
+          const cur = r.projects?.find((p) => p.id === r.current);
+          return reply({ content: [{ type: "text", text: JSON.stringify({ bound: cur ?? null, note: "会话与项目固定绑定，无需也无法切换" }) }] });
         }
         if (name === "asset_list") {
           const r = await apiJson("/api/assets");

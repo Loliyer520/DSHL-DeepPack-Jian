@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
 import type { Timeline } from '../../../engine/src/schema';
-import { CANVAS_PRESETS } from './ProjectBar';
+
+// 画布预设（面板内自用；会话项目的初始画布由服务端默认 720p）
+const CANVAS_PRESETS = [
+  { key: '1080p', label: '1080p 横屏', meta: { width: 1920, height: 1080, fps: 30 } },
+  { key: '720p', label: '720p 横屏', meta: { width: 1280, height: 720, fps: 30 } },
+  { key: 'vertical', label: '竖屏 9:16', meta: { width: 1080, height: 1920, fps: 30 } },
+  { key: 'square', label: '方形 1:1', meta: { width: 1080, height: 1080, fps: 30 } },
+  { key: '4k', label: '4K 横屏', meta: { width: 3840, height: 2160, fps: 30 } },
+];
 
 // 画布设置弹层：预设 + 自定义宽/高/fps（宽高服务端会偶数对齐）
 export const CanvasDialog: React.FC<{
