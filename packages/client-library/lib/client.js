@@ -33,44 +33,79 @@ window.__ModuleLoader__.load({
 		const DEFAULT_PORT = 5180;
 		const PORT_CACHE_KEY = "djian.enginePort";
 		const hostBase = () => typeof window !== "undefined" && window.location ? `${window.location.protocol}//${window.location.hostname}` : "http://127.0.0.1";
-		let API_BASE = (() => {
+		let API_BASE = `${hostBase()}:${DEFAULT_PORT}`;
+		const applyBase = (port) => {
+			API_BASE = `${hostBase()}:${port}`;
+		};
+		async function isEngine(base) {
 			try {
-				const cached = Number(window.localStorage.getItem(PORT_CACHE_KEY));
-				if (cached > 0) return `${hostBase()}:${cached}`;
-			} catch {}
-			return `${hostBase()}:${DEFAULT_PORT}`;
-		})();
+				const r = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(1500) });
+				if (!r.ok) return false;
+				return (await r.json().catch(() => null))?.service === "djian-engine";
+			} catch {
+				return false;
+			}
+		}
+		function fragmentPort() {
+			try {
+				const m = /(?:^|[#&])djian-engine=(\d+)/.exec(window.location.hash || "");
+				const p = m ? Number(m[1]) : 0;
+				return p > 0 && p < 65536 ? p : 0;
+			} catch {
+				return 0;
+			}
+		}
 		let discovery = null;
+		let generation = 0;
 		function ensureEngineBase() {
 			if (typeof window === "undefined") return Promise.resolve();
-			discovery ?? (discovery = (async () => {
+			discovery ?? (discovery = (async (gen) => {
+				const candidates = [];
+				const frag = fragmentPort();
+				if (frag > 0) candidates.push(frag);
 				let cached = 0;
 				try {
 					cached = Number(window.localStorage.getItem(PORT_CACHE_KEY));
 				} catch {}
-				const candidates = cached > 0 ? [cached] : [];
+				if (cached > 0) candidates.push(cached);
 				for (let p = DEFAULT_PORT; p <= 5190; p++) if (!candidates.includes(p)) candidates.push(p);
-				for (const p of candidates) try {
-					if ((await fetch(`${hostBase()}:${p}/api/health`, { signal: AbortSignal.timeout(1500) })).ok) {
-						try {
-							window.localStorage.setItem(PORT_CACHE_KEY, String(p));
-						} catch {}
-						API_BASE = `${hostBase()}:${p}`;
-						return;
-					}
-				} catch {}
-			})());
+				for (const p of candidates) if (await isEngine(`${hostBase()}:${p}`)) {
+					if (gen !== generation) return;
+					try {
+						window.localStorage.setItem(PORT_CACHE_KEY, String(p));
+					} catch {}
+					applyBase(p);
+					return;
+				}
+			})(generation));
 			return discovery;
+		}
+		let lastHealAt = 0;
+		async function apiFetch(path, init) {
+			try {
+				return await fetch(`${API_BASE}${path}`, init);
+			} catch (e) {
+				if (!(e instanceof TypeError)) throw e;
+				if (Date.now() - lastHealAt < 1e4) throw e;
+				lastHealAt = Date.now();
+				discovery = null;
+				generation++;
+				try {
+					window.localStorage.removeItem(PORT_CACHE_KEY);
+				} catch {}
+				await ensureEngineBase();
+				return fetch(`${API_BASE}${path}`, init);
+			}
 		}
 		ensureEngineBase();
 		async function searchLibrary(q, kind, page) {
-			const r = await fetch(`${API_BASE}/api/library/search?q=${encodeURIComponent(q)}&type=${kind}&page=${page}`);
+			const r = await apiFetch(`/api/library/search?q=${encodeURIComponent(q)}&type=${kind}&page=${page}`);
 			const d = await r.json().catch(() => ({}));
 			if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
 			return d;
 		}
 		async function importLibrary(url, name, kind) {
-			const r = await fetch(`${API_BASE}/api/library/import`, {
+			const r = await apiFetch(`/api/library/import`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({

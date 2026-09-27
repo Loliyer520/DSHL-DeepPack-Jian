@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "type": "profile",
   "name": "djian",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "displayName": {
     "zh-CN": "D剪 · AI 视频剪辑工作台",
     "en-US": "Djian · AI Video Editing Workbench"
@@ -13,6 +13,7 @@
   },
   "author": "Loliy",
   "profileName": "djian",
+  "dshVersion": "0.1.5-rc.3",
   "bundles": [
     "@deepseek-ai/dsh-base",
     "@deepseek-ai/dsh-web-app"
