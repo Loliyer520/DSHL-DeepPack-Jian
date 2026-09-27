@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
-import type { Timeline, Clip, Overlay, AudioClip } from "../../engine/src/schema";import { demoSessions, nextId, emptyTimeline, fmtSec, type Session, type ChatMessage } from "./data";
+import type { Timeline, Clip, Overlay, AudioClip } from "../../engine/src/schema";import { demoSessions, nextId, emptyTimeline, fmtSec, type Session, type ChatMessage, type NewProjectConfig } from "./data";
 
 // ---------- 全局状态：会话列表 + 当前会话（消息 + 时间线） ----------
 // 核心约定：所有剪辑操作（用户手动 or AI 下发）都向当前会话注入 system 消息，
@@ -12,7 +12,7 @@ interface Store {
   active: Session;
   aiPending: boolean;
   setActive: (id: string) => void;
-  newSession: () => void;
+  createProject: (config: NewProjectConfig) => void;
   sendUserMessage: (text: string) => void;
   // 剪辑操作（都会注入系统消息）
   addClip: () => void;
@@ -409,14 +409,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       active,
       aiPending,
       setActive: setActiveId,
-      newSession: () => {
+      createProject: (config) => {
         const id = nextId("s");
         const session: Session = {
           id,
-          title: "新会话",
+          title: config.title,
           updatedAt: Date.now(),
-          messages: [{ id: nextId("m"), role: "system", title: "系统", text: "会话已创建", time: Date.now() }],
-          timeline: emptyTimeline(),
+          messages: [
+            {
+              id: nextId("m"),
+              role: "system",
+              title: "系统",
+              text: `项目「${config.title}」已创建 · ${config.width}×${config.height} · ${config.fps}fps`,
+              time: Date.now(),
+            },
+          ],
+          timeline: emptyTimeline({ fps: config.fps, width: config.width, height: config.height }),
         };
         setSessions((prev) => [session, ...prev]);
         setActiveId(id);
@@ -425,7 +433,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const now = Date.now();
         mutateActive((s) => ({
           ...s,
-          title: s.title === "新会话" ? text.slice(0, 18) : s.title,
+          title: s.title === "未命名项目" ? text.slice(0, 18) : s.title,
           messages: [...s.messages, { id: nextId("m"), role: "user", text, time: now }],
         }));
         // 真实 AI 后端：POST /api/chat，模型返回 reply + 结构化剪辑 ops

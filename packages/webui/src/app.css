@@ -873,3 +873,130 @@
   background: rgba(220, 60, 60, 0.12);
   color: rgb(200, 50, 50);
 }
+
+/* ===== 新建项目弹窗：遮罩 + 卡片 + chips（配色走主题令牌，明暗通吃） ===== */
+.npd-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 17, 21, 0.4);
+  backdrop-filter: blur(2px);
+}
+
+.npd-card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 400px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  padding: 16px 18px 18px;
+  border: 0.5px solid var(--border-l3);
+  border-radius: 16px;
+  background: var(--bg-layer-1);
+  box-shadow: var(--elevation-soft);
+}
+
+.npd-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.npd-title {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+  color: var(--label-primary);
+}
+
+.npd-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.npd-label {
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--label-secondary);
+}
+
+.npd-name-wrap {
+  width: 100%;
+}
+
+.npd-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.npd-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  height: 30px;
+  padding: 0 12px;
+  border: 0.5px solid var(--border-l4);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--label-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-in-out),
+    border-color var(--dur-fast) var(--ease-in-out);
+}
+
+.npd-chip:hover {
+  background: var(--fill-hover);
+}
+
+.npd-chip.selected {
+  border-color: var(--business-primary);
+  background: var(--info-soft);
+}
+
+.npd-chip-hint {
+  font-size: 11px;
+  color: var(--label-tertiary);
+}
+
+.npd-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.npd-btn {
+  height: 32px;
+  padding: 0 16px;
+  border: 0.5px solid var(--border-l4);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--label-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-in-out);
+}
+
+.npd-btn:hover {
+  background: var(--fill-hover);
+}
+
+.npd-btn.primary {
+  border-color: transparent;
+  background: var(--button-info-fill);
+  color: #fff;
+}
+
+.npd-btn.primary:hover {
+  background: var(--button-info-hover);
+}

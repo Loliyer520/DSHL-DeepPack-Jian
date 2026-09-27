@@ -21,6 +21,14 @@ export interface Session {
   timeline: Timeline;
 }
 
+// 新建项目弹窗的初始设置：落进 timeline.meta，项目名做会话标题
+export interface NewProjectConfig {
+  title: string;
+  fps: number;
+  width: number;
+  height: number;
+}
+
 let seq = 0;
 export const nextId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${(seq++).toString(36)}`;
 
