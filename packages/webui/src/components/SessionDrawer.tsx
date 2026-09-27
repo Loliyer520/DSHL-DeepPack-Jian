@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useStore } from "../store";
 import { NewProjectDialog } from "./NewProjectDialog";
+import { IconClapper, IconPanel, IconPlus } from "./icons";
 
 // 左侧会话抽屉：照抄 dsh SidebarRoot + WorkspaceBrowser Rows
 // 结构：品牌行（60px，wordmark + 右侧收起圆钮）→ 新建项目条（38px/12px 圆角/0.5px 边）
@@ -26,22 +27,19 @@ export const SessionDrawer: React.FC<{ open: boolean; onToggle: () => void }> = 
         {/* 品牌行：figma I133:7632，wordmark 墨色 + 右侧 panel toggle */}
         <div className="logo-row">
           <div className="brand-identity">
-            <span className="brand-mark">🎬</span>
+            <span className="brand-mark">
+              <IconClapper size={15} />
+            </span>
             <span className="brand-name">D剪</span>
           </div>
           <button className="icon-circle" title="收起侧栏" onClick={onToggle}>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="1.3" />
-              <path d="M6 2.5v11" stroke="currentColor" strokeWidth="1.3" />
-            </svg>
+            <IconPanel size={16} />
           </button>
         </div>
 
         {/* 新建项目条：figma 133:7634，38px 高 12px 圆角带边；点击先弹设置面板 */}
         <button className="new-session-bar" onClick={() => setCreating(true)}>
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M7 2v10M2 7h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-          </svg>
+          <IconPlus size={14} />
           <span>新建项目</span>
         </button>
 

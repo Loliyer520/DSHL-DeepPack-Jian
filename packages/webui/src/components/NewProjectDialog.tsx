@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { IconClose } from "./icons";
 
 // 新建项目弹窗：点「新建项目」先落初始设置（项目名/画布比例/分辨率/帧率），
 // 确认后才真正创建会话——对齐剪映/PR 的序列预设流程。
@@ -70,7 +71,7 @@ export const NewProjectDialog: React.FC<{
         <div className="npd-title-row">
           <span className="npd-title">新建项目</span>
           <button className="icon-btn" title="关闭" onClick={onCancel}>
-            ✕
+            <IconClose size={14} />
           </button>
         </div>
 

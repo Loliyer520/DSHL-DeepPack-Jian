@@ -5,6 +5,7 @@ import { ChatView } from "./components/ChatView";
 import { PreviewPanel } from "./components/PreviewPanel";
 import { TimelineEditor } from "./components/TimelineEditor";
 import { useStore } from "./store";
+import { IconMoon, IconPanel, IconSun } from "./components/icons";
 
 // 布局照 dsh 原页面：左抽屉（会话）/ 中对话 / 右栏（预览 + 剪辑），grid 三列
 const Shell: React.FC = () => {
@@ -32,7 +33,7 @@ const Shell: React.FC = () => {
         <header className="topbar">
           {!drawerOpen && (
             <button className="icon-btn" title="展开侧栏" onClick={() => setDrawerOpen(true)}>
-              »
+              <IconPanel size={16} />
             </button>
           )}
           <span className="topbar-title">{active.title}</span>
@@ -42,7 +43,7 @@ const Shell: React.FC = () => {
             title={theme === "dark" ? "切换到浅色" : "切换到暗色"}
             onClick={toggleTheme}
           >
-            {theme === "dark" ? "☀" : "☾"}
+            {theme === "dark" ? <IconSun size={16} /> : <IconMoon size={16} />}
           </button>
         </header>
         <ChatView />

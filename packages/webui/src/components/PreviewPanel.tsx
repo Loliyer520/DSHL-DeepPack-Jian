@@ -84,7 +84,7 @@ export const PreviewPanel: React.FC = () => {
           {(durationInFrames / t.meta.fps).toFixed(1)}s
         </span>
         {exp.phase === "idle" && (
-          <button className="export-btn" onClick={startExport}>
+          <button className="export-btn primary" onClick={startExport}>
             导出
           </button>
         )}

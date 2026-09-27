@@ -3,17 +3,19 @@ import { useStore } from "../store";
 import { fmtSec } from "../data";
 import type { Clip } from "../../../engine/src/schema";
 import { ANIMATION_PRESETS, expandAnimationPreset } from "../../../engine/src/presets";
+import { IconClose, IconGrip, IconNote, IconPlus, IconScissors, IconVolume } from "./icons";
 
-// 右下：剪辑面板（dsh 风格）——strip 标题行 + 行式编辑卡片
-// v2 多轨：片段=主轨道；画中画区（绝对时间+盒子预设）；音频区（轨音量/静音+clip）
-// 输入框照 dsh ui-primitives Input：32px 高、0.5px border-l4、8px 圆角、聚焦墨色边
+// 右下：剪辑面板——strip 标题行 + 行式编辑卡片
+// v2 多轨：片段=主轨道；画中画区（绝对时间+盒子预设）；音频区（轨静音+clip）
+// 卡片类别色轨：片段蓝 / 画中画紫 / 音频青 / 字幕琥珀，与轨道视图一一对应
 const NumberField: React.FC<{
   label: string;
   value: number;
+  unit?: string;
   step?: number;
   min?: number;
   onCommit: (v: number) => void;
-}> = ({ label, value, step = 0.5, min = 0, onCommit }) => {
+}> = ({ label, value, unit, step = 0.5, min = 0, onCommit }) => {
   return (
     <label className="num-field">
       <span className="num-label">{label}</span>
@@ -33,10 +35,18 @@ const NumberField: React.FC<{
             if (e.key === "Enter") (e.target as HTMLInputElement).blur();
           }}
         />
+        {unit && <span className="input-unit">{unit}</span>}
       </span>
     </label>
   );
 };
+
+// 删除钮：24px 幽灵钮，hover 才转危险色
+const DeleteBtn: React.FC<{ title: string; onClick: () => void }> = ({ title, onClick }) => (
+  <button className="icon-btn-ghost danger" title={title} onClick={onClick}>
+    <IconClose size={13} />
+  </button>
+);
 
 // 滤镜预设（与面板 FilterSelect 同集）
 const FILTER_PRESETS: Array<{ label: string; filter: Exclude<Clip["filter"], undefined> }> = [
@@ -70,8 +80,8 @@ const AnimSelect: React.FC<{ clip: Clip }> = ({ clip }) => {
         e.target.value = "";
       }}
     >
-      <option value="">✨ 动画…</option>
-      {clip.animations && Object.keys(clip.animations).length > 0 && <option value="__clear">✕ 清除动画</option>}
+      <option value="">动画…</option>
+      {clip.animations && Object.keys(clip.animations).length > 0 && <option value="__clear">清除动画</option>}
       {ANIM_GROUPS.map((g) => (
         <optgroup key={g} label={g}>
           {Object.entries(ANIMATION_PRESETS)
@@ -88,40 +98,42 @@ const AnimSelect: React.FC<{ clip: Clip }> = ({ clip }) => {
 const ClipRow: React.FC<{ clip: Clip; index: number; splitAt?: number }> = ({ clip, index, splitAt }) => {
   const { updateClip, removeClip, splitClip } = useStore();
   return (
-    <div className="edit-card clip-card" data-index={index} draggable onDragStart={(e) => {
+    <div className="edit-card cat-video clip-card" data-index={index} draggable onDragStart={(e) => {
       e.dataTransfer.setData("text/clip-index", String(index));
       e.dataTransfer.effectAllowed = "move";
     }}>
       <div className="edit-card-head">
-        <span className="drag-handle" title="拖拽排序">⋮⋮</span>
-        <span className="edit-card-title">
-          #{index + 1} {clip.src}
+        <span className="drag-handle" title="拖拽排序">
+          <IconGrip />
         </span>
+        <span className="clip-index">{index + 1}</span>
+        <span className="edit-card-title" title={clip.src}>{clip.src}</span>
         <select
           className="chip-select"
+          style={{ width: "auto", flex: "none" }}
           value={clip.transition}
           onChange={(e) => updateClip(clip.id, { transition: e.target.value as Clip["transition"] })}
         >
           <option value="none">无转场</option>
           <option value="fade">淡入</option>
         </select>
-        <button className="icon-circle danger" title="分割片段" onClick={() => splitAt !== undefined && splitClip(clip.id, splitAt)}>✂</button>
-        <button className="icon-circle danger" title="删除片段" onClick={() => removeClip(clip.id)}>
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-            <path d="M2.5 2.5l8 8M10.5 2.5l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-          </svg>
+        <button className="icon-btn-ghost" title="分割片段" onClick={() => splitAt !== undefined && splitClip(clip.id, splitAt)}>
+          <IconScissors size={14} />
         </button>
+        <DeleteBtn title="删除片段" onClick={() => removeClip(clip.id)} />
       </div>
       <div className="edit-card-fields">
-        <NumberField label="起点(s)" value={clip.inPoint} onCommit={(v) => updateClip(clip.id, { inPoint: v })} />
+        <NumberField label="起点" unit="s" value={clip.inPoint} onCommit={(v) => updateClip(clip.id, { inPoint: v })} />
         <NumberField
-          label="时长(s)"
+          label="时长"
+          unit="s"
           value={clip.clipDuration}
           min={0.1}
           onCommit={(v) => updateClip(clip.id, { clipDuration: v })}
         />
         <NumberField
           label="音量"
+          unit="×"
           value={clip.volume}
           step={0.1}
           min={0}
@@ -129,11 +141,14 @@ const ClipRow: React.FC<{ clip: Clip; index: number; splitAt?: number }> = ({ cl
         />
         <NumberField
           label="速度"
+          unit="×"
           value={clip.speed ?? 1}
           step={0.25}
           min={0.1}
           onCommit={(v) => updateClip(clip.id, { speed: Math.min(10, Math.max(0.1, v)) })}
         />
+      </div>
+      <div className="edit-card-selects">
         <select
           className="chip-select"
           value={clip.filter ? JSON.stringify(clip.filter) : ""}
@@ -170,12 +185,13 @@ const BOX_PRESETS: Array<{ label: string; box: { x: number; y: number; w: number
 const PipRow: React.FC<{ clip: Clip }> = ({ clip }) => {
   const { updateClip, removeClip } = useStore();
   return (
-    <div className="edit-card overlay-row">
-      <span className="edit-card-title" style={{ maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+    <div className="edit-card cat-pip overlay-row">
+      <span className="edit-card-title" style={{ maxWidth: 110, flexBasis: 110 }} title={clip.src}>
         {clip.src}
       </span>
       <select
         className="chip-select"
+        style={{ width: 128, flex: "none" }}
         value={clip.box ? JSON.stringify(clip.box) : ""}
         onChange={(e) => {
           const v = e.target.value;
@@ -194,13 +210,9 @@ const PipRow: React.FC<{ clip: Clip }> = ({ clip }) => {
           </option>
         ))}
       </select>
-      <NumberField label="从(s)" value={clip.atSeconds ?? 0} onCommit={(v) => updateClip(clip.id, { atSeconds: Math.max(0, v) })} />
-      <NumberField label="时长(s)" value={clip.clipDuration} min={0.1} onCommit={(v) => updateClip(clip.id, { clipDuration: v })} />
-      <button className="icon-circle danger" title="删除画中画" onClick={() => removeClip(clip.id)}>
-        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-          <path d="M2.5 2.5l8 8M10.5 2.5l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-        </svg>
-      </button>
+      <NumberField label="从" unit="s" value={clip.atSeconds ?? 0} onCommit={(v) => updateClip(clip.id, { atSeconds: Math.max(0, v) })} />
+      <NumberField label="时长" unit="s" value={clip.clipDuration} min={0.1} onCommit={(v) => updateClip(clip.id, { clipDuration: v })} />
+      <DeleteBtn title="删除画中画" onClick={() => removeClip(clip.id)} />
     </div>
   );
 };
@@ -208,24 +220,21 @@ const PipRow: React.FC<{ clip: Clip }> = ({ clip }) => {
 const AudioRow: React.FC<{ clip: import("../../../engine/src/schema").AudioClip }> = ({ clip }) => {
   const { removeClip, updateClip } = useStore();
   return (
-    <div className="edit-card overlay-row">
-      <span className="edit-card-title" style={{ maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        ♪ {clip.src}
+    <div className="edit-card cat-audio overlay-row">
+      <span className="edit-card-title" style={{ maxWidth: 90, flexBasis: 90 }} title={clip.src}>
+        {clip.src}
       </span>
-      <NumberField label="从(s)" value={clip.atSeconds} onCommit={(v) => updateClip(clip.id, { atSeconds: Math.max(0, v) })} />
-      <NumberField label="时长(s)" value={clip.duration} min={0.1} onCommit={(v) => updateClip(clip.id, { duration: v })} />
+      <NumberField label="从" unit="s" value={clip.atSeconds} onCommit={(v) => updateClip(clip.id, { atSeconds: Math.max(0, v) })} />
+      <NumberField label="时长" unit="s" value={clip.duration} min={0.1} onCommit={(v) => updateClip(clip.id, { duration: v })} />
       <NumberField
         label="音量"
+        unit="×"
         value={clip.volume}
         step={0.1}
         min={0}
         onCommit={(v) => updateClip(clip.id, { volume: Math.min(1, Math.max(0, v)) })}
       />
-      <button className="icon-circle danger" title="删除音频片段" onClick={() => removeClip(clip.id)}>
-        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-          <path d="M2.5 2.5l8 8M10.5 2.5l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-        </svg>
-      </button>
+      <DeleteBtn title="删除音频片段" onClick={() => removeClip(clip.id)} />
     </div>
   );
 };
@@ -261,26 +270,24 @@ export const TimelineEditor: React.FC = () => {
       <div className="panel-strip">
         <span className="panel-strip-title">剪辑</span>
         <span className="panel-strip-meta">
-          {mainClips.length} 段{pipClips.length ? ` · 画中画×${pipClips.length}` : ""}
-          {t.audioTracks.length ? ` · 音频×${t.audioTracks.reduce((s, tr) => s + tr.clips.length, 0)}` : ""} · {t.overlays.length} 字幕
+          {mainClips.length} 段{pipClips.length ? ` · 画中画 ${pipClips.length}` : ""}
+          {t.audioTracks.length ? ` · 音频 ${t.audioTracks.reduce((s, tr) => s + tr.clips.length, 0)}` : ""} · 字幕 {t.overlays.length}
         </span>
       </div>
       <div className="panel-body editor-body">
         <div className="editor-section">
           <div className="section-head">
-            <span>片段（主轨道）</span>
-            <span style={{ display: "flex", gap: 6 }}>
-              <button className="chip-select" style={{ cursor: "pointer" }} title="加画中画叠加" onClick={addPip}>
+            <span>片段 · 主轨道</span>
+            <span style={{ display: "flex", gap: 4 }}>
+              <button className="chip-select chip-btn" style={{ cursor: "pointer" }} title="加画中画叠加" onClick={addPip}>
                 画中画
               </button>
-              <button className="icon-circle" title="添加片段" onClick={addClip}>
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <path d="M7 2v10M2 7h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                </svg>
+              <button className="icon-btn-ghost" title="添加片段" onClick={addClip}>
+                <IconPlus size={15} />
               </button>
             </span>
           </div>
-          {mainClips.length === 0 && <div className="section-empty">主轨道空</div>}
+          {mainClips.length === 0 && <div className="section-empty">主轨道还没有片段 · 点右上角 + 添加</div>}
           <div onDragOver={onDragOver} onDrop={onDrop}>
             {(() => {
               let acc = 0;
@@ -297,7 +304,7 @@ export const TimelineEditor: React.FC = () => {
           <div className="section-head">
             <span>画中画</span>
           </div>
-          {pipClips.length === 0 && <div className="section-empty">无叠加片段</div>}
+          {pipClips.length === 0 && <div className="section-empty">暂无叠加片段</div>}
           {pipClips.map((c) => (
             <PipRow key={c.id} clip={c} />
           ))}
@@ -307,26 +314,27 @@ export const TimelineEditor: React.FC = () => {
           <div className="section-head">
             <span>音频</span>
             <button
-              className="chip-select"
+              className="chip-select chip-btn"
               style={{ cursor: "pointer" }}
               title="加一条测试音频（a.mp4 声道）"
               onClick={() => addAudio("a.mp4", 5)}
             >
-              + 测试音
+              测试音
             </button>
           </div>
-          {t.audioTracks.length === 0 && <div className="section-empty">无音频轨</div>}
+          {t.audioTracks.length === 0 && <div className="section-empty">暂无音频轨</div>}
           {t.audioTracks.map((tr) => (
             <div key={tr.id}>
               <div className="edit-card-head" style={{ padding: "2px 0" }}>
-                <span className="edit-card-title">♪ {tr.name ?? "音频"}</span>
+                <IconNote size={13} />
+                <span className="edit-card-title">{tr.name ?? "音频"}</span>
                 <button
-                  className="chip-select"
-                  style={{ cursor: "pointer", opacity: tr.muted ? 0.5 : 1 }}
+                  className="icon-btn-ghost"
+                  style={tr.muted ? { color: "var(--c-danger)" } : undefined}
                   title={tr.muted ? "取消静音" : "静音"}
                   onClick={() => updateAudioTrack(tr.id, { muted: !tr.muted })}
                 >
-                  {tr.muted ? "🔇 已静音" : "🔊"}
+                  <IconVolume size={14} off={tr.muted} />
                 </button>
               </div>
               {tr.clips.map((c) => (
@@ -339,15 +347,13 @@ export const TimelineEditor: React.FC = () => {
         <div className="editor-section">
           <div className="section-head">
             <span>字幕</span>
-            <button className="icon-circle" title="添加字幕" onClick={addOverlay}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M7 2v10M2 7h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-              </svg>
+            <button className="icon-btn-ghost" title="添加字幕" onClick={addOverlay}>
+              <IconPlus size={15} />
             </button>
           </div>
-          {t.overlays.length === 0 && <div className="section-empty">无字幕</div>}
+          {t.overlays.length === 0 && <div className="section-empty">暂无字幕</div>}
           {t.overlays.map((o, i) => (
-            <div className="edit-card overlay-row" key={i}>
+            <div className="edit-card cat-sub overlay-row" key={i}>
               <span className="input-wrap overlay-text-wrap">
                 <input
                   className="input-inner"
@@ -364,11 +370,7 @@ export const TimelineEditor: React.FC = () => {
               <span className="overlay-range">
                 {fmtSec(o.startSeconds)}–{fmtSec(o.endSeconds)}
               </span>
-              <button className="icon-circle danger" title="删除字幕" onClick={() => removeOverlay(i)}>
-                <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                  <path d="M2.5 2.5l8 8M10.5 2.5l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                </svg>
-              </button>
+              <DeleteBtn title="删除字幕" onClick={() => removeOverlay(i)} />
             </div>
           ))}
         </div>

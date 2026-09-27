@@ -1,4 +1,6 @@
-/* D剪主题令牌 —— 取自 deepseek-harness ui-theme design-platform.css（dsh 原页面风格） */
+/* D剪主题令牌 —— dsh design-platform 底座 + 专业 NLE 语义色层
+   原则：表面分层（base/raised/overlay 三级）、发丝线分隔、语义轨道色只做
+   低饱和填充 + 高饱和描边点睛、一切数字用 tabular-nums。 */
 :root {
   /* 品牌蓝（deepseek 系） */
   --ds-50: rgb(237, 243, 254);
@@ -51,12 +53,28 @@
   --button-floating-hover: var(--n-75);
   --business-primary: var(--ds-500);
   --interactive-bg-hover: rgba(38, 49, 72, 0.06);
-  --elevation-soft: 0 2px 12px rgba(15, 17, 21, 0.06);
+  --elevation-soft: 0 1px 2px rgba(15, 17, 21, 0.05), 0 4px 16px rgba(15, 17, 21, 0.07);
+  --elevation-pop: 0 4px 12px rgba(15, 17, 21, 0.1), 0 16px 48px rgba(15, 17, 21, 0.18);
   /* 剪辑轨道片段底色：浅色用品牌蓝浅阶，暗色降为半透明蓝（--ds-50 是固定浅蓝，不能直接用） */
   --info-soft: var(--ds-50);
 
+  /* ===== 轨道语义色（视频蓝 / 画中画紫 / 音频青 / 字幕琥珀）=====
+     浅色：solid 做描边与图标，soft 做填充；暗色镜像。 */
+  --c-video: var(--ds-500);
+  --c-video-soft: rgba(65, 118, 230, 0.1);
+  --c-pip: rgb(124, 92, 224);
+  --c-pip-soft: rgba(124, 92, 224, 0.1);
+  --c-audio: rgb(13, 148, 136);
+  --c-audio-soft: rgba(13, 148, 136, 0.1);
+  --c-sub: rgb(180, 120, 16);
+  --c-sub-soft: rgba(180, 120, 16, 0.1);
+  --c-danger: rgb(211, 64, 90);
+  --c-danger-soft: rgba(211, 64, 90, 0.1);
+  --ring-color: rgba(65, 118, 230, 0.35);
+
   /* 动效（dsh deepsuite 曲线） */
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
   --dur-fast: 0.1s;
   --dur: 0.2s;
   --dur-slow: 0.3s;
@@ -64,33 +82,50 @@
   --chat-content-width: 748px;
   --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
 }
 
 [data-theme="dark"] {
-  --bg-base: var(--n-950);
-  --sidebar-fill: var(--n-900);
-  --border-l3: rgba(255, 255, 255, 0.16);
-  --border-l2: rgba(255, 255, 255, 0.1);
-  --label-primary: var(--n-50);
-  --label-secondary: var(--n-300);
-  --label-tertiary: rgba(249, 250, 251, 0.4);
+  /* 冷石墨阶：base < sidebar < raised，靠色阶+发丝线分层而不是靠阴影堆 */
+  --bg-base: #0f1115;
+  --sidebar-fill: #13161b;
+  --n-850: #1a1e25;
+  --n-875: #161a20;
+  --bubble: #1d222a;
+  --input-major: #1a1f26;
+  --bg-layer-1: #1a1f26;
+  --border-l3: rgba(255, 255, 255, 0.14);
+  --border-l2: rgba(255, 255, 255, 0.08);
+  --border-l4: rgba(255, 255, 255, 0.18);
+  --label-primary: #e8ebf0;
+  --label-secondary: #9aa3b0;
+  --label-tertiary: rgba(232, 235, 240, 0.42);
   --fill-hover: rgba(255, 255, 255, 0.06);
   --fill-active: rgba(255, 255, 255, 0.1);
-  --bubble: var(--n-850);
-  --input-major: var(--n-850);
-  --bg-layer-1: var(--n-875);
-  --border-l4: rgba(255, 255, 255, 0.2);
   --brand-primary: var(--n-50);
-  --label-caption: var(--n-600);
+  --label-caption: #6b7482;
   --label-primary-dimmed: var(--n-100);
   --button-info-fill: var(--ds-400);
-  --button-info-hover: var(--ds-500);
-  --button-elevated-fill: var(--n-750);
-  --button-floating-hover: var(--n-800);
+  --button-info-hover: rgb(126, 174, 255);
+  --button-elevated-fill: #232932;
+  --button-floating-hover: #272e38;
   --business-primary: var(--ds-400);
   --interactive-bg-hover: rgba(255, 255, 255, 0.08);
-  --elevation-soft: 0 2px 12px rgba(0, 0, 0, 0.4);
-  --info-soft: rgba(65, 118, 230, 0.18);
+  --elevation-soft: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.32);
+  --elevation-pop: 0 4px 12px rgba(0, 0, 0, 0.45), 0 20px 56px rgba(0, 0, 0, 0.5);
+  --info-soft: rgba(65, 118, 230, 0.16);
+
+  --c-video: var(--ds-400);
+  --c-video-soft: rgba(103, 158, 254, 0.14);
+  --c-pip: rgb(150, 122, 245);
+  --c-pip-soft: rgba(150, 122, 245, 0.15);
+  --c-audio: rgb(45, 199, 182);
+  --c-audio-soft: rgba(45, 199, 182, 0.13);
+  --c-sub: rgb(233, 168, 58);
+  --c-sub-soft: rgba(233, 168, 58, 0.13);
+  --c-danger: rgb(246, 95, 121);
+  --c-danger-soft: rgba(246, 95, 121, 0.12);
+  --ring-color: rgba(103, 158, 254, 0.4);
 }
 
 html,
@@ -107,6 +142,7 @@ body {
   color: var(--label-primary);
   background: var(--bg-base);
   font-size: 14px;
+  text-rendering: optimizeLegibility;
 }
 
 button,
@@ -118,4 +154,34 @@ textarea {
 
 * {
   box-sizing: border-box;
+}
+
+/* 键盘可达性：统一聚焦环（鼠标点击不出环） */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring-color);
+}
+
+/* 纤细滚动条：hover 才显形，不抢内容 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border: 3px solid transparent;
+  border-radius: 8px;
+  background-clip: padding-box;
+}
+*:hover > ::-webkit-scrollbar-thumb,
+*:hover::-webkit-scrollbar-thumb {
+  background: var(--border-l4);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--label-caption);
+  background-clip: padding-box;
 }

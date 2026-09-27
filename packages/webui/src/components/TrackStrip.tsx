@@ -2,10 +2,11 @@ import React, { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { playerBus, seekToSeconds } from "../playerBus";
 import { fmtSec } from "../data";
+import { IconNote } from "./icons";
 import { timelineDurationInFrames } from "../../../engine/src/schema";
 
-// 轨道视图（v2 多轨）：主轨串行块 + 叠加轨/音频轨绝对块，共用一条时间轴
-// 点击片段块或轨道空白 → seek；播放头位置 = currentFrame / totalFrames
+// 轨道视图（v2 多轨）：时间标尺 + 主轨串行块 + 叠加轨/音频轨绝对块
+// 点击标尺/泳道空白 → seek；播放头位置 = currentFrame / totalFrames
 export const TrackStrip: React.FC = () => {
   const { active } = useStore();
   const t = active.timeline;
@@ -33,6 +34,10 @@ export const TrackStrip: React.FC = () => {
     seekToSeconds(frac * total, t.meta.fps);
   };
 
+  // 标尺刻度：按总时长取 4~6 段，短片不挤
+  const tickCount = total <= 12 ? 4 : 6;
+  const ticks = Array.from({ length: tickCount + 1 }, (_, i) => (total / tickCount) * i);
+
   const main = t.videoTracks[0];
   const overlays = t.videoTracks.slice(1);
   let acc = 0;
@@ -42,9 +47,18 @@ export const TrackStrip: React.FC = () => {
     return { clip: c, start, widthPct: (c.clipDuration / total) * 100 };
   });
 
-  const Row: React.FC<{ name: string; children: React.ReactNode }> = ({ name, children }) => (
+  const Row: React.FC<{ name: string; dot?: "tv" | "tp" | "ta"; icon?: React.ReactNode; children: React.ReactNode }> = ({
+    name,
+    dot,
+    icon,
+    children,
+  }) => (
     <div className="track-row" onClick={onSeek}>
-      <span className="track-row-name">{name}</span>
+      <span className="track-row-name">
+        {dot && <span className={`track-row-dot ${dot}`} />}
+        {icon}
+        {name}
+      </span>
       <div className="track-strip track-row-lane">
         {children}
         <div className="playhead" style={{ left: `${(Math.min(playhead, total) / total) * 100}%` }} />
@@ -54,11 +68,19 @@ export const TrackStrip: React.FC = () => {
 
   return (
     <div className="track-rows">
-      <Row name="视频">
+      {/* 时间标尺：与泳道左对齐（52px 行名 + 6px gap） */}
+      <div className="track-ruler" onClick={onSeek}>
+        {ticks.map((sec, i) => (
+          <span key={i} className="track-tick">
+            {fmtSec(sec)}
+          </span>
+        ))}
+      </div>
+      <Row name="视频" dot="tv">
         {blocks.map(({ clip, start, widthPct }) => (
           <div
             key={clip.id}
-            className={`track-block ${clip.transition === "fade" ? "has-fade" : ""}`}
+            className={`track-block tb-video ${clip.transition === "fade" ? "has-fade" : ""}`}
             style={{ width: `${widthPct}%` }}
             title={`${clip.src} · ${fmtSec(start)}–${fmtSec(start + clip.clipDuration)}`}
           >
@@ -67,11 +89,11 @@ export const TrackStrip: React.FC = () => {
         ))}
       </Row>
       {overlays.map((tr) => (
-        <Row key={tr.id} name={tr.name ?? "画中画"}>
+        <Row key={tr.id} name={tr.name ?? "画中画"} dot="tp">
           {tr.clips.map((c) => (
             <div
               key={c.id}
-              className="track-block track-pip-block"
+              className="track-block tb-pip"
               style={{
                 position: "absolute",
                 left: `${((c.atSeconds ?? 0) / total) * 100}%`,
@@ -85,11 +107,11 @@ export const TrackStrip: React.FC = () => {
         </Row>
       ))}
       {t.audioTracks.map((tr) => (
-        <Row key={tr.id} name={`♪ ${tr.name ?? "音频"}`}>
+        <Row key={tr.id} name={tr.name ?? "音频"} dot="ta" icon={<IconNote size={12} />}>
           {tr.clips.map((c) => (
             <div
               key={c.id}
-              className="track-block track-audio-block"
+              className="track-block tb-audio"
               style={{
                 position: "absolute",
                 left: `${(c.atSeconds / total) * 100}%`,
@@ -97,7 +119,7 @@ export const TrackStrip: React.FC = () => {
               }}
               title={`${c.src} · ${fmtSec(c.atSeconds)}–${fmtSec(c.atSeconds + c.duration)}`}
             >
-              <span className="track-block-label">♪ {c.src}</span>
+              <span className="track-block-label">{c.src}</span>
             </div>
           ))}
         </Row>
