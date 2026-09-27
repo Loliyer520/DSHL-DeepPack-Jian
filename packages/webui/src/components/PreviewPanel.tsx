@@ -53,6 +53,11 @@ export const PreviewPanel: React.FC = () => {
   useEffect(() => stopPolling, []);
 
   const startExport = async () => {
+    // 导出按服务端当前项目解析素材；会话还没绑定服务端项目时渲染必错，先拦下
+    if (!active.serverId) {
+      setExp({ phase: "error", message: "该会话还没有服务端项目：先发一条消息（自动创建项目）后再导出" });
+      return;
+    }
     setExp({ phase: "rendering", percent: 0 });
     try {
       const r = await fetch("/api/export", {

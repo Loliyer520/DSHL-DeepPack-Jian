@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Timeline, Clip, Overlay, AudioClip } from "../../engine/src/schema";import { demoSessions, nextId, emptyTimeline, fmtSec, type Session, type ChatMessage, type NewProjectConfig } from "./data";
 
 // ---------- 全局状态：会话列表 + 当前会话（消息 + 时间线） ----------
@@ -92,6 +92,92 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     },
     [mutateActive],
   );
+
+  // ---- 会话=项目对齐（服务端 ~/.djian/projects/<id> 是落盘事实源） ----
+  // webui 会话 ↔ 服务端项目一一绑定：新建/升级时落盘，激活时对齐服务端 current，
+  // 这样 AI ops 落盘、导出渲染、素材解析都发生在当前会话自己的项目里。
+  const currentRef = useRef<string>(""); // 已对齐的服务端 current，防重复 POST
+  const touchedRef = useRef(false); // 启动恢复完成前用户是否已动手
+
+  const pushCurrent = useCallback((serverId: string): Promise<void> => {
+    if (currentRef.current === serverId) return Promise.resolve();
+    currentRef.current = serverId;
+    return fetch("/api/current", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: serverId }),
+    })
+      .then(() => undefined)
+      .catch(() => {
+        currentRef.current = ""; // 失败不记位，下次操作再试
+      });
+  }, []);
+
+  // 无 serverId 的会话（demo/纯前端模式）首次真用时升级为服务端项目
+  const ensureServerProject = useCallback(
+    (s: Session): Promise<string | null> => {
+      if (s.serverId) return pushCurrent(s.serverId).then(() => s.serverId ?? null);
+      return fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: s.title, meta: s.timeline.meta }),
+      })
+        .then(async (r) => (r.ok ? ((await r.json()) as { id?: string }) : null))
+        .then((d) => {
+          const pid = d?.id;
+          if (!pid) return null;
+          setSessions((prev) => prev.map((x) => (x.id === s.id ? { ...x, serverId: pid } : x)));
+          return pushCurrent(pid).then(() => pid);
+        })
+        .catch(() => null);
+    },
+    [pushCurrent],
+  );
+
+  // 启动恢复：服务端有项目则以项目为会话列表（一会话=一项目），失败/空保持 demo
+  useEffect(() => {
+    let dead = false;
+    fetch("/api/projects")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("unreachable"))))
+      .then(async (d: { projects?: { id: string; name: string; createdAt: string | null }[] }) => {
+        const projects = [...(d.projects ?? [])].reverse(); // 服务端按 createdAt 升序，抽屉要新项目在前
+        const restored = (await Promise.all(
+          projects.map(async (p): Promise<Session | null> => {
+            try {
+              const r = await fetch(`/api/projects/${p.id}/timeline`);
+              if (!r.ok) return null;
+              const td = await r.json();
+              if (!td?.timeline) return null;
+              return {
+                id: p.id,
+                serverId: p.id,
+                title: p.name,
+                updatedAt: (p.createdAt && Date.parse(p.createdAt)) || Date.now(),
+                messages: [
+                  { id: nextId("m"), role: "system", title: "系统", text: `已从服务端载入项目「${p.name}」`, time: Date.now() },
+                ],
+                timeline: td.timeline as Timeline,
+              };
+            } catch {
+              return null; // 单个项目拉不到就跳过
+            }
+          }),
+        )).filter((s): s is Session => Boolean(s));
+        if (dead || restored.length === 0) return;
+        if (touchedRef.current) {
+          setSessions((prev) => [...restored, ...prev]); // 用户已先动手：追加不打断
+        } else {
+          setSessions(restored);
+          setActiveId(restored[0].id);
+        }
+      })
+      .catch(() => {
+        /* 无服务端（纯静态/dev）：保持 demo 会话 */
+      });
+    return () => {
+      dead = true;
+    };
+  }, []);
 
   // ---- 共享剪辑原语（by = "手动剪辑" | "AI 剪辑"） ----
 
@@ -408,8 +494,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       activeId,
       active,
       aiPending,
-      setActive: setActiveId,
+      setActive: (id) => {
+        touchedRef.current = true;
+        setActiveId(id);
+        const s = sessions.find((x) => x.id === id);
+        if (s?.serverId) void pushCurrent(s.serverId); // 服务端 current 跟随激活会话
+      },
       createProject: (config) => {
+        touchedRef.current = true;
         const id = nextId("s");
         const session: Session = {
           id,
@@ -428,9 +520,23 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         };
         setSessions((prev) => [session, ...prev]);
         setActiveId(id);
+        // 服务端落盘同名项目并对齐 current（失败=纯前端模式，会话只留内存）
+        fetch("/api/projects", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: config.title, meta: { fps: config.fps, width: config.width, height: config.height } }),
+        })
+          .then(async (r) => (r.ok ? ((await r.json()) as { id?: string }) : null))
+          .then((d) => {
+            if (!d?.id) return;
+            setSessions((prev) => prev.map((x) => (x.id === id ? { ...x, serverId: d.id } : x)));
+            return pushCurrent(d.id);
+          })
+          .catch(() => {});
       },
       sendUserMessage: (text) => {
         const now = Date.now();
+        touchedRef.current = true;
         mutateActive((s) => ({
           ...s,
           title: s.title === "未命名项目" ? text.slice(0, 18) : s.title,
@@ -439,16 +545,29 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // 真实 AI 后端：POST /api/chat，模型返回 reply + 结构化剪辑 ops
         setAiPending(true);
         const snapshot = sessions.find((s) => s.id === activeId) ?? sessions[0];
-        fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            message: text,
-            sessionId: activeId,
-            timeline: snapshot.timeline,
-            history: snapshot.messages.slice(-8).map((m) => ({ role: m.role, text: m.text })),
-          }),
-        })
+        const renameTo = snapshot.title === "未命名项目" ? text.slice(0, 18) : null;
+        // 先把会话对到自己的服务端项目（demo 首聊自动升级），再进 AI——
+        // 保证 ops 落盘、素材解析发生在本会话的项目里，而不是全局 current
+        void ensureServerProject(snapshot)
+          .then((pid) => {
+            if (pid && renameTo) {
+              fetch(`/api/projects/${pid}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: renameTo }),
+              }).catch(() => {});
+            }
+            return fetch("/api/chat", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                message: text,
+                sessionId: activeId,
+                timeline: snapshot.timeline,
+                history: snapshot.messages.slice(-8).map((m) => ({ role: m.role, text: m.text })),
+              }),
+            });
+          })
           .then(async (res) => {
             if (res.status === 501) throw new Error("AI 未配置（501）");
             if (!res.ok) {
@@ -506,7 +625,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       removeOverlay: (index) => removeOverlayBy("手动剪辑", index),
       updateOverlay: (index, patch) => updateOverlayBy("手动剪辑", index, patch),
     }),
-    [sessions, activeId, active, aiPending, mutateActive, applyOps, addClipBy, addPipBy, addAudioBy, removeClipBy, splitClipBy, updateClipBy, reorderClipsBy, addOverlayBy, removeOverlayBy, updateOverlayBy],
+    [sessions, activeId, active, aiPending, mutateActive, applyOps, ensureServerProject, pushCurrent, addClipBy, addPipBy, addAudioBy, removeClipBy, splitClipBy, updateClipBy, reorderClipsBy, addOverlayBy, removeOverlayBy, updateOverlayBy],
   );
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

@@ -904,6 +904,13 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ok: true, id, name });
   }
   const projMatch = url.pathname.match(/^\/api\/projects\/([a-zA-Z0-9_-]+)$/);
+  // 单项目时间线直读（webui 启动恢复会话列表用；不翻动 current/绑定）
+  const projTimelineMatch = url.pathname.match(/^\/api\/projects\/([a-zA-Z0-9_-]+)\/timeline$/);
+  if (projTimelineMatch && req.method === "GET") {
+    const id = sanitizeId(projTimelineMatch[1]);
+    if (!fs.existsSync(projectDir(id))) return json(res, 404, { error: "项目不存在" });
+    return json(res, 200, { ok: true, id, timeline: loadTimelineFor(id) });
+  }
   if (projMatch && req.method === "PATCH") {
     const id = sanitizeId(projMatch[1]);
     const meta = readProjectMeta(id);

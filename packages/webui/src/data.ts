@@ -19,6 +19,8 @@ export interface Session {
   updatedAt: number;
   messages: ChatMessage[];
   timeline: Timeline;
+  /** 服务端项目 id（~/.djian/projects/<id>，一会话=一项目）；缺省 = 尚未落盘（demo/纯前端模式） */
+  serverId?: string;
 }
 
 // 新建项目弹窗的初始设置：落进 timeline.meta，项目名做会话标题
