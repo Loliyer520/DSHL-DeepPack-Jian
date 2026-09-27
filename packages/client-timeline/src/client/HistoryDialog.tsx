@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { API_BASE } from './api';
+import { apiFetch } from './api';
 
 interface SnapInfo {
   id: string;
@@ -14,7 +14,7 @@ export const HistoryDialog: React.FC<{ onClose: () => void; onRestored: () => vo
   const [err, setErr] = useState('');
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/history`)
+    apiFetch(`/api/history`)
       .then((r) => r.json())
       .then((d) => setSnaps(d.snapshots ?? []))
       .catch(() => setErr('历史列表加载失败'));
@@ -24,7 +24,7 @@ export const HistoryDialog: React.FC<{ onClose: () => void; onRestored: () => vo
     setBusy(id);
     setErr('');
     try {
-      const r = await fetch(`${API_BASE}/api/history/${encodeURIComponent(id)}`, { method: 'POST' });
+      const r = await apiFetch(`/api/history/${encodeURIComponent(id)}`, { method: 'POST' });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
       onRestored();

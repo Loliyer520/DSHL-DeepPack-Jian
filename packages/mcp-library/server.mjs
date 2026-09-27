@@ -20,17 +20,29 @@ import path from "node:path";
 // D剪 服务端口发现链（启动器 portAutoBump 后实际端口可能不是 5180）：
 // 显式 MEDIA_SERVER_URL → 启动器注入的 DSHL_SERVICE_PORTS JSON → profile 根
 // .dshl-service-ports.json（启动器写的全服务契约）→ 引擎自落盘的
-// engine-port.json（本进程 cwd=profile 根；HOME 场景再查 ~/.djian）→ 默认 5180。
-// 每次调用重解析：端口文件在引擎重启后会被覆写，缓存会拿到旧端口。
-function resolveServerBase() {
-  if (process.env.MEDIA_SERVER_URL) return process.env.MEDIA_SERVER_URL.replace(/\/+$/, "");
+// engine-port.json（本进程 cwd=profile 根；HOME 场景再查 ~/.djian）→ 探测 5180..5190
+// （与启动器顺延窗口一致）→ 默认 5180。
+// 除显式 env 外，每个候选都要过 /api/health 身份校验（service=djian-engine）：
+// 端口文件可能是上次崩溃留下的陈旧数据，端口也可能撞上别家服务。验证通过的地址
+// 进程内缓存，缓存失联（引擎重启换口）自动重扫——自愈，不盲信任何一层。
+let verifiedBase = "";
+async function engineAlive(base) {
+  try {
+    const res = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(1500) });
+    if (!res.ok) return false;
+    const j = await res.json().catch(() => null);
+    return j?.service === "djian-engine";
+  } catch { return false; }
+}
+function candidateBases() {
+  const list = [];
   const fromMap = (map) => {
     const p = Number(map?.["djian-engine"] ?? map?.port);
     return p > 0 ? `http://127.0.0.1:${p}` : null;
   };
   try {
     const viaEnv = fromMap(JSON.parse(process.env.DSHL_SERVICE_PORTS || "{}"));
-    if (viaEnv) return viaEnv;
+    if (viaEnv) list.push(viaEnv);
   } catch { /* 非法 JSON 忽略 */ }
   const files = [
     path.join(process.cwd(), ".dshl-service-ports.json"),
@@ -40,9 +52,22 @@ function resolveServerBase() {
   for (const f of files) {
     try {
       const viaFile = fromMap(JSON.parse(fs.readFileSync(f, "utf-8")));
-      if (viaFile) return viaFile;
+      if (viaFile) list.push(viaFile);
     } catch { /* 文件不存在或尚未写入 */ }
   }
+  for (let p = 5180; p <= 5190; p++) list.push(`http://127.0.0.1:${p}`);
+  return [...new Set(list)];
+}
+async function resolveServerBase() {
+  if (process.env.MEDIA_SERVER_URL) return process.env.MEDIA_SERVER_URL.replace(/\/+$/, "");
+  if (verifiedBase && (await engineAlive(verifiedBase))) return verifiedBase;
+  for (const base of candidateBases()) {
+    if (await engineAlive(base)) {
+      verifiedBase = base;
+      return base;
+    }
+  }
+  verifiedBase = "";
   return "http://127.0.0.1:5180";
 }
 const FALLBACK_DIR = process.env.MEDIA_DOWNLOAD_DIR || path.resolve(process.cwd(), "media-downloads");
@@ -105,7 +130,7 @@ async function downloadMedia({ url, name, kind }) {
   if (!/^https?:\/\//i.test(String(url))) throw new Error("url 必须是 http(s) 直链");
   // 优先：D剪 服务端入库（自动进当前项目 assets + invalidateBundle）
   try {
-    const r = await fetch(`${resolveServerBase()}/api/library/import`, {
+    const r = await fetch(`${await resolveServerBase()}/api/library/import`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url, name, kind }),

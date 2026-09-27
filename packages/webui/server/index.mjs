@@ -798,7 +798,10 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
   // CORS：供官方 dsh web（5190/反代 5191）里的剪辑面板插件跨域读写；本机 + 服务器公网 IP 来源
   const origin = req.headers.origin ?? "";
-  if (/^https?:\/\/(127\.0\.0\.1|localhost|64\.90\.25\.108)(:\d+)?$/.test(origin)) res._aco = origin;
+  // 面板嵌在 dsh web 壳里跨源调用本引擎：壳可能经局域网 IP 被访问（不只是 127.0.0.1），
+  // 只认本机回环会把局域网场景的 CORS 全拒掉（面板健康探测失败=整个面板失联）。
+  // 放行回环 + 私有网段 + kashic 中转；其余来源（公网直连）仍不带 CORS 头。
+  if (/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\]|(?:10|192\.168)\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}|64\.90\.25\.108)(:\d+)?$/.test(origin)) res._aco = origin;
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
       ...(res._aco ? { "Access-Control-Allow-Origin": res._aco } : {}),
@@ -814,7 +817,8 @@ const server = http.createServer(async (req, res) => {
   });
 
   if (url.pathname === "/api/health") {
-    return json(res, 200, { ok: true, ai: AI_READY, model: MODEL, engine: "dsh-sdk" });
+    // service/port：身份与端口自报——面板与 MCP 靠它做发现校验（防止撞上恰好监听同端口的其他服务）
+    return json(res, 200, { ok: true, service: "djian-engine", port: PORT, ai: AI_READY, model: MODEL, engine: "dsh-sdk" });
   }
 
   // MCP server 回传剪辑 ops（校验归一化，rejected 反馈给模型）
@@ -1296,6 +1300,16 @@ const server = http.createServer(async (req, res) => {
 // 不主动掐空闲 keep-alive 连接（默认 5s）：MCP 客户端在模型思考间隙复用连接时，
 // 会撞上服务端掐线竞态——请求已落盘生效但响应丢失，客户端报 fetch failed 且有整批重发风险。
 server.keepAliveTimeout = 0;
+// 端口被占时的清晰报错：独立运行（不经启动器）没有 portAutoBump，栈外只剩一句人话
+server.on("error", (err) => {
+  if (err && err.code === "EADDRINUSE") {
+    console.error(`[djian] 引擎需要的端口 ${PORT} 已被其他程序占用，无法启动。` +
+      "经启动器运行时会自动顺延端口（manifest portAutoBump）；独立运行请先释放该端口，或以 PORT=端口 重新启动。");
+  } else {
+    console.error(`[djian] 引擎监听失败：${(err && err.stack) || err}`);
+  }
+  process.exit(1);
+});
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`djian webui server on :${PORT} (ai=${AI_READY}, model=${MODEL}, engine=dsh-sdk)`);
   // 端口落盘：启动器 portAutoBump 后实际端口可能不是 5180，MCP/面板按此文件（或 DSHL_SERVICE_PORTS env）发现真实端口

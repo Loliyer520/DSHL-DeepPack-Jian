@@ -20097,47 +20097,81 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		const DEFAULT_PORT = 5180;
 		const PORT_CACHE_KEY = "djian.enginePort";
 		const hostBase = () => typeof window !== "undefined" && window.location ? `${window.location.protocol}//${window.location.hostname}` : "http://127.0.0.1";
-		let API_BASE = (() => {
-			try {
-				const cached = Number(window.localStorage.getItem(PORT_CACHE_KEY));
-				if (cached > 0) return `${hostBase()}:${cached}`;
-			} catch {}
-			return `${hostBase()}:${DEFAULT_PORT}`;
-		})();
+		let API_BASE = `${hostBase()}:${DEFAULT_PORT}`;
 		let exportDownloadUrl = `${API_BASE}/api/export/download`;
+		const applyBase = (port) => {
+			API_BASE = `${hostBase()}:${port}`;
+			exportDownloadUrl = `${API_BASE}/api/export/download`;
+		};
+		async function isEngine(base) {
+			try {
+				const r = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(1500) });
+				if (!r.ok) return false;
+				return (await r.json().catch(() => null))?.service === "djian-engine";
+			} catch {
+				return false;
+			}
+		}
+		function fragmentPort() {
+			try {
+				const m = /(?:^|[#&])djian-engine=(\d+)/.exec(window.location.hash || "");
+				const p = m ? Number(m[1]) : 0;
+				return p > 0 && p < 65536 ? p : 0;
+			} catch {
+				return 0;
+			}
+		}
 		let discovery = null;
+		let generation = 0;
 		function ensureEngineBase() {
 			if (typeof window === "undefined") return Promise.resolve();
-			discovery ?? (discovery = (async () => {
+			discovery ?? (discovery = (async (gen) => {
+				const candidates = [];
+				const frag = fragmentPort();
+				if (frag > 0) candidates.push(frag);
 				let cached = 0;
 				try {
 					cached = Number(window.localStorage.getItem(PORT_CACHE_KEY));
 				} catch {}
-				const candidates = cached > 0 ? [cached] : [];
+				if (cached > 0) candidates.push(cached);
 				for (let p = DEFAULT_PORT; p <= 5190; p++) if (!candidates.includes(p)) candidates.push(p);
-				for (const p of candidates) try {
-					if ((await fetch(`${hostBase()}:${p}/api/health`, { signal: AbortSignal.timeout(1500) })).ok) {
-						try {
-							window.localStorage.setItem(PORT_CACHE_KEY, String(p));
-						} catch {}
-						API_BASE = `${hostBase()}:${p}`;
-						exportDownloadUrl = `${API_BASE}/api/export/download`;
-						return;
-					}
-				} catch {}
-			})());
+				for (const p of candidates) if (await isEngine(`${hostBase()}:${p}`)) {
+					if (gen !== generation) return;
+					try {
+						window.localStorage.setItem(PORT_CACHE_KEY, String(p));
+					} catch {}
+					applyBase(p);
+					return;
+				}
+			})(generation));
 			return discovery;
+		}
+		let lastHealAt = 0;
+		async function apiFetch(path, init) {
+			try {
+				return await fetch(`${API_BASE}${path}`, init);
+			} catch (e) {
+				if (!(e instanceof TypeError)) throw e;
+				if (Date.now() - lastHealAt < 1e4) throw e;
+				lastHealAt = Date.now();
+				discovery = null;
+				generation++;
+				try {
+					window.localStorage.removeItem(PORT_CACHE_KEY);
+				} catch {}
+				await ensureEngineBase();
+				return fetch(`${API_BASE}${path}`, init);
+			}
 		}
 		ensureEngineBase();
 		const assetUrl = (src) => /^(?:[a-z]+:)?\/\//i.test(src) ? src : `${API_BASE}/${src.replace(/^\/+/, "")}`;
 		async function getTimeline(sessionId, peek = false) {
-			const q = sessionId ? `?session=${encodeURIComponent(sessionId)}${peek ? "&peek=1" : ""}` : "";
-			const r = await fetch(`${API_BASE}/api/internal/timeline${q}`);
+			const r = await apiFetch(`/api/internal/timeline${sessionId ? `?session=${encodeURIComponent(sessionId)}${peek ? "&peek=1" : ""}` : ""}`);
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 			return r.json();
 		}
 		async function putTimeline(t, sessionId) {
-			const r = await fetch(`${API_BASE}/api/internal/timeline`, {
+			const r = await apiFetch(`/api/internal/timeline`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(sessionId ? {
@@ -20148,10 +20182,10 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 		}
 		async function getExportStatus() {
-			return (await fetch(`${API_BASE}/api/export/status`)).json();
+			return (await apiFetch(`/api/export/status`)).json();
 		}
 		async function startExportWith(timeline, opts) {
-			const r = await fetch(`${API_BASE}/api/export`, {
+			const r = await apiFetch(`/api/export`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
@@ -20166,7 +20200,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			}
 		}
 		async function sessionProject(sessionId) {
-			const r = await fetch(`${API_BASE}/api/session-project`, {
+			const r = await apiFetch(`/api/session-project`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ sessionId })
@@ -20175,17 +20209,17 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			return (await r.json()).project ?? null;
 		}
 		async function listFonts() {
-			const r = await fetch(`${API_BASE}/api/fonts`);
+			const r = await apiFetch(`/api/fonts`);
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 			return (await r.json()).fonts ?? [];
 		}
 		async function listAssets() {
-			const r = await fetch(`${API_BASE}/api/assets`);
+			const r = await apiFetch(`/api/assets`);
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 			return (await r.json()).assets ?? [];
 		}
 		async function uploadAsset(file) {
-			const r = await fetch(`${API_BASE}/api/assets?name=${encodeURIComponent(file.name)}`, {
+			const r = await apiFetch(`/api/assets?name=${encodeURIComponent(file.name)}`, {
 				method: "POST",
 				headers: { "Content-Type": "application/octet-stream" },
 				body: file
@@ -20195,7 +20229,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			return d;
 		}
 		async function deleteAsset(name) {
-			const r = await fetch(`${API_BASE}/api/assets/${encodeURIComponent(name)}`, { method: "DELETE" });
+			const r = await apiFetch(`/api/assets/${encodeURIComponent(name)}`, { method: "DELETE" });
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 		}
 		const assetThumbUrl = (name) => `${API_BASE}/api/assets/${encodeURIComponent(name)}/thumb`;
@@ -20873,13 +20907,13 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			const [busy, setBusy] = (0, react.useState)(null);
 			const [err, setErr] = (0, react.useState)("");
 			(0, react.useEffect)(() => {
-				fetch(`${API_BASE}/api/history`).then((r) => r.json()).then((d) => setSnaps(d.snapshots ?? [])).catch(() => setErr("历史列表加载失败"));
+				apiFetch(`/api/history`).then((r) => r.json()).then((d) => setSnaps(d.snapshots ?? [])).catch(() => setErr("历史列表加载失败"));
 			}, []);
 			const restore = async (id) => {
 				setBusy(id);
 				setErr("");
 				try {
-					const r = await fetch(`${API_BASE}/api/history/${encodeURIComponent(id)}`, { method: "POST" });
+					const r = await apiFetch(`/api/history/${encodeURIComponent(id)}`, { method: "POST" });
 					const d = await r.json().catch(() => ({}));
 					if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
 					onRestored();

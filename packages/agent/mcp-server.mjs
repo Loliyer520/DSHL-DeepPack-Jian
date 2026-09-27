@@ -7,17 +7,29 @@ import path from "node:path";
 // 后端端口发现链（启动器 portAutoBump 后实际端口可能不是 5180）：
 // 显式 DJIAN_WEBUI_URL → 启动器注入的 DSHL_SERVICE_PORTS JSON → profile 根
 // .dshl-service-ports.json（启动器写的全服务契约）→ 引擎自落盘的
-// engine-port.json（cwd=profile 根；HOME 场景再查 ~/.djian）→ 默认 5180。
-// 每次调用重解析：端口文件在引擎重启后会被覆写，缓存会拿到旧端口。
-function webui() {
-  if (process.env.DJIAN_WEBUI_URL) return process.env.DJIAN_WEBUI_URL.replace(/\/+$/, "");
+// engine-port.json（cwd=profile 根；HOME 场景再查 ~/.djian）→ 探测 5180..5190
+// （与启动器顺延窗口一致）→ 默认 5180。
+// 除显式 env 外，每个候选都要过 /api/health 身份校验（service=djian-engine）：
+// 端口文件可能是上次崩溃留下的陈旧数据，端口也可能撞上别家服务。验证通过的地址
+// 进程内缓存，缓存失联（引擎重启换口）自动重扫——自愈，不盲信任何一层。
+let verifiedBase = "";
+async function engineAlive(base) {
+  try {
+    const res = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(1500) });
+    if (!res.ok) return false;
+    const j = await res.json().catch(() => null);
+    return j?.service === "djian-engine";
+  } catch { return false; }
+}
+function candidateBases() {
+  const list = [];
   const fromMap = (map) => {
     const p = Number(map?.["djian-engine"] ?? map?.port);
     return p > 0 ? `http://127.0.0.1:${p}` : null;
   };
   try {
     const viaEnv = fromMap(JSON.parse(process.env.DSHL_SERVICE_PORTS || "{}"));
-    if (viaEnv) return viaEnv;
+    if (viaEnv) list.push(viaEnv);
   } catch { /* 非法 JSON 忽略 */ }
   const files = [
     path.join(process.cwd(), ".dshl-service-ports.json"),
@@ -27,9 +39,23 @@ function webui() {
   for (const f of files) {
     try {
       const viaFile = fromMap(JSON.parse(fs.readFileSync(f, "utf-8")));
-      if (viaFile) return viaFile;
+      if (viaFile) list.push(viaFile);
     } catch { /* 文件不存在或尚未写入 */ }
   }
+  for (let p = 5180; p <= 5190; p++) list.push(`http://127.0.0.1:${p}`);
+  return [...new Set(list)];
+}
+async function webui() {
+  if (process.env.DJIAN_WEBUI_URL) return process.env.DJIAN_WEBUI_URL.replace(/\/+$/, "");
+  if (verifiedBase && (await engineAlive(verifiedBase))) return verifiedBase;
+  for (const base of candidateBases()) {
+    if (await engineAlive(base)) {
+      verifiedBase = base;
+      return base;
+    }
+  }
+  verifiedBase = "";
+  // 兜底默认：引擎没起时让请求自然报连接错误（与旧行为一致，工具报错里带地址好排查）
   return "http://127.0.0.1:5180";
 }
 
@@ -179,7 +205,7 @@ function send(msg) {
 async function forwardOps(ops) {
   let res;
   try {
-    res = await fetch(`${webui()}/api/internal/ops`, {
+    res = await fetch(`${await webui()}/api/internal/ops`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ops }),
@@ -188,13 +214,13 @@ async function forwardOps(ops) {
   } catch (e) {
     // 网络在请求或响应阶段中断：操作可能已生效（服务端可能已落盘但响应丢失）。
     // 探测后如实告知模型，让它先核对再补差，防止整批重发造成重复添加。
-    const reachable = await fetch(`${webui()}/api/health`, { signal: AbortSignal.timeout(3_000) })
+    const reachable = await fetch(`${await webui()}/api/health`, { signal: AbortSignal.timeout(3_000) })
       .then((r) => r.ok)
       .catch(() => false);
     if (reachable) {
       throw new Error("网络在响应阶段中断，操作可能已经生效：请先用 get_timeline 核对当前状态，缺什么补什么，切勿整批重发（可能重复添加）");
     }
-    throw new Error(`无法连接 D剪 后端（${webui()}）：引擎可能正在启动或重启，请稍后重试`);
+    throw new Error(`无法连接 D剪 后端（${await webui()}）：引擎可能正在启动或重启，请稍后重试`);
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `webui HTTP ${res.status}`);
@@ -202,8 +228,8 @@ async function forwardOps(ops) {
 }
 
 async function fetchTimeline() {
-  const go = () =>
-    fetch(`${webui()}/api/internal/timeline`, { signal: AbortSignal.timeout(10_000) }).then(async (res) => {
+  const go = async () =>
+    fetch(`${await webui()}/api/internal/timeline`, { signal: AbortSignal.timeout(10_000) }).then(async (res) => {
       if (!res.ok) throw new Error(`webui HTTP ${res.status}`);
       return res.json();
     });
@@ -218,7 +244,7 @@ async function fetchTimeline() {
 // 通用 GET/POST JSON（项目/素材工具用）
 async function apiJson(pathname, body) {
   const go = async () => {
-    const res = await fetch(`${webui()}${pathname}`, {
+    const res = await fetch(`${await webui()}${pathname}`, {
       method: body === undefined ? "GET" : "POST",
       headers: body === undefined ? {} : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -237,7 +263,7 @@ async function apiJson(pathname, body) {
 }
 
 async function fetchFrame(seconds) {
-  const res = await fetch(`${webui()}/api/internal/frame`, {
+  const res = await fetch(`${await webui()}/api/internal/frame`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ seconds }),
