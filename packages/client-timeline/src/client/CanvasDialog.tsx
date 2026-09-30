@@ -1,3 +1,4 @@
+import { useDialog } from './useDialog';
 import React, { useState } from 'react';
 import type { Timeline } from '../../../engine/src/schema';
 
@@ -16,6 +17,7 @@ export const CanvasDialog: React.FC<{
   onApply: (meta: { width: number; height: number; fps: number }) => void;
   onClose: () => void;
 }> = ({ t, onApply, onClose }) => {
+  const dialogRef = useDialog(onClose);
   const [width, setWidth] = useState(t.meta.width);
   const [height, setHeight] = useState(t.meta.height);
   const [fps, setFps] = useState(t.meta.fps);
@@ -34,7 +36,7 @@ export const CanvasDialog: React.FC<{
 
   return (
     <div className="djp-mask" onClick={onClose}>
-      <div className="djp-dialog" onClick={(e) => e.stopPropagation()}>
+      <div className="djp-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-label="画布设置" tabIndex={-1} onClick={(e) => e.stopPropagation()}>
         <div className="djp-dialog-title">画布设置</div>
         <div className="djp-preset-grid">
           {CANVAS_PRESETS.map((p) => (

@@ -2,22 +2,39 @@
 
 JSON 时间线驱动的视频剪辑工具：**AI 操作剪辑**与 **WebUI 手动调整/预览**编辑同一份时间线 JSON，渲染层吃 JSON 出 mp4。最终形态为 dsh 整合包（.dspack），可被 DSHL 一键导入。
 
-## 架构
+## 架构与当前界面
 
 ```
 packages/
-├── engine   @djian/engine  — Remotion 渲染引擎：时间线 schema + 渲染 API + CLI（JSON 进 → mp4 出）
-├── webui    @djian/webui   — 浏览器剪辑界面（Remotion Player 预览 + 时间线编辑器，产出/编辑 JSON）
-└── pack     — dsh 整合包源（manifest v5 / .dspack v3 + home/ 剪辑技能）→ 构建脚本出 .dspack
+├── engine           — 时间线 schema、共享画面组件、渲染 API 与 CLI
+├── client-timeline  — 当前剪辑界面：DSHL 右侧栏插件
+├── client-library   — DSHL 在线素材资源库插件
+├── webui            — 项目、素材、时间线和导出 API；保留旧独立界面源码
+├── agent            — AI 剪辑 MCP 工具
+├── mcp-library      — 在线素材搜索与导入 MCP 工具
+└── pack             — manifest v5 / .dspack v3 整合包及构建脚本
 examples/    — 示例时间线 JSON（引擎测试与格式文档）
 ```
 
-设计原则见 [docs 待补]：时间线 JSON 是唯一事实源；整合包做薄壳、代码做 npm 包；一切依赖坐标钉死。
+当前产品入口是 DSHL 宿主中的「剪辑面板」，引擎服务不再提供旧独立界面。面板预览与导出共用 `engine/src/TimelineVideo.tsx`，素材地址和字体地址由使用场景提供。
+
+编辑区采用深色预览工作台、独立播放控制和底部工具栏，素材与参数默认收起。时间线以居中的白色播放线定位，横向滚动或拖动空白处浏览画面；播放时轨道随时间移动。视频以连续缩略图展示，音频显示青色波形，字幕显示暖色文本块，重叠字幕自动分行。支持主轨拖动排序，画中画、字幕及音频移动和边缘裁剪，以及吸附开关和缩放。单击片段选中，双击或按 Enter 打开属性抽屉；窄屏轨道内部滚动。音频波形读取真实素材；超过 20 MB、浏览器无法解码或跨域读取失败时显示基础音频条，不影响剪辑。视频缩略图使用素材采样帧。
+
+主轨、音频、画中画和字幕按独立模式编辑：当前类型完整展开，其他类型压缩成上方的细色条；点击底栏或细条切换模式，播放时间与缩放保持不变。再次点击当前模式打开工具列表，右侧「+」打开当前类型的添加入口。选中音视频片段后按 S 只分割该片段。
+
+支持变速片段分割和裁剪、滤镜、字幕动画、音量包络、撤销与历史恢复。竖屏画面会适应固定高度的预览区。手动修改串行保存；保存失败时保留修改并支持重试，浏览器允许本地存储时也会保留未保存草稿。
+
+聚焦剪辑面板后：空格播放/暂停，左右方向键逐帧，Shift + 方向键跳转一秒，S 在播放头处分割主轨，Ctrl/Cmd + Z 撤销。输入框与其他宿主区域保留自身快捷键。
 
 ## 快速验证
 
 ```sh
 npm install
 npm run build:engine
+npm run check:timeline
+npm test
+npm run bundle -w @djian/client-ui-timeline
 node packages/engine/bin/djian-render.mjs examples/timeline-a.json -o out/demo.mp4
 ```
+
+引擎构建通过后再构建插件。回归测试覆盖视频/音频变速分割和分割后的缓动曲线连续性。界面与保存流程仍需在目标 DSHL 宿主内做集成验证；项目当前不包含音频波形、完整关键帧曲线编辑器或协作冲突合并。

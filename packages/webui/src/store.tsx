@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { shiftAnimations } from "../../engine/src/schema";
 import type { Timeline, Clip, Overlay, AudioClip } from "../../engine/src/schema";import { demoSessions, nextId, emptyTimeline, fmtSec, type Session, type ChatMessage, type NewProjectConfig } from "./data";
 
 // ---------- 全局状态：会话列表 + 当前会话（消息 + 时间线） ----------
@@ -283,7 +284,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const off = atSeconds - start;
           if (!(off > 0.05) || off >= clip.clipDuration - 0.05) return t;
           const left = { ...clip, clipDuration: off };
-          const right: Clip = { ...clip, id: nextId("c"), inPoint: clip.inPoint + off, clipDuration: clip.clipDuration - off };
+          const right: Clip = { ...clip, id: nextId("c"), inPoint: clip.inPoint + off * (clip.speed ?? 1), clipDuration: clip.clipDuration - off, animations: shiftAnimations(clip.animations, off) };
           if (clip.atSeconds !== undefined) right.atSeconds = clip.atSeconds + off;
           const clips = [...tr.clips];
           clips.splice(idx, 1, left, right);
@@ -297,7 +298,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const off = atSeconds - clip.atSeconds;
           if (!(off > 0.05) || off >= clip.duration - 0.05) return t;
           const left = { ...clip, duration: off };
-          const right: AudioClip = { ...clip, id: nextId("ac"), inPoint: clip.inPoint + off, duration: clip.duration - off, atSeconds: clip.atSeconds + off };
+          const right: AudioClip = { ...clip, id: nextId("ac"), inPoint: clip.inPoint + off * (clip.speed ?? 1), duration: clip.duration - off, atSeconds: clip.atSeconds + off, animations: shiftAnimations(clip.animations, off) };
           const clips = [...tr.clips];
           clips.splice(idx, 1, left, right);
           return { ...t, audioTracks: t.audioTracks.map((x, i) => (i === ti ? { ...x, clips } : x)) };

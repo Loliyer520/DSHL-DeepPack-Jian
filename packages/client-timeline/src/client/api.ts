@@ -75,6 +75,7 @@ let lastHealAt = 0;
 // 断线自愈：引擎重启换口后，旧地址连接失败（TypeError）→ 作废缓存重新发现，再重试本次请求。
 // 引擎彻底下线时限流（10 秒内只重发现一次），面板 2 秒轮询不至于每次都全量扫端口。
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  await ensureEngineBase();
   try {
     return await fetch(`${API_BASE}${path}`, init);
   } catch (e) {

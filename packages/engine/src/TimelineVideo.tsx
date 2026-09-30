@@ -16,6 +16,8 @@ import { clipBox, evalKeyframes, type AudioClip, type Animations, type Clip, typ
 import { fontById, injectFontFaceStyle, overlayFontFamily } from "./fonts";
 
 const SEC = (fps: number, s: number) => Math.round(s * fps);
+const AssetResolver = React.createContext<(src: string) => string>(staticFile);
+const directAsset = (src: string) => src;
 
 // v3：CSS filter 字符串（省略的通道不出现）
 const filterCss = (f: Filter | undefined): string | undefined => {
@@ -63,7 +65,8 @@ const FadeIn: React.FC<{ fade: boolean; children: React.ReactNode }> = ({ fade, 
 
 // 单段 clip（由 Series.Sequence / Sequence 提供时长与起点）
 // v3 变速：成片占时不变（外层序列已定），素材消耗 = 占时 × speed，播放速率 playbackRate 同步
-const ClipSegment: React.FC<{ clip: Clip; pip?: boolean }> = ({ clip, pip }) => {
+const ClipSegment: React.FC<{ clip: Clip; pip?: boolean }> = ({ clip }) => {
+  const resolveAsset = React.useContext(AssetResolver);
   const { fps } = useVideoConfig();
   const fade = clip.transition === "fade";
   const speed = clip.speed ?? 1;
@@ -71,13 +74,13 @@ const ClipSegment: React.FC<{ clip: Clip; pip?: boolean }> = ({ clip, pip }) => 
   const anim = animStyle(clip.animations, local);
 
   const inner = clip.type === "image"
-    ? <Img src={staticFile(clip.src)} style={{ width: "100%", height: "100%", objectFit: "cover", filter: filterCss(clip.filter), ...anim }} />
+    ? <Img src={resolveAsset(clip.src)} style={{ width: "100%", height: "100%", objectFit: "cover", filter: filterCss(clip.filter), ...anim }} />
     : (
       // <Video> 而非 <OffthreadVideo>：OffthreadVideo 走 Rust 合成器抽帧，在这台 4GB 小机上
       // 随机报 "No frame found at position"（2026-09-23 实测，ffmpeg 同点抽帧全 OK，
       // 密集关键帧/缓存调优均无效）。渲染时浏览器自己 seek 解码，慢一点但稳定。
       <Video
-        src={staticFile(clip.src)}
+        src={resolveAsset(clip.src)}
         startFrom={SEC(fps, clip.inPoint)}
         // endAt 是素材源帧绝对位置：占时 × speed 换算成素材消耗（2x 快放 3s → 吃 6s）
         endAt={SEC(fps, clip.inPoint + clip.clipDuration * speed)}
@@ -120,13 +123,14 @@ const AudioSegment: React.FC<{ clip: AudioClip; trackVolume: number; muted: bool
   muted,
 }) => {
   const { fps } = useVideoConfig();
+  const resolveAsset = React.useContext(AssetResolver);
   if (muted) return null;
   const speed = clip.speed ?? 1;
   const env = clip.animations?.volume;
   return (
     <Sequence from={SEC(fps, clip.atSeconds)} durationInFrames={SEC(fps, clip.duration)}>
       <AudioVolumeEnv
-        src={staticFile(clip.src)}
+        src={resolveAsset(clip.src)}
         startFrom={SEC(fps, clip.inPoint)}
         endAt={SEC(fps, clip.inPoint + clip.duration * speed)}
         playbackRate={speed}
@@ -163,9 +167,9 @@ const AudioVolumeEnv: React.FC<{
 };
 
 // 内置字体：取帧/渲染前等字体真正就位，避免首帧回落系统字体
-const FontGate: React.FC<{ timeline: Timeline }> = ({ timeline }) => {
+const FontGate: React.FC<{ timeline: Timeline; fontsBase?: string }> = ({ timeline, fontsBase }) => {
   React.useEffect(() => {
-    injectFontFaceStyle();
+    injectFontFaceStyle(fontsBase);
     const used = [...new Set(timeline.overlays.map((ov) => ov.fontFamily).filter((v): v is string => Boolean(v)))]
       .map((id) => fontById(id))
       .filter((f): f is NonNullable<typeof f> => Boolean(f));
@@ -177,7 +181,7 @@ const FontGate: React.FC<{ timeline: Timeline }> = ({ timeline }) => {
       }),
     );
     void Promise.all(loads).then(() => continueRender(handle));
-  }, [timeline]);
+  }, [timeline, fontsBase]);
   return null;
 };
 
@@ -206,13 +210,14 @@ const OverlayView: React.FC<{ ov: Overlay }> = ({ ov }) => {
 };
 
 // 主组件：吃时间线 JSON（v2，v1 已在 parseTimeline 归一化），出整片
-export const TimelineVideo: React.FC<{ timeline: Timeline }> = ({ timeline }) => {
+export const TimelineVideo: React.FC<{ timeline: Timeline; directSources?: boolean; fontsBase?: string }> = ({ timeline, directSources = false, fontsBase }) => {
   const { fps } = useVideoConfig();
   const [mainTrack, ...overlayTracks] = timeline.videoTracks;
 
   return (
+    <AssetResolver.Provider value={directSources ? directAsset : staticFile}>
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
-      <FontGate timeline={timeline} />
+      <FontGate timeline={timeline} fontsBase={fontsBase} />
       {/* 主轨道：串行 */}
       <Series>
         {mainTrack.clips.map((clip) => (
@@ -246,5 +251,6 @@ export const TimelineVideo: React.FC<{ timeline: Timeline }> = ({ timeline }) =>
         );
       })}
     </AbsoluteFill>
+    </AssetResolver.Provider>
   );
 };

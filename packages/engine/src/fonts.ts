@@ -50,11 +50,14 @@ export const overlayFontFamily = (id: string | undefined): string => {
 
 // 浏览器环境把 @font-face 注入 document（渲染 bundle 与面板预览共用；幂等）
 // base 缺省时：渲染 bundle（origin=webui）走同源 "/fonts"；面板应显式传 `${API_BASE}/fonts`
-let styleInjected = false;
+let injectedBase: string | undefined;
+let fontStyle: HTMLStyleElement | undefined;
 export const injectFontFaceStyle = (base?: string): void => {
-  if (styleInjected || typeof document === "undefined") return;
-  styleInjected = true;
-  const style = document.createElement("style");
-  style.textContent = fontFaceCss(base);
-  document.head.appendChild(style);
+  if (typeof document === "undefined") return;
+  const resolved = fontsBaseUrl(base);
+  if (injectedBase === resolved) return;
+  injectedBase = resolved;
+  fontStyle ??= document.createElement("style");
+  fontStyle.textContent = fontFaceCss(resolved);
+  if (!fontStyle.isConnected) document.head.appendChild(fontStyle);
 };

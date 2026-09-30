@@ -244,7 +244,7 @@ const shiftAnims = (anims, off) => {
   const out = {};
   for (const ch of Object.keys(anims)) {
     if (!Array.isArray(anims[ch])) continue;
-    out[ch] = anims[ch].map((k) => ({ t: Math.max(0, Number(k.t) - off), v: Number(k.v), ...(VALID_EASINGS.has(k.e) ? { e: k.e } : {}) }));
+    out[ch] = anims[ch].map((k) => ({ t: Number(k.t) - off, v: Number(k.v), ...(VALID_EASINGS.has(k.e) ? { e: k.e } : {}) }));
   }
   return Object.keys(out).length ? out : undefined;
 };
@@ -695,7 +695,7 @@ function applyOpsToTimeline(ops) {
           const right = {
             ...clip,
             id: newClipId(),
-            inPoint: clip.inPoint + off,
+            inPoint: clip.inPoint + off * (clip.speed ?? 1),
             clipDuration: clip.clipDuration - off,
           };
           if (clip.atSeconds !== undefined) right.atSeconds = (clip.atSeconds ?? 0) + off;
@@ -713,7 +713,7 @@ function applyOpsToTimeline(ops) {
           const right = {
             ...clip,
             id: newClipId(),
-            inPoint: clip.inPoint + off,
+            inPoint: clip.inPoint + off * (clip.speed ?? 1),
             duration: clip.duration - off,
             atSeconds: clip.atSeconds + off,
           };

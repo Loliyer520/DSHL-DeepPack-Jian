@@ -1,3 +1,4 @@
+import { Icon } from './Icon';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   assetThumbUrl,
@@ -110,7 +111,7 @@ export const AssetsSection: React.FC<{
                   ) : (
                     <button title="设为配乐" onClick={() => onSetBgm(a.name)}>♪配乐</button>
                   )}
-                  <button title="删除素材" onClick={() => void onDelete(a.name)}>✕</button>
+                  <button title="删除素材" onClick={() => void onDelete(a.name)}><Icon name="close" /></button>
                 </div>
               </div>
             ))}

@@ -19,7 +19,8 @@ export const transitionSchema = z.enum(["none", "fade"]).default("none");
 // e = 从本帧到下一帧的缓动曲线（省略=线性）
 export const easingSchema = z.enum(["linear", "in", "out", "inOut", "bounce", "elastic"]);
 export const keyframeSchema = z.object({
-  t: z.number().min(0),
+  // A split keeps earlier keyframes at negative times to preserve the easing curve.
+  t: z.number(),
   v: z.number(),
   e: easingSchema.optional(),
 });
@@ -156,6 +157,13 @@ export type AudioClip = z.infer<typeof audioClipSchema>;
 export type AudioTrack = z.infer<typeof audioTrackV2Schema>;
 export type Overlay = z.infer<typeof overlaySchema>;
 export type Timeline = z.infer<typeof timelineSchema>;
+
+export function shiftAnimations(animations: Animations | undefined, seconds: number): Animations | undefined {
+  if (!animations) return undefined;
+  return Object.fromEntries(Object.entries(animations).map(([channel, frames]) => [
+    channel, frames?.map((frame) => ({ ...frame, t: frame.t - seconds })),
+  ])) as Animations;
+}
 
 const SEC = (fps: number, s: number) => Math.round(s * fps);
 

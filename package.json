@@ -8,6 +8,8 @@
   ],
   "scripts": {
     "build:engine": "npm run build -w @djian/engine",
+    "check:timeline": "tsc -p packages/client-timeline/tsconfig.json --noEmit",
+    "test": "npm run build:engine && node --test tests/*.test.mjs",
     "pack": "node packages/pack/scripts/build-dspack.mjs"
   },
   "license": "MIT"

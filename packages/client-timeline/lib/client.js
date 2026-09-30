@@ -30,6 +30,5186 @@ window.__ModuleLoader__.load({
 		react = __toESM(react, 1);
 		let react_jsx_runtime = require("react/jsx-runtime");
 		let react_dom = require("react-dom");
+		//#region src/client/bus.ts
+		const playerBus = { ref: null };
+		const seekToSeconds = (seconds, fps) => {
+			playerBus.ref?.seekTo(Math.round(seconds * fps));
+		};
+		//#endregion
+		//#region src/client/Icon.tsx
+		const paths = {
+			play: "m7 4 14 8-14 8z",
+			pause: "M7 4v16M17 4v16",
+			scissors: "M9 9 20 3M9 15 20 21M4 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm0 10a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
+			music: "M9 18V5l11-2v13M9 9l11-2M9 18a3 3 0 1 1-3-3c1.7 0 3 1 3 3zm11-2a3 3 0 1 1-3-3c1.7 0 3 1 3 3z",
+			text: "M4 7V4h16v3M12 4v16M8 20h8",
+			layers: "M3 3h15v15H3zM7 21h14V7M6 14l3-4 3 3 2-2 2 3",
+			library: "M3 5h7l2 2h9v13H3zM10 11v6m-3-3h6",
+			magnet: "M5 4v9a7 7 0 0 0 14 0V4h-4v9a3 3 0 0 1-6 0V4zM5 8h4m6 0h4",
+			fit: "M8 5H4v14h4m8-14h4v14h-4M8 12h8m-6-3-3 3 3 3m4-6 3 3-3 3",
+			expand: "M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5",
+			collapse: "M3 8h5V3m8 0v5h5M8 21v-5H3m18 0h-5v5",
+			undo: "M9 5 4 10l5 5M4 10h10a6 6 0 0 1 6 6v3",
+			redo: "m15 5 5 5-5 5m5-5H10a6 6 0 0 0-6 6v3",
+			plus: "M12 5v14M5 12h14",
+			close: "m6 6 12 12M18 6 6 18",
+			split: "M12 3v18M4 6h4v12H4zm12 0h4v12h-4z",
+			volume: "m11 5-5 4H3v6h3l5 4zm4 3a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14",
+			muted: "m11 5-5 4H3v6h3l5 4zm5 4 5 6m0-6-5 6",
+			grip: "M9 5h.01M15 5h.01M9 12h.01M15 12h.01M9 19h.01M15 19h.01",
+			film: "M4 4h16v16H4zM8 4v16M16 4v16M4 9h4m-4 6h4m8-6h4m-4 6h4"
+		};
+		function Icon({ name }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("svg", {
+				className: "djp-icon",
+				width: "16",
+				height: "16",
+				viewBox: "0 0 24 24",
+				fill: "none",
+				stroke: "currentColor",
+				strokeWidth: name === "grip" ? 3 : 1.65,
+				strokeLinecap: "round",
+				strokeLinejoin: "round",
+				"aria-hidden": "true",
+				focusable: "false",
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: paths[name] })
+			});
+		}
+		//#endregion
+		//#region src/client/TransportBar.tsx
+		const clock = (seconds) => `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(Math.floor(seconds) % 60).padStart(2, "0")}`;
+		function TransportBar({ fps, duration, undo, redo, canUndo, canRedo }) {
+			const time = (0, react.useRef)(null);
+			const [playing, setPlaying] = (0, react.useState)(false);
+			(0, react.useEffect)(() => {
+				let frame = 0;
+				const tick = () => {
+					const player = playerBus.ref;
+					if (time.current) time.current.textContent = clock((player?.getCurrentFrame() ?? 0) / fps);
+					setPlaying(player?.isPlaying() ?? false);
+					frame = requestAnimationFrame(tick);
+				};
+				frame = requestAnimationFrame(tick);
+				return () => cancelAnimationFrame(frame);
+			}, [fps]);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "djp-transport",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "djp-transport-time",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("output", {
+							ref: time,
+							"aria-label": "播放时间",
+							children: "00:00"
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [" / ", clock(duration)] })]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "djp-play-toggle",
+						"aria-label": playing ? "暂停" : "播放",
+						title: "播放 / 暂停（空格）",
+						onClick: () => playerBus.ref?.toggle(),
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: playing ? "pause" : "play" })
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "djp-transport-actions",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "djp-iconbtn",
+								title: "撤销（Ctrl+Z）",
+								"aria-label": "撤销",
+								disabled: !canUndo,
+								onClick: undo,
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "undo" })
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "djp-iconbtn",
+								title: "重做（Ctrl+Shift+Z）",
+								"aria-label": "重做",
+								disabled: !canRedo,
+								onClick: redo,
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "redo" })
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "djp-iconbtn",
+								title: "全屏预览",
+								"aria-label": "全屏预览",
+								onClick: () => {
+									playerBus.ref?.requestFullscreen();
+								},
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "expand" })
+							})
+						]
+					})
+				]
+			});
+		}
+		//#endregion
+		//#region ../../node_modules/zod/lib/index.mjs
+		var util;
+		(function(util) {
+			util.assertEqual = (val) => val;
+			function assertIs(_arg) {}
+			util.assertIs = assertIs;
+			function assertNever(_x) {
+				throw new Error();
+			}
+			util.assertNever = assertNever;
+			util.arrayToEnum = (items) => {
+				const obj = {};
+				for (const item of items) obj[item] = item;
+				return obj;
+			};
+			util.getValidEnumValues = (obj) => {
+				const validKeys = util.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
+				const filtered = {};
+				for (const k of validKeys) filtered[k] = obj[k];
+				return util.objectValues(filtered);
+			};
+			util.objectValues = (obj) => {
+				return util.objectKeys(obj).map(function(e) {
+					return obj[e];
+				});
+			};
+			util.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object) => {
+				const keys = [];
+				for (const key in object) if (Object.prototype.hasOwnProperty.call(object, key)) keys.push(key);
+				return keys;
+			};
+			util.find = (arr, checker) => {
+				for (const item of arr) if (checker(item)) return item;
+			};
+			util.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && isFinite(val) && Math.floor(val) === val;
+			function joinValues(array, separator = " | ") {
+				return array.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
+			}
+			util.joinValues = joinValues;
+			util.jsonStringifyReplacer = (_, value) => {
+				if (typeof value === "bigint") return value.toString();
+				return value;
+			};
+		})(util || (util = {}));
+		var objectUtil;
+		(function(objectUtil) {
+			objectUtil.mergeShapes = (first, second) => {
+				return {
+					...first,
+					...second
+				};
+			};
+		})(objectUtil || (objectUtil = {}));
+		const ZodParsedType = util.arrayToEnum([
+			"string",
+			"nan",
+			"number",
+			"integer",
+			"float",
+			"boolean",
+			"date",
+			"bigint",
+			"symbol",
+			"function",
+			"undefined",
+			"null",
+			"array",
+			"object",
+			"unknown",
+			"promise",
+			"void",
+			"never",
+			"map",
+			"set"
+		]);
+		const getParsedType = (data) => {
+			switch (typeof data) {
+				case "undefined": return ZodParsedType.undefined;
+				case "string": return ZodParsedType.string;
+				case "number": return isNaN(data) ? ZodParsedType.nan : ZodParsedType.number;
+				case "boolean": return ZodParsedType.boolean;
+				case "function": return ZodParsedType.function;
+				case "bigint": return ZodParsedType.bigint;
+				case "symbol": return ZodParsedType.symbol;
+				case "object":
+					if (Array.isArray(data)) return ZodParsedType.array;
+					if (data === null) return ZodParsedType.null;
+					if (data.then && typeof data.then === "function" && data.catch && typeof data.catch === "function") return ZodParsedType.promise;
+					if (typeof Map !== "undefined" && data instanceof Map) return ZodParsedType.map;
+					if (typeof Set !== "undefined" && data instanceof Set) return ZodParsedType.set;
+					if (typeof Date !== "undefined" && data instanceof Date) return ZodParsedType.date;
+					return ZodParsedType.object;
+				default: return ZodParsedType.unknown;
+			}
+		};
+		const ZodIssueCode = util.arrayToEnum([
+			"invalid_type",
+			"invalid_literal",
+			"custom",
+			"invalid_union",
+			"invalid_union_discriminator",
+			"invalid_enum_value",
+			"unrecognized_keys",
+			"invalid_arguments",
+			"invalid_return_type",
+			"invalid_date",
+			"invalid_string",
+			"too_small",
+			"too_big",
+			"invalid_intersection_types",
+			"not_multiple_of",
+			"not_finite"
+		]);
+		const quotelessJson = (obj) => {
+			return JSON.stringify(obj, null, 2).replace(/"([^"]+)":/g, "$1:");
+		};
+		var ZodError = class ZodError extends Error {
+			constructor(issues) {
+				super();
+				this.issues = [];
+				this.addIssue = (sub) => {
+					this.issues = [...this.issues, sub];
+				};
+				this.addIssues = (subs = []) => {
+					this.issues = [...this.issues, ...subs];
+				};
+				const actualProto = new.target.prototype;
+				if (Object.setPrototypeOf) Object.setPrototypeOf(this, actualProto);
+				else this.__proto__ = actualProto;
+				this.name = "ZodError";
+				this.issues = issues;
+			}
+			get errors() {
+				return this.issues;
+			}
+			format(_mapper) {
+				const mapper = _mapper || function(issue) {
+					return issue.message;
+				};
+				const fieldErrors = { _errors: [] };
+				const processError = (error) => {
+					for (const issue of error.issues) if (issue.code === "invalid_union") issue.unionErrors.map(processError);
+					else if (issue.code === "invalid_return_type") processError(issue.returnTypeError);
+					else if (issue.code === "invalid_arguments") processError(issue.argumentsError);
+					else if (issue.path.length === 0) fieldErrors._errors.push(mapper(issue));
+					else {
+						let curr = fieldErrors;
+						let i = 0;
+						while (i < issue.path.length) {
+							const el = issue.path[i];
+							if (!(i === issue.path.length - 1)) curr[el] = curr[el] || { _errors: [] };
+							else {
+								curr[el] = curr[el] || { _errors: [] };
+								curr[el]._errors.push(mapper(issue));
+							}
+							curr = curr[el];
+							i++;
+						}
+					}
+				};
+				processError(this);
+				return fieldErrors;
+			}
+			static assert(value) {
+				if (!(value instanceof ZodError)) throw new Error(`Not a ZodError: ${value}`);
+			}
+			toString() {
+				return this.message;
+			}
+			get message() {
+				return JSON.stringify(this.issues, util.jsonStringifyReplacer, 2);
+			}
+			get isEmpty() {
+				return this.issues.length === 0;
+			}
+			flatten(mapper = (issue) => issue.message) {
+				const fieldErrors = {};
+				const formErrors = [];
+				for (const sub of this.issues) if (sub.path.length > 0) {
+					fieldErrors[sub.path[0]] = fieldErrors[sub.path[0]] || [];
+					fieldErrors[sub.path[0]].push(mapper(sub));
+				} else formErrors.push(mapper(sub));
+				return {
+					formErrors,
+					fieldErrors
+				};
+			}
+			get formErrors() {
+				return this.flatten();
+			}
+		};
+		ZodError.create = (issues) => {
+			return new ZodError(issues);
+		};
+		const errorMap = (issue, _ctx) => {
+			let message;
+			switch (issue.code) {
+				case ZodIssueCode.invalid_type:
+					if (issue.received === ZodParsedType.undefined) message = "Required";
+					else message = `Expected ${issue.expected}, received ${issue.received}`;
+					break;
+				case ZodIssueCode.invalid_literal:
+					message = `Invalid literal value, expected ${JSON.stringify(issue.expected, util.jsonStringifyReplacer)}`;
+					break;
+				case ZodIssueCode.unrecognized_keys:
+					message = `Unrecognized key(s) in object: ${util.joinValues(issue.keys, ", ")}`;
+					break;
+				case ZodIssueCode.invalid_union:
+					message = `Invalid input`;
+					break;
+				case ZodIssueCode.invalid_union_discriminator:
+					message = `Invalid discriminator value. Expected ${util.joinValues(issue.options)}`;
+					break;
+				case ZodIssueCode.invalid_enum_value:
+					message = `Invalid enum value. Expected ${util.joinValues(issue.options)}, received '${issue.received}'`;
+					break;
+				case ZodIssueCode.invalid_arguments:
+					message = `Invalid function arguments`;
+					break;
+				case ZodIssueCode.invalid_return_type:
+					message = `Invalid function return type`;
+					break;
+				case ZodIssueCode.invalid_date:
+					message = `Invalid date`;
+					break;
+				case ZodIssueCode.invalid_string:
+					if (typeof issue.validation === "object") {
+						if ("includes" in issue.validation) {
+							message = `Invalid input: must include "${issue.validation.includes}"`;
+							if (typeof issue.validation.position === "number") message = `${message} at one or more positions greater than or equal to ${issue.validation.position}`;
+						} else if ("startsWith" in issue.validation) message = `Invalid input: must start with "${issue.validation.startsWith}"`;
+						else if ("endsWith" in issue.validation) message = `Invalid input: must end with "${issue.validation.endsWith}"`;
+						else util.assertNever(issue.validation);
+					} else if (issue.validation !== "regex") message = `Invalid ${issue.validation}`;
+					else message = "Invalid";
+					break;
+				case ZodIssueCode.too_small:
+					if (issue.type === "array") message = `Array must contain ${issue.exact ? "exactly" : issue.inclusive ? `at least` : `more than`} ${issue.minimum} element(s)`;
+					else if (issue.type === "string") message = `String must contain ${issue.exact ? "exactly" : issue.inclusive ? `at least` : `over`} ${issue.minimum} character(s)`;
+					else if (issue.type === "number") message = `Number must be ${issue.exact ? `exactly equal to ` : issue.inclusive ? `greater than or equal to ` : `greater than `}${issue.minimum}`;
+					else if (issue.type === "date") message = `Date must be ${issue.exact ? `exactly equal to ` : issue.inclusive ? `greater than or equal to ` : `greater than `}${new Date(Number(issue.minimum))}`;
+					else message = "Invalid input";
+					break;
+				case ZodIssueCode.too_big:
+					if (issue.type === "array") message = `Array must contain ${issue.exact ? `exactly` : issue.inclusive ? `at most` : `less than`} ${issue.maximum} element(s)`;
+					else if (issue.type === "string") message = `String must contain ${issue.exact ? `exactly` : issue.inclusive ? `at most` : `under`} ${issue.maximum} character(s)`;
+					else if (issue.type === "number") message = `Number must be ${issue.exact ? `exactly` : issue.inclusive ? `less than or equal to` : `less than`} ${issue.maximum}`;
+					else if (issue.type === "bigint") message = `BigInt must be ${issue.exact ? `exactly` : issue.inclusive ? `less than or equal to` : `less than`} ${issue.maximum}`;
+					else if (issue.type === "date") message = `Date must be ${issue.exact ? `exactly` : issue.inclusive ? `smaller than or equal to` : `smaller than`} ${new Date(Number(issue.maximum))}`;
+					else message = "Invalid input";
+					break;
+				case ZodIssueCode.custom:
+					message = `Invalid input`;
+					break;
+				case ZodIssueCode.invalid_intersection_types:
+					message = `Intersection results could not be merged`;
+					break;
+				case ZodIssueCode.not_multiple_of:
+					message = `Number must be a multiple of ${issue.multipleOf}`;
+					break;
+				case ZodIssueCode.not_finite:
+					message = "Number must be finite";
+					break;
+				default:
+					message = _ctx.defaultError;
+					util.assertNever(issue);
+			}
+			return { message };
+		};
+		let overrideErrorMap = errorMap;
+		function setErrorMap(map) {
+			overrideErrorMap = map;
+		}
+		function getErrorMap() {
+			return overrideErrorMap;
+		}
+		const makeIssue = (params) => {
+			const { data, path, errorMaps, issueData } = params;
+			const fullPath = [...path, ...issueData.path || []];
+			const fullIssue = {
+				...issueData,
+				path: fullPath
+			};
+			if (issueData.message !== void 0) return {
+				...issueData,
+				path: fullPath,
+				message: issueData.message
+			};
+			let errorMessage = "";
+			const maps = errorMaps.filter((m) => !!m).slice().reverse();
+			for (const map of maps) errorMessage = map(fullIssue, {
+				data,
+				defaultError: errorMessage
+			}).message;
+			return {
+				...issueData,
+				path: fullPath,
+				message: errorMessage
+			};
+		};
+		const EMPTY_PATH = [];
+		function addIssueToContext(ctx, issueData) {
+			const overrideMap = getErrorMap();
+			const issue = makeIssue({
+				issueData,
+				data: ctx.data,
+				path: ctx.path,
+				errorMaps: [
+					ctx.common.contextualErrorMap,
+					ctx.schemaErrorMap,
+					overrideMap,
+					overrideMap === errorMap ? void 0 : errorMap
+				].filter((x) => !!x)
+			});
+			ctx.common.issues.push(issue);
+		}
+		var ParseStatus = class ParseStatus {
+			constructor() {
+				this.value = "valid";
+			}
+			dirty() {
+				if (this.value === "valid") this.value = "dirty";
+			}
+			abort() {
+				if (this.value !== "aborted") this.value = "aborted";
+			}
+			static mergeArray(status, results) {
+				const arrayValue = [];
+				for (const s of results) {
+					if (s.status === "aborted") return INVALID;
+					if (s.status === "dirty") status.dirty();
+					arrayValue.push(s.value);
+				}
+				return {
+					status: status.value,
+					value: arrayValue
+				};
+			}
+			static async mergeObjectAsync(status, pairs) {
+				const syncPairs = [];
+				for (const pair of pairs) {
+					const key = await pair.key;
+					const value = await pair.value;
+					syncPairs.push({
+						key,
+						value
+					});
+				}
+				return ParseStatus.mergeObjectSync(status, syncPairs);
+			}
+			static mergeObjectSync(status, pairs) {
+				const finalObject = {};
+				for (const pair of pairs) {
+					const { key, value } = pair;
+					if (key.status === "aborted") return INVALID;
+					if (value.status === "aborted") return INVALID;
+					if (key.status === "dirty") status.dirty();
+					if (value.status === "dirty") status.dirty();
+					if (key.value !== "__proto__" && (typeof value.value !== "undefined" || pair.alwaysSet)) finalObject[key.value] = value.value;
+				}
+				return {
+					status: status.value,
+					value: finalObject
+				};
+			}
+		};
+		const INVALID = Object.freeze({ status: "aborted" });
+		const DIRTY = (value) => ({
+			status: "dirty",
+			value
+		});
+		const OK = (value) => ({
+			status: "valid",
+			value
+		});
+		const isAborted = (x) => x.status === "aborted";
+		const isDirty = (x) => x.status === "dirty";
+		const isValid = (x) => x.status === "valid";
+		const isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
+		/******************************************************************************
+		Copyright (c) Microsoft Corporation.
+
+		Permission to use, copy, modify, and/or distribute this software for any
+		purpose with or without fee is hereby granted.
+
+		THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+		REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+		AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+		INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+		LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+		OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+		PERFORMANCE OF THIS SOFTWARE.
+		***************************************************************************** */
+		function __classPrivateFieldGet(receiver, state, kind, f) {
+			if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a getter");
+			if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
+			return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
+		}
+		function __classPrivateFieldSet(receiver, state, value, kind, f) {
+			if (kind === "m") throw new TypeError("Private method is not writable");
+			if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a setter");
+			if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot write private member to an object whose class did not declare it");
+			return kind === "a" ? f.call(receiver, value) : f ? f.value = value : state.set(receiver, value), value;
+		}
+		var errorUtil;
+		(function(errorUtil) {
+			errorUtil.errToObj = (message) => typeof message === "string" ? { message } : message || {};
+			errorUtil.toString = (message) => typeof message === "string" ? message : message === null || message === void 0 ? void 0 : message.message;
+		})(errorUtil || (errorUtil = {}));
+		var _ZodEnum_cache;
+		var _ZodNativeEnum_cache;
+		var ParseInputLazyPath = class {
+			constructor(parent, value, path, key) {
+				this._cachedPath = [];
+				this.parent = parent;
+				this.data = value;
+				this._path = path;
+				this._key = key;
+			}
+			get path() {
+				if (!this._cachedPath.length) {
+					if (this._key instanceof Array) this._cachedPath.push(...this._path, ...this._key);
+					else this._cachedPath.push(...this._path, this._key);
+				}
+				return this._cachedPath;
+			}
+		};
+		const handleResult = (ctx, result) => {
+			if (isValid(result)) return {
+				success: true,
+				data: result.value
+			};
+			else {
+				if (!ctx.common.issues.length) throw new Error("Validation failed but no issues detected.");
+				return {
+					success: false,
+					get error() {
+						if (this._error) return this._error;
+						const error = new ZodError(ctx.common.issues);
+						this._error = error;
+						return this._error;
+					}
+				};
+			}
+		};
+		function processCreateParams(params) {
+			if (!params) return {};
+			const { errorMap, invalid_type_error, required_error, description } = params;
+			if (errorMap && (invalid_type_error || required_error)) throw new Error(`Can't use "invalid_type_error" or "required_error" in conjunction with custom error map.`);
+			if (errorMap) return {
+				errorMap,
+				description
+			};
+			const customMap = (iss, ctx) => {
+				var _a, _b;
+				const { message } = params;
+				if (iss.code === "invalid_enum_value") return { message: message !== null && message !== void 0 ? message : ctx.defaultError };
+				if (typeof ctx.data === "undefined") return { message: (_a = message !== null && message !== void 0 ? message : required_error) !== null && _a !== void 0 ? _a : ctx.defaultError };
+				if (iss.code !== "invalid_type") return { message: ctx.defaultError };
+				return { message: (_b = message !== null && message !== void 0 ? message : invalid_type_error) !== null && _b !== void 0 ? _b : ctx.defaultError };
+			};
+			return {
+				errorMap: customMap,
+				description
+			};
+		}
+		var ZodType = class {
+			constructor(def) {
+				/** Alias of safeParseAsync */
+				this.spa = this.safeParseAsync;
+				this._def = def;
+				this.parse = this.parse.bind(this);
+				this.safeParse = this.safeParse.bind(this);
+				this.parseAsync = this.parseAsync.bind(this);
+				this.safeParseAsync = this.safeParseAsync.bind(this);
+				this.spa = this.spa.bind(this);
+				this.refine = this.refine.bind(this);
+				this.refinement = this.refinement.bind(this);
+				this.superRefine = this.superRefine.bind(this);
+				this.optional = this.optional.bind(this);
+				this.nullable = this.nullable.bind(this);
+				this.nullish = this.nullish.bind(this);
+				this.array = this.array.bind(this);
+				this.promise = this.promise.bind(this);
+				this.or = this.or.bind(this);
+				this.and = this.and.bind(this);
+				this.transform = this.transform.bind(this);
+				this.brand = this.brand.bind(this);
+				this.default = this.default.bind(this);
+				this.catch = this.catch.bind(this);
+				this.describe = this.describe.bind(this);
+				this.pipe = this.pipe.bind(this);
+				this.readonly = this.readonly.bind(this);
+				this.isNullable = this.isNullable.bind(this);
+				this.isOptional = this.isOptional.bind(this);
+			}
+			get description() {
+				return this._def.description;
+			}
+			_getType(input) {
+				return getParsedType(input.data);
+			}
+			_getOrReturnCtx(input, ctx) {
+				return ctx || {
+					common: input.parent.common,
+					data: input.data,
+					parsedType: getParsedType(input.data),
+					schemaErrorMap: this._def.errorMap,
+					path: input.path,
+					parent: input.parent
+				};
+			}
+			_processInputParams(input) {
+				return {
+					status: new ParseStatus(),
+					ctx: {
+						common: input.parent.common,
+						data: input.data,
+						parsedType: getParsedType(input.data),
+						schemaErrorMap: this._def.errorMap,
+						path: input.path,
+						parent: input.parent
+					}
+				};
+			}
+			_parseSync(input) {
+				const result = this._parse(input);
+				if (isAsync(result)) throw new Error("Synchronous parse encountered promise.");
+				return result;
+			}
+			_parseAsync(input) {
+				const result = this._parse(input);
+				return Promise.resolve(result);
+			}
+			parse(data, params) {
+				const result = this.safeParse(data, params);
+				if (result.success) return result.data;
+				throw result.error;
+			}
+			safeParse(data, params) {
+				var _a;
+				const ctx = {
+					common: {
+						issues: [],
+						async: (_a = params === null || params === void 0 ? void 0 : params.async) !== null && _a !== void 0 ? _a : false,
+						contextualErrorMap: params === null || params === void 0 ? void 0 : params.errorMap
+					},
+					path: (params === null || params === void 0 ? void 0 : params.path) || [],
+					schemaErrorMap: this._def.errorMap,
+					parent: null,
+					data,
+					parsedType: getParsedType(data)
+				};
+				const result = this._parseSync({
+					data,
+					path: ctx.path,
+					parent: ctx
+				});
+				return handleResult(ctx, result);
+			}
+			async parseAsync(data, params) {
+				const result = await this.safeParseAsync(data, params);
+				if (result.success) return result.data;
+				throw result.error;
+			}
+			async safeParseAsync(data, params) {
+				const ctx = {
+					common: {
+						issues: [],
+						contextualErrorMap: params === null || params === void 0 ? void 0 : params.errorMap,
+						async: true
+					},
+					path: (params === null || params === void 0 ? void 0 : params.path) || [],
+					schemaErrorMap: this._def.errorMap,
+					parent: null,
+					data,
+					parsedType: getParsedType(data)
+				};
+				const maybeAsyncResult = this._parse({
+					data,
+					path: ctx.path,
+					parent: ctx
+				});
+				const result = await (isAsync(maybeAsyncResult) ? maybeAsyncResult : Promise.resolve(maybeAsyncResult));
+				return handleResult(ctx, result);
+			}
+			refine(check, message) {
+				const getIssueProperties = (val) => {
+					if (typeof message === "string" || typeof message === "undefined") return { message };
+					else if (typeof message === "function") return message(val);
+					else return message;
+				};
+				return this._refinement((val, ctx) => {
+					const result = check(val);
+					const setError = () => ctx.addIssue({
+						code: ZodIssueCode.custom,
+						...getIssueProperties(val)
+					});
+					if (typeof Promise !== "undefined" && result instanceof Promise) return result.then((data) => {
+						if (!data) {
+							setError();
+							return false;
+						} else return true;
+					});
+					if (!result) {
+						setError();
+						return false;
+					} else return true;
+				});
+			}
+			refinement(check, refinementData) {
+				return this._refinement((val, ctx) => {
+					if (!check(val)) {
+						ctx.addIssue(typeof refinementData === "function" ? refinementData(val, ctx) : refinementData);
+						return false;
+					} else return true;
+				});
+			}
+			_refinement(refinement) {
+				return new ZodEffects({
+					schema: this,
+					typeName: ZodFirstPartyTypeKind.ZodEffects,
+					effect: {
+						type: "refinement",
+						refinement
+					}
+				});
+			}
+			superRefine(refinement) {
+				return this._refinement(refinement);
+			}
+			optional() {
+				return ZodOptional.create(this, this._def);
+			}
+			nullable() {
+				return ZodNullable.create(this, this._def);
+			}
+			nullish() {
+				return this.nullable().optional();
+			}
+			array() {
+				return ZodArray.create(this, this._def);
+			}
+			promise() {
+				return ZodPromise.create(this, this._def);
+			}
+			or(option) {
+				return ZodUnion.create([this, option], this._def);
+			}
+			and(incoming) {
+				return ZodIntersection.create(this, incoming, this._def);
+			}
+			transform(transform) {
+				return new ZodEffects({
+					...processCreateParams(this._def),
+					schema: this,
+					typeName: ZodFirstPartyTypeKind.ZodEffects,
+					effect: {
+						type: "transform",
+						transform
+					}
+				});
+			}
+			default(def) {
+				const defaultValueFunc = typeof def === "function" ? def : () => def;
+				return new ZodDefault({
+					...processCreateParams(this._def),
+					innerType: this,
+					defaultValue: defaultValueFunc,
+					typeName: ZodFirstPartyTypeKind.ZodDefault
+				});
+			}
+			brand() {
+				return new ZodBranded({
+					typeName: ZodFirstPartyTypeKind.ZodBranded,
+					type: this,
+					...processCreateParams(this._def)
+				});
+			}
+			catch(def) {
+				const catchValueFunc = typeof def === "function" ? def : () => def;
+				return new ZodCatch({
+					...processCreateParams(this._def),
+					innerType: this,
+					catchValue: catchValueFunc,
+					typeName: ZodFirstPartyTypeKind.ZodCatch
+				});
+			}
+			describe(description) {
+				const This = this.constructor;
+				return new This({
+					...this._def,
+					description
+				});
+			}
+			pipe(target) {
+				return ZodPipeline.create(this, target);
+			}
+			readonly() {
+				return ZodReadonly.create(this);
+			}
+			isOptional() {
+				return this.safeParse(void 0).success;
+			}
+			isNullable() {
+				return this.safeParse(null).success;
+			}
+		};
+		const cuidRegex = /^c[^\s-]{8,}$/i;
+		const cuid2Regex = /^[0-9a-z]+$/;
+		const ulidRegex = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+		const uuidRegex = /^[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}$/i;
+		const nanoidRegex = /^[a-z0-9_-]{21}$/i;
+		const durationRegex = /^[-+]?P(?!$)(?:(?:[-+]?\d+Y)|(?:[-+]?\d+[.,]\d+Y$))?(?:(?:[-+]?\d+M)|(?:[-+]?\d+[.,]\d+M$))?(?:(?:[-+]?\d+W)|(?:[-+]?\d+[.,]\d+W$))?(?:(?:[-+]?\d+D)|(?:[-+]?\d+[.,]\d+D$))?(?:T(?=[\d+-])(?:(?:[-+]?\d+H)|(?:[-+]?\d+[.,]\d+H$))?(?:(?:[-+]?\d+M)|(?:[-+]?\d+[.,]\d+M$))?(?:[-+]?\d+(?:[.,]\d+)?S)?)??$/;
+		const emailRegex = /^(?!\.)(?!.*\.\.)([A-Z0-9_'+\-\.]*)[A-Z0-9_+-]@([A-Z0-9][A-Z0-9\-]*\.)+[A-Z]{2,}$/i;
+		const _emojiRegex = `^(\\p{Extended_Pictographic}|\\p{Emoji_Component})+$`;
+		let emojiRegex;
+		const ipv4Regex = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$/;
+		const ipv6Regex = /^(([a-f0-9]{1,4}:){7}|::([a-f0-9]{1,4}:){0,6}|([a-f0-9]{1,4}:){1}:([a-f0-9]{1,4}:){0,5}|([a-f0-9]{1,4}:){2}:([a-f0-9]{1,4}:){0,4}|([a-f0-9]{1,4}:){3}:([a-f0-9]{1,4}:){0,3}|([a-f0-9]{1,4}:){4}:([a-f0-9]{1,4}:){0,2}|([a-f0-9]{1,4}:){5}:([a-f0-9]{1,4}:){0,1})([a-f0-9]{1,4}|(((25[0-5])|(2[0-4][0-9])|(1[0-9]{2})|([0-9]{1,2}))\.){3}((25[0-5])|(2[0-4][0-9])|(1[0-9]{2})|([0-9]{1,2})))$/;
+		const base64Regex = /^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/;
+		const dateRegexSource = `((\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-((0[13578]|1[02])-(0[1-9]|[12]\\d|3[01])|(0[469]|11)-(0[1-9]|[12]\\d|30)|(02)-(0[1-9]|1\\d|2[0-8])))`;
+		const dateRegex = new RegExp(`^${dateRegexSource}$`);
+		function timeRegexSource(args) {
+			let regex = `([01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d`;
+			if (args.precision) regex = `${regex}\\.\\d{${args.precision}}`;
+			else if (args.precision == null) regex = `${regex}(\\.\\d+)?`;
+			return regex;
+		}
+		function timeRegex(args) {
+			return new RegExp(`^${timeRegexSource(args)}$`);
+		}
+		function datetimeRegex(args) {
+			let regex = `${dateRegexSource}T${timeRegexSource(args)}`;
+			const opts = [];
+			opts.push(args.local ? `Z?` : `Z`);
+			if (args.offset) opts.push(`([+-]\\d{2}:?\\d{2})`);
+			regex = `${regex}(${opts.join("|")})`;
+			return new RegExp(`^${regex}$`);
+		}
+		function isValidIP(ip, version) {
+			if ((version === "v4" || !version) && ipv4Regex.test(ip)) return true;
+			if ((version === "v6" || !version) && ipv6Regex.test(ip)) return true;
+			return false;
+		}
+		var ZodString = class ZodString extends ZodType {
+			_parse(input) {
+				if (this._def.coerce) input.data = String(input.data);
+				if (this._getType(input) !== ZodParsedType.string) {
+					const ctx = this._getOrReturnCtx(input);
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.string,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				const status = new ParseStatus();
+				let ctx = void 0;
+				for (const check of this._def.checks) if (check.kind === "min") {
+					if (input.data.length < check.value) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.too_small,
+							minimum: check.value,
+							type: "string",
+							inclusive: true,
+							exact: false,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "max") {
+					if (input.data.length > check.value) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.too_big,
+							maximum: check.value,
+							type: "string",
+							inclusive: true,
+							exact: false,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "length") {
+					const tooBig = input.data.length > check.value;
+					const tooSmall = input.data.length < check.value;
+					if (tooBig || tooSmall) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						if (tooBig) addIssueToContext(ctx, {
+							code: ZodIssueCode.too_big,
+							maximum: check.value,
+							type: "string",
+							inclusive: true,
+							exact: true,
+							message: check.message
+						});
+						else if (tooSmall) addIssueToContext(ctx, {
+							code: ZodIssueCode.too_small,
+							minimum: check.value,
+							type: "string",
+							inclusive: true,
+							exact: true,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "email") {
+					if (!emailRegex.test(input.data)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							validation: "email",
+							code: ZodIssueCode.invalid_string,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "emoji") {
+					if (!emojiRegex) emojiRegex = new RegExp(_emojiRegex, "u");
+					if (!emojiRegex.test(input.data)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							validation: "emoji",
+							code: ZodIssueCode.invalid_string,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "uuid") {
+					if (!uuidRegex.test(input.data)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							validation: "uuid",
+							code: ZodIssueCode.invalid_string,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "nanoid") {
+					if (!nanoidRegex.test(input.data)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							validation: "nanoid",
+							code: ZodIssueCode.invalid_string,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "cuid") {
+					if (!cuidRegex.test(input.data)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							validation: "cuid",
+							code: ZodIssueCode.invalid_string,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "cuid2") {
+					if (!cuid2Regex.test(input.data)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							validation: "cuid2",
+							code: ZodIssueCode.invalid_string,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "ulid") {
+					if (!ulidRegex.test(input.data)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							validation: "ulid",
+							code: ZodIssueCode.invalid_string,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "url") try {
+					new URL(input.data);
+				} catch (_a) {
+					ctx = this._getOrReturnCtx(input, ctx);
+					addIssueToContext(ctx, {
+						validation: "url",
+						code: ZodIssueCode.invalid_string,
+						message: check.message
+					});
+					status.dirty();
+				}
+				else if (check.kind === "regex") {
+					check.regex.lastIndex = 0;
+					if (!check.regex.test(input.data)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							validation: "regex",
+							code: ZodIssueCode.invalid_string,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "trim") input.data = input.data.trim();
+				else if (check.kind === "includes") {
+					if (!input.data.includes(check.value, check.position)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.invalid_string,
+							validation: {
+								includes: check.value,
+								position: check.position
+							},
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "toLowerCase") input.data = input.data.toLowerCase();
+				else if (check.kind === "toUpperCase") input.data = input.data.toUpperCase();
+				else if (check.kind === "startsWith") {
+					if (!input.data.startsWith(check.value)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.invalid_string,
+							validation: { startsWith: check.value },
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "endsWith") {
+					if (!input.data.endsWith(check.value)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.invalid_string,
+							validation: { endsWith: check.value },
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "datetime") {
+					if (!datetimeRegex(check).test(input.data)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.invalid_string,
+							validation: "datetime",
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "date") {
+					if (!dateRegex.test(input.data)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.invalid_string,
+							validation: "date",
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "time") {
+					if (!timeRegex(check).test(input.data)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.invalid_string,
+							validation: "time",
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "duration") {
+					if (!durationRegex.test(input.data)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							validation: "duration",
+							code: ZodIssueCode.invalid_string,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "ip") {
+					if (!isValidIP(input.data, check.version)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							validation: "ip",
+							code: ZodIssueCode.invalid_string,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "base64") {
+					if (!base64Regex.test(input.data)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							validation: "base64",
+							code: ZodIssueCode.invalid_string,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else util.assertNever(check);
+				return {
+					status: status.value,
+					value: input.data
+				};
+			}
+			_regex(regex, validation, message) {
+				return this.refinement((data) => regex.test(data), {
+					validation,
+					code: ZodIssueCode.invalid_string,
+					...errorUtil.errToObj(message)
+				});
+			}
+			_addCheck(check) {
+				return new ZodString({
+					...this._def,
+					checks: [...this._def.checks, check]
+				});
+			}
+			email(message) {
+				return this._addCheck({
+					kind: "email",
+					...errorUtil.errToObj(message)
+				});
+			}
+			url(message) {
+				return this._addCheck({
+					kind: "url",
+					...errorUtil.errToObj(message)
+				});
+			}
+			emoji(message) {
+				return this._addCheck({
+					kind: "emoji",
+					...errorUtil.errToObj(message)
+				});
+			}
+			uuid(message) {
+				return this._addCheck({
+					kind: "uuid",
+					...errorUtil.errToObj(message)
+				});
+			}
+			nanoid(message) {
+				return this._addCheck({
+					kind: "nanoid",
+					...errorUtil.errToObj(message)
+				});
+			}
+			cuid(message) {
+				return this._addCheck({
+					kind: "cuid",
+					...errorUtil.errToObj(message)
+				});
+			}
+			cuid2(message) {
+				return this._addCheck({
+					kind: "cuid2",
+					...errorUtil.errToObj(message)
+				});
+			}
+			ulid(message) {
+				return this._addCheck({
+					kind: "ulid",
+					...errorUtil.errToObj(message)
+				});
+			}
+			base64(message) {
+				return this._addCheck({
+					kind: "base64",
+					...errorUtil.errToObj(message)
+				});
+			}
+			ip(options) {
+				return this._addCheck({
+					kind: "ip",
+					...errorUtil.errToObj(options)
+				});
+			}
+			datetime(options) {
+				var _a, _b;
+				if (typeof options === "string") return this._addCheck({
+					kind: "datetime",
+					precision: null,
+					offset: false,
+					local: false,
+					message: options
+				});
+				return this._addCheck({
+					kind: "datetime",
+					precision: typeof (options === null || options === void 0 ? void 0 : options.precision) === "undefined" ? null : options === null || options === void 0 ? void 0 : options.precision,
+					offset: (_a = options === null || options === void 0 ? void 0 : options.offset) !== null && _a !== void 0 ? _a : false,
+					local: (_b = options === null || options === void 0 ? void 0 : options.local) !== null && _b !== void 0 ? _b : false,
+					...errorUtil.errToObj(options === null || options === void 0 ? void 0 : options.message)
+				});
+			}
+			date(message) {
+				return this._addCheck({
+					kind: "date",
+					message
+				});
+			}
+			time(options) {
+				if (typeof options === "string") return this._addCheck({
+					kind: "time",
+					precision: null,
+					message: options
+				});
+				return this._addCheck({
+					kind: "time",
+					precision: typeof (options === null || options === void 0 ? void 0 : options.precision) === "undefined" ? null : options === null || options === void 0 ? void 0 : options.precision,
+					...errorUtil.errToObj(options === null || options === void 0 ? void 0 : options.message)
+				});
+			}
+			duration(message) {
+				return this._addCheck({
+					kind: "duration",
+					...errorUtil.errToObj(message)
+				});
+			}
+			regex(regex, message) {
+				return this._addCheck({
+					kind: "regex",
+					regex,
+					...errorUtil.errToObj(message)
+				});
+			}
+			includes(value, options) {
+				return this._addCheck({
+					kind: "includes",
+					value,
+					position: options === null || options === void 0 ? void 0 : options.position,
+					...errorUtil.errToObj(options === null || options === void 0 ? void 0 : options.message)
+				});
+			}
+			startsWith(value, message) {
+				return this._addCheck({
+					kind: "startsWith",
+					value,
+					...errorUtil.errToObj(message)
+				});
+			}
+			endsWith(value, message) {
+				return this._addCheck({
+					kind: "endsWith",
+					value,
+					...errorUtil.errToObj(message)
+				});
+			}
+			min(minLength, message) {
+				return this._addCheck({
+					kind: "min",
+					value: minLength,
+					...errorUtil.errToObj(message)
+				});
+			}
+			max(maxLength, message) {
+				return this._addCheck({
+					kind: "max",
+					value: maxLength,
+					...errorUtil.errToObj(message)
+				});
+			}
+			length(len, message) {
+				return this._addCheck({
+					kind: "length",
+					value: len,
+					...errorUtil.errToObj(message)
+				});
+			}
+			/**
+			* @deprecated Use z.string().min(1) instead.
+			* @see {@link ZodString.min}
+			*/
+			nonempty(message) {
+				return this.min(1, errorUtil.errToObj(message));
+			}
+			trim() {
+				return new ZodString({
+					...this._def,
+					checks: [...this._def.checks, { kind: "trim" }]
+				});
+			}
+			toLowerCase() {
+				return new ZodString({
+					...this._def,
+					checks: [...this._def.checks, { kind: "toLowerCase" }]
+				});
+			}
+			toUpperCase() {
+				return new ZodString({
+					...this._def,
+					checks: [...this._def.checks, { kind: "toUpperCase" }]
+				});
+			}
+			get isDatetime() {
+				return !!this._def.checks.find((ch) => ch.kind === "datetime");
+			}
+			get isDate() {
+				return !!this._def.checks.find((ch) => ch.kind === "date");
+			}
+			get isTime() {
+				return !!this._def.checks.find((ch) => ch.kind === "time");
+			}
+			get isDuration() {
+				return !!this._def.checks.find((ch) => ch.kind === "duration");
+			}
+			get isEmail() {
+				return !!this._def.checks.find((ch) => ch.kind === "email");
+			}
+			get isURL() {
+				return !!this._def.checks.find((ch) => ch.kind === "url");
+			}
+			get isEmoji() {
+				return !!this._def.checks.find((ch) => ch.kind === "emoji");
+			}
+			get isUUID() {
+				return !!this._def.checks.find((ch) => ch.kind === "uuid");
+			}
+			get isNANOID() {
+				return !!this._def.checks.find((ch) => ch.kind === "nanoid");
+			}
+			get isCUID() {
+				return !!this._def.checks.find((ch) => ch.kind === "cuid");
+			}
+			get isCUID2() {
+				return !!this._def.checks.find((ch) => ch.kind === "cuid2");
+			}
+			get isULID() {
+				return !!this._def.checks.find((ch) => ch.kind === "ulid");
+			}
+			get isIP() {
+				return !!this._def.checks.find((ch) => ch.kind === "ip");
+			}
+			get isBase64() {
+				return !!this._def.checks.find((ch) => ch.kind === "base64");
+			}
+			get minLength() {
+				let min = null;
+				for (const ch of this._def.checks) if (ch.kind === "min") {
+					if (min === null || ch.value > min) min = ch.value;
+				}
+				return min;
+			}
+			get maxLength() {
+				let max = null;
+				for (const ch of this._def.checks) if (ch.kind === "max") {
+					if (max === null || ch.value < max) max = ch.value;
+				}
+				return max;
+			}
+		};
+		ZodString.create = (params) => {
+			var _a;
+			return new ZodString({
+				checks: [],
+				typeName: ZodFirstPartyTypeKind.ZodString,
+				coerce: (_a = params === null || params === void 0 ? void 0 : params.coerce) !== null && _a !== void 0 ? _a : false,
+				...processCreateParams(params)
+			});
+		};
+		function floatSafeRemainder(val, step) {
+			const valDecCount = (val.toString().split(".")[1] || "").length;
+			const stepDecCount = (step.toString().split(".")[1] || "").length;
+			const decCount = valDecCount > stepDecCount ? valDecCount : stepDecCount;
+			return parseInt(val.toFixed(decCount).replace(".", "")) % parseInt(step.toFixed(decCount).replace(".", "")) / Math.pow(10, decCount);
+		}
+		var ZodNumber = class ZodNumber extends ZodType {
+			constructor() {
+				super(...arguments);
+				this.min = this.gte;
+				this.max = this.lte;
+				this.step = this.multipleOf;
+			}
+			_parse(input) {
+				if (this._def.coerce) input.data = Number(input.data);
+				if (this._getType(input) !== ZodParsedType.number) {
+					const ctx = this._getOrReturnCtx(input);
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.number,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				let ctx = void 0;
+				const status = new ParseStatus();
+				for (const check of this._def.checks) if (check.kind === "int") {
+					if (!util.isInteger(input.data)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.invalid_type,
+							expected: "integer",
+							received: "float",
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "min") {
+					if (check.inclusive ? input.data < check.value : input.data <= check.value) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.too_small,
+							minimum: check.value,
+							type: "number",
+							inclusive: check.inclusive,
+							exact: false,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "max") {
+					if (check.inclusive ? input.data > check.value : input.data >= check.value) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.too_big,
+							maximum: check.value,
+							type: "number",
+							inclusive: check.inclusive,
+							exact: false,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "multipleOf") {
+					if (floatSafeRemainder(input.data, check.value) !== 0) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.not_multiple_of,
+							multipleOf: check.value,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "finite") {
+					if (!Number.isFinite(input.data)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.not_finite,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else util.assertNever(check);
+				return {
+					status: status.value,
+					value: input.data
+				};
+			}
+			gte(value, message) {
+				return this.setLimit("min", value, true, errorUtil.toString(message));
+			}
+			gt(value, message) {
+				return this.setLimit("min", value, false, errorUtil.toString(message));
+			}
+			lte(value, message) {
+				return this.setLimit("max", value, true, errorUtil.toString(message));
+			}
+			lt(value, message) {
+				return this.setLimit("max", value, false, errorUtil.toString(message));
+			}
+			setLimit(kind, value, inclusive, message) {
+				return new ZodNumber({
+					...this._def,
+					checks: [...this._def.checks, {
+						kind,
+						value,
+						inclusive,
+						message: errorUtil.toString(message)
+					}]
+				});
+			}
+			_addCheck(check) {
+				return new ZodNumber({
+					...this._def,
+					checks: [...this._def.checks, check]
+				});
+			}
+			int(message) {
+				return this._addCheck({
+					kind: "int",
+					message: errorUtil.toString(message)
+				});
+			}
+			positive(message) {
+				return this._addCheck({
+					kind: "min",
+					value: 0,
+					inclusive: false,
+					message: errorUtil.toString(message)
+				});
+			}
+			negative(message) {
+				return this._addCheck({
+					kind: "max",
+					value: 0,
+					inclusive: false,
+					message: errorUtil.toString(message)
+				});
+			}
+			nonpositive(message) {
+				return this._addCheck({
+					kind: "max",
+					value: 0,
+					inclusive: true,
+					message: errorUtil.toString(message)
+				});
+			}
+			nonnegative(message) {
+				return this._addCheck({
+					kind: "min",
+					value: 0,
+					inclusive: true,
+					message: errorUtil.toString(message)
+				});
+			}
+			multipleOf(value, message) {
+				return this._addCheck({
+					kind: "multipleOf",
+					value,
+					message: errorUtil.toString(message)
+				});
+			}
+			finite(message) {
+				return this._addCheck({
+					kind: "finite",
+					message: errorUtil.toString(message)
+				});
+			}
+			safe(message) {
+				return this._addCheck({
+					kind: "min",
+					inclusive: true,
+					value: Number.MIN_SAFE_INTEGER,
+					message: errorUtil.toString(message)
+				})._addCheck({
+					kind: "max",
+					inclusive: true,
+					value: Number.MAX_SAFE_INTEGER,
+					message: errorUtil.toString(message)
+				});
+			}
+			get minValue() {
+				let min = null;
+				for (const ch of this._def.checks) if (ch.kind === "min") {
+					if (min === null || ch.value > min) min = ch.value;
+				}
+				return min;
+			}
+			get maxValue() {
+				let max = null;
+				for (const ch of this._def.checks) if (ch.kind === "max") {
+					if (max === null || ch.value < max) max = ch.value;
+				}
+				return max;
+			}
+			get isInt() {
+				return !!this._def.checks.find((ch) => ch.kind === "int" || ch.kind === "multipleOf" && util.isInteger(ch.value));
+			}
+			get isFinite() {
+				let max = null, min = null;
+				for (const ch of this._def.checks) if (ch.kind === "finite" || ch.kind === "int" || ch.kind === "multipleOf") return true;
+				else if (ch.kind === "min") {
+					if (min === null || ch.value > min) min = ch.value;
+				} else if (ch.kind === "max") {
+					if (max === null || ch.value < max) max = ch.value;
+				}
+				return Number.isFinite(min) && Number.isFinite(max);
+			}
+		};
+		ZodNumber.create = (params) => {
+			return new ZodNumber({
+				checks: [],
+				typeName: ZodFirstPartyTypeKind.ZodNumber,
+				coerce: (params === null || params === void 0 ? void 0 : params.coerce) || false,
+				...processCreateParams(params)
+			});
+		};
+		var ZodBigInt = class ZodBigInt extends ZodType {
+			constructor() {
+				super(...arguments);
+				this.min = this.gte;
+				this.max = this.lte;
+			}
+			_parse(input) {
+				if (this._def.coerce) input.data = BigInt(input.data);
+				if (this._getType(input) !== ZodParsedType.bigint) {
+					const ctx = this._getOrReturnCtx(input);
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.bigint,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				let ctx = void 0;
+				const status = new ParseStatus();
+				for (const check of this._def.checks) if (check.kind === "min") {
+					if (check.inclusive ? input.data < check.value : input.data <= check.value) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.too_small,
+							type: "bigint",
+							minimum: check.value,
+							inclusive: check.inclusive,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "max") {
+					if (check.inclusive ? input.data > check.value : input.data >= check.value) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.too_big,
+							type: "bigint",
+							maximum: check.value,
+							inclusive: check.inclusive,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "multipleOf") {
+					if (input.data % check.value !== BigInt(0)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.not_multiple_of,
+							multipleOf: check.value,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else util.assertNever(check);
+				return {
+					status: status.value,
+					value: input.data
+				};
+			}
+			gte(value, message) {
+				return this.setLimit("min", value, true, errorUtil.toString(message));
+			}
+			gt(value, message) {
+				return this.setLimit("min", value, false, errorUtil.toString(message));
+			}
+			lte(value, message) {
+				return this.setLimit("max", value, true, errorUtil.toString(message));
+			}
+			lt(value, message) {
+				return this.setLimit("max", value, false, errorUtil.toString(message));
+			}
+			setLimit(kind, value, inclusive, message) {
+				return new ZodBigInt({
+					...this._def,
+					checks: [...this._def.checks, {
+						kind,
+						value,
+						inclusive,
+						message: errorUtil.toString(message)
+					}]
+				});
+			}
+			_addCheck(check) {
+				return new ZodBigInt({
+					...this._def,
+					checks: [...this._def.checks, check]
+				});
+			}
+			positive(message) {
+				return this._addCheck({
+					kind: "min",
+					value: BigInt(0),
+					inclusive: false,
+					message: errorUtil.toString(message)
+				});
+			}
+			negative(message) {
+				return this._addCheck({
+					kind: "max",
+					value: BigInt(0),
+					inclusive: false,
+					message: errorUtil.toString(message)
+				});
+			}
+			nonpositive(message) {
+				return this._addCheck({
+					kind: "max",
+					value: BigInt(0),
+					inclusive: true,
+					message: errorUtil.toString(message)
+				});
+			}
+			nonnegative(message) {
+				return this._addCheck({
+					kind: "min",
+					value: BigInt(0),
+					inclusive: true,
+					message: errorUtil.toString(message)
+				});
+			}
+			multipleOf(value, message) {
+				return this._addCheck({
+					kind: "multipleOf",
+					value,
+					message: errorUtil.toString(message)
+				});
+			}
+			get minValue() {
+				let min = null;
+				for (const ch of this._def.checks) if (ch.kind === "min") {
+					if (min === null || ch.value > min) min = ch.value;
+				}
+				return min;
+			}
+			get maxValue() {
+				let max = null;
+				for (const ch of this._def.checks) if (ch.kind === "max") {
+					if (max === null || ch.value < max) max = ch.value;
+				}
+				return max;
+			}
+		};
+		ZodBigInt.create = (params) => {
+			var _a;
+			return new ZodBigInt({
+				checks: [],
+				typeName: ZodFirstPartyTypeKind.ZodBigInt,
+				coerce: (_a = params === null || params === void 0 ? void 0 : params.coerce) !== null && _a !== void 0 ? _a : false,
+				...processCreateParams(params)
+			});
+		};
+		var ZodBoolean = class extends ZodType {
+			_parse(input) {
+				if (this._def.coerce) input.data = Boolean(input.data);
+				if (this._getType(input) !== ZodParsedType.boolean) {
+					const ctx = this._getOrReturnCtx(input);
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.boolean,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				return OK(input.data);
+			}
+		};
+		ZodBoolean.create = (params) => {
+			return new ZodBoolean({
+				typeName: ZodFirstPartyTypeKind.ZodBoolean,
+				coerce: (params === null || params === void 0 ? void 0 : params.coerce) || false,
+				...processCreateParams(params)
+			});
+		};
+		var ZodDate = class ZodDate extends ZodType {
+			_parse(input) {
+				if (this._def.coerce) input.data = new Date(input.data);
+				if (this._getType(input) !== ZodParsedType.date) {
+					const ctx = this._getOrReturnCtx(input);
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.date,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				if (isNaN(input.data.getTime())) {
+					addIssueToContext(this._getOrReturnCtx(input), { code: ZodIssueCode.invalid_date });
+					return INVALID;
+				}
+				const status = new ParseStatus();
+				let ctx = void 0;
+				for (const check of this._def.checks) if (check.kind === "min") {
+					if (input.data.getTime() < check.value) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.too_small,
+							message: check.message,
+							inclusive: true,
+							exact: false,
+							minimum: check.value,
+							type: "date"
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "max") {
+					if (input.data.getTime() > check.value) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.too_big,
+							message: check.message,
+							inclusive: true,
+							exact: false,
+							maximum: check.value,
+							type: "date"
+						});
+						status.dirty();
+					}
+				} else util.assertNever(check);
+				return {
+					status: status.value,
+					value: new Date(input.data.getTime())
+				};
+			}
+			_addCheck(check) {
+				return new ZodDate({
+					...this._def,
+					checks: [...this._def.checks, check]
+				});
+			}
+			min(minDate, message) {
+				return this._addCheck({
+					kind: "min",
+					value: minDate.getTime(),
+					message: errorUtil.toString(message)
+				});
+			}
+			max(maxDate, message) {
+				return this._addCheck({
+					kind: "max",
+					value: maxDate.getTime(),
+					message: errorUtil.toString(message)
+				});
+			}
+			get minDate() {
+				let min = null;
+				for (const ch of this._def.checks) if (ch.kind === "min") {
+					if (min === null || ch.value > min) min = ch.value;
+				}
+				return min != null ? new Date(min) : null;
+			}
+			get maxDate() {
+				let max = null;
+				for (const ch of this._def.checks) if (ch.kind === "max") {
+					if (max === null || ch.value < max) max = ch.value;
+				}
+				return max != null ? new Date(max) : null;
+			}
+		};
+		ZodDate.create = (params) => {
+			return new ZodDate({
+				checks: [],
+				coerce: (params === null || params === void 0 ? void 0 : params.coerce) || false,
+				typeName: ZodFirstPartyTypeKind.ZodDate,
+				...processCreateParams(params)
+			});
+		};
+		var ZodSymbol = class extends ZodType {
+			_parse(input) {
+				if (this._getType(input) !== ZodParsedType.symbol) {
+					const ctx = this._getOrReturnCtx(input);
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.symbol,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				return OK(input.data);
+			}
+		};
+		ZodSymbol.create = (params) => {
+			return new ZodSymbol({
+				typeName: ZodFirstPartyTypeKind.ZodSymbol,
+				...processCreateParams(params)
+			});
+		};
+		var ZodUndefined = class extends ZodType {
+			_parse(input) {
+				if (this._getType(input) !== ZodParsedType.undefined) {
+					const ctx = this._getOrReturnCtx(input);
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.undefined,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				return OK(input.data);
+			}
+		};
+		ZodUndefined.create = (params) => {
+			return new ZodUndefined({
+				typeName: ZodFirstPartyTypeKind.ZodUndefined,
+				...processCreateParams(params)
+			});
+		};
+		var ZodNull = class extends ZodType {
+			_parse(input) {
+				if (this._getType(input) !== ZodParsedType.null) {
+					const ctx = this._getOrReturnCtx(input);
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.null,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				return OK(input.data);
+			}
+		};
+		ZodNull.create = (params) => {
+			return new ZodNull({
+				typeName: ZodFirstPartyTypeKind.ZodNull,
+				...processCreateParams(params)
+			});
+		};
+		var ZodAny = class extends ZodType {
+			constructor() {
+				super(...arguments);
+				this._any = true;
+			}
+			_parse(input) {
+				return OK(input.data);
+			}
+		};
+		ZodAny.create = (params) => {
+			return new ZodAny({
+				typeName: ZodFirstPartyTypeKind.ZodAny,
+				...processCreateParams(params)
+			});
+		};
+		var ZodUnknown = class extends ZodType {
+			constructor() {
+				super(...arguments);
+				this._unknown = true;
+			}
+			_parse(input) {
+				return OK(input.data);
+			}
+		};
+		ZodUnknown.create = (params) => {
+			return new ZodUnknown({
+				typeName: ZodFirstPartyTypeKind.ZodUnknown,
+				...processCreateParams(params)
+			});
+		};
+		var ZodNever = class extends ZodType {
+			_parse(input) {
+				const ctx = this._getOrReturnCtx(input);
+				addIssueToContext(ctx, {
+					code: ZodIssueCode.invalid_type,
+					expected: ZodParsedType.never,
+					received: ctx.parsedType
+				});
+				return INVALID;
+			}
+		};
+		ZodNever.create = (params) => {
+			return new ZodNever({
+				typeName: ZodFirstPartyTypeKind.ZodNever,
+				...processCreateParams(params)
+			});
+		};
+		var ZodVoid = class extends ZodType {
+			_parse(input) {
+				if (this._getType(input) !== ZodParsedType.undefined) {
+					const ctx = this._getOrReturnCtx(input);
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.void,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				return OK(input.data);
+			}
+		};
+		ZodVoid.create = (params) => {
+			return new ZodVoid({
+				typeName: ZodFirstPartyTypeKind.ZodVoid,
+				...processCreateParams(params)
+			});
+		};
+		var ZodArray = class ZodArray extends ZodType {
+			_parse(input) {
+				const { ctx, status } = this._processInputParams(input);
+				const def = this._def;
+				if (ctx.parsedType !== ZodParsedType.array) {
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.array,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				if (def.exactLength !== null) {
+					const tooBig = ctx.data.length > def.exactLength.value;
+					const tooSmall = ctx.data.length < def.exactLength.value;
+					if (tooBig || tooSmall) {
+						addIssueToContext(ctx, {
+							code: tooBig ? ZodIssueCode.too_big : ZodIssueCode.too_small,
+							minimum: tooSmall ? def.exactLength.value : void 0,
+							maximum: tooBig ? def.exactLength.value : void 0,
+							type: "array",
+							inclusive: true,
+							exact: true,
+							message: def.exactLength.message
+						});
+						status.dirty();
+					}
+				}
+				if (def.minLength !== null) {
+					if (ctx.data.length < def.minLength.value) {
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.too_small,
+							minimum: def.minLength.value,
+							type: "array",
+							inclusive: true,
+							exact: false,
+							message: def.minLength.message
+						});
+						status.dirty();
+					}
+				}
+				if (def.maxLength !== null) {
+					if (ctx.data.length > def.maxLength.value) {
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.too_big,
+							maximum: def.maxLength.value,
+							type: "array",
+							inclusive: true,
+							exact: false,
+							message: def.maxLength.message
+						});
+						status.dirty();
+					}
+				}
+				if (ctx.common.async) return Promise.all([...ctx.data].map((item, i) => {
+					return def.type._parseAsync(new ParseInputLazyPath(ctx, item, ctx.path, i));
+				})).then((result) => {
+					return ParseStatus.mergeArray(status, result);
+				});
+				const result = [...ctx.data].map((item, i) => {
+					return def.type._parseSync(new ParseInputLazyPath(ctx, item, ctx.path, i));
+				});
+				return ParseStatus.mergeArray(status, result);
+			}
+			get element() {
+				return this._def.type;
+			}
+			min(minLength, message) {
+				return new ZodArray({
+					...this._def,
+					minLength: {
+						value: minLength,
+						message: errorUtil.toString(message)
+					}
+				});
+			}
+			max(maxLength, message) {
+				return new ZodArray({
+					...this._def,
+					maxLength: {
+						value: maxLength,
+						message: errorUtil.toString(message)
+					}
+				});
+			}
+			length(len, message) {
+				return new ZodArray({
+					...this._def,
+					exactLength: {
+						value: len,
+						message: errorUtil.toString(message)
+					}
+				});
+			}
+			nonempty(message) {
+				return this.min(1, message);
+			}
+		};
+		ZodArray.create = (schema, params) => {
+			return new ZodArray({
+				type: schema,
+				minLength: null,
+				maxLength: null,
+				exactLength: null,
+				typeName: ZodFirstPartyTypeKind.ZodArray,
+				...processCreateParams(params)
+			});
+		};
+		function deepPartialify(schema) {
+			if (schema instanceof ZodObject) {
+				const newShape = {};
+				for (const key in schema.shape) {
+					const fieldSchema = schema.shape[key];
+					newShape[key] = ZodOptional.create(deepPartialify(fieldSchema));
+				}
+				return new ZodObject({
+					...schema._def,
+					shape: () => newShape
+				});
+			} else if (schema instanceof ZodArray) return new ZodArray({
+				...schema._def,
+				type: deepPartialify(schema.element)
+			});
+			else if (schema instanceof ZodOptional) return ZodOptional.create(deepPartialify(schema.unwrap()));
+			else if (schema instanceof ZodNullable) return ZodNullable.create(deepPartialify(schema.unwrap()));
+			else if (schema instanceof ZodTuple) return ZodTuple.create(schema.items.map((item) => deepPartialify(item)));
+			else return schema;
+		}
+		var ZodObject = class ZodObject extends ZodType {
+			constructor() {
+				super(...arguments);
+				this._cached = null;
+				/**
+				* @deprecated In most cases, this is no longer needed - unknown properties are now silently stripped.
+				* If you want to pass through unknown properties, use `.passthrough()` instead.
+				*/
+				this.nonstrict = this.passthrough;
+				/**
+				* @deprecated Use `.extend` instead
+				*  */
+				this.augment = this.extend;
+			}
+			_getCached() {
+				if (this._cached !== null) return this._cached;
+				const shape = this._def.shape();
+				const keys = util.objectKeys(shape);
+				return this._cached = {
+					shape,
+					keys
+				};
+			}
+			_parse(input) {
+				if (this._getType(input) !== ZodParsedType.object) {
+					const ctx = this._getOrReturnCtx(input);
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.object,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				const { status, ctx } = this._processInputParams(input);
+				const { shape, keys: shapeKeys } = this._getCached();
+				const extraKeys = [];
+				if (!(this._def.catchall instanceof ZodNever && this._def.unknownKeys === "strip")) {
+					for (const key in ctx.data) if (!shapeKeys.includes(key)) extraKeys.push(key);
+				}
+				const pairs = [];
+				for (const key of shapeKeys) {
+					const keyValidator = shape[key];
+					const value = ctx.data[key];
+					pairs.push({
+						key: {
+							status: "valid",
+							value: key
+						},
+						value: keyValidator._parse(new ParseInputLazyPath(ctx, value, ctx.path, key)),
+						alwaysSet: key in ctx.data
+					});
+				}
+				if (this._def.catchall instanceof ZodNever) {
+					const unknownKeys = this._def.unknownKeys;
+					if (unknownKeys === "passthrough") for (const key of extraKeys) pairs.push({
+						key: {
+							status: "valid",
+							value: key
+						},
+						value: {
+							status: "valid",
+							value: ctx.data[key]
+						}
+					});
+					else if (unknownKeys === "strict") {
+						if (extraKeys.length > 0) {
+							addIssueToContext(ctx, {
+								code: ZodIssueCode.unrecognized_keys,
+								keys: extraKeys
+							});
+							status.dirty();
+						}
+					} else if (unknownKeys === "strip");
+					else throw new Error(`Internal ZodObject error: invalid unknownKeys value.`);
+				} else {
+					const catchall = this._def.catchall;
+					for (const key of extraKeys) {
+						const value = ctx.data[key];
+						pairs.push({
+							key: {
+								status: "valid",
+								value: key
+							},
+							value: catchall._parse(new ParseInputLazyPath(ctx, value, ctx.path, key)),
+							alwaysSet: key in ctx.data
+						});
+					}
+				}
+				if (ctx.common.async) return Promise.resolve().then(async () => {
+					const syncPairs = [];
+					for (const pair of pairs) {
+						const key = await pair.key;
+						const value = await pair.value;
+						syncPairs.push({
+							key,
+							value,
+							alwaysSet: pair.alwaysSet
+						});
+					}
+					return syncPairs;
+				}).then((syncPairs) => {
+					return ParseStatus.mergeObjectSync(status, syncPairs);
+				});
+				else return ParseStatus.mergeObjectSync(status, pairs);
+			}
+			get shape() {
+				return this._def.shape();
+			}
+			strict(message) {
+				errorUtil.errToObj;
+				return new ZodObject({
+					...this._def,
+					unknownKeys: "strict",
+					...message !== void 0 ? { errorMap: (issue, ctx) => {
+						var _a, _b, _c, _d;
+						const defaultError = (_c = (_b = (_a = this._def).errorMap) === null || _b === void 0 ? void 0 : _b.call(_a, issue, ctx).message) !== null && _c !== void 0 ? _c : ctx.defaultError;
+						if (issue.code === "unrecognized_keys") return { message: (_d = errorUtil.errToObj(message).message) !== null && _d !== void 0 ? _d : defaultError };
+						return { message: defaultError };
+					} } : {}
+				});
+			}
+			strip() {
+				return new ZodObject({
+					...this._def,
+					unknownKeys: "strip"
+				});
+			}
+			passthrough() {
+				return new ZodObject({
+					...this._def,
+					unknownKeys: "passthrough"
+				});
+			}
+			extend(augmentation) {
+				return new ZodObject({
+					...this._def,
+					shape: () => ({
+						...this._def.shape(),
+						...augmentation
+					})
+				});
+			}
+			/**
+			* Prior to zod@1.0.12 there was a bug in the
+			* inferred type of merged objects. Please
+			* upgrade if you are experiencing issues.
+			*/
+			merge(merging) {
+				return new ZodObject({
+					unknownKeys: merging._def.unknownKeys,
+					catchall: merging._def.catchall,
+					shape: () => ({
+						...this._def.shape(),
+						...merging._def.shape()
+					}),
+					typeName: ZodFirstPartyTypeKind.ZodObject
+				});
+			}
+			setKey(key, schema) {
+				return this.augment({ [key]: schema });
+			}
+			catchall(index) {
+				return new ZodObject({
+					...this._def,
+					catchall: index
+				});
+			}
+			pick(mask) {
+				const shape = {};
+				util.objectKeys(mask).forEach((key) => {
+					if (mask[key] && this.shape[key]) shape[key] = this.shape[key];
+				});
+				return new ZodObject({
+					...this._def,
+					shape: () => shape
+				});
+			}
+			omit(mask) {
+				const shape = {};
+				util.objectKeys(this.shape).forEach((key) => {
+					if (!mask[key]) shape[key] = this.shape[key];
+				});
+				return new ZodObject({
+					...this._def,
+					shape: () => shape
+				});
+			}
+			/**
+			* @deprecated
+			*/
+			deepPartial() {
+				return deepPartialify(this);
+			}
+			partial(mask) {
+				const newShape = {};
+				util.objectKeys(this.shape).forEach((key) => {
+					const fieldSchema = this.shape[key];
+					if (mask && !mask[key]) newShape[key] = fieldSchema;
+					else newShape[key] = fieldSchema.optional();
+				});
+				return new ZodObject({
+					...this._def,
+					shape: () => newShape
+				});
+			}
+			required(mask) {
+				const newShape = {};
+				util.objectKeys(this.shape).forEach((key) => {
+					if (mask && !mask[key]) newShape[key] = this.shape[key];
+					else {
+						let newField = this.shape[key];
+						while (newField instanceof ZodOptional) newField = newField._def.innerType;
+						newShape[key] = newField;
+					}
+				});
+				return new ZodObject({
+					...this._def,
+					shape: () => newShape
+				});
+			}
+			keyof() {
+				return createZodEnum(util.objectKeys(this.shape));
+			}
+		};
+		ZodObject.create = (shape, params) => {
+			return new ZodObject({
+				shape: () => shape,
+				unknownKeys: "strip",
+				catchall: ZodNever.create(),
+				typeName: ZodFirstPartyTypeKind.ZodObject,
+				...processCreateParams(params)
+			});
+		};
+		ZodObject.strictCreate = (shape, params) => {
+			return new ZodObject({
+				shape: () => shape,
+				unknownKeys: "strict",
+				catchall: ZodNever.create(),
+				typeName: ZodFirstPartyTypeKind.ZodObject,
+				...processCreateParams(params)
+			});
+		};
+		ZodObject.lazycreate = (shape, params) => {
+			return new ZodObject({
+				shape,
+				unknownKeys: "strip",
+				catchall: ZodNever.create(),
+				typeName: ZodFirstPartyTypeKind.ZodObject,
+				...processCreateParams(params)
+			});
+		};
+		var ZodUnion = class extends ZodType {
+			_parse(input) {
+				const { ctx } = this._processInputParams(input);
+				const options = this._def.options;
+				function handleResults(results) {
+					for (const result of results) if (result.result.status === "valid") return result.result;
+					for (const result of results) if (result.result.status === "dirty") {
+						ctx.common.issues.push(...result.ctx.common.issues);
+						return result.result;
+					}
+					const unionErrors = results.map((result) => new ZodError(result.ctx.common.issues));
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_union,
+						unionErrors
+					});
+					return INVALID;
+				}
+				if (ctx.common.async) return Promise.all(options.map(async (option) => {
+					const childCtx = {
+						...ctx,
+						common: {
+							...ctx.common,
+							issues: []
+						},
+						parent: null
+					};
+					return {
+						result: await option._parseAsync({
+							data: ctx.data,
+							path: ctx.path,
+							parent: childCtx
+						}),
+						ctx: childCtx
+					};
+				})).then(handleResults);
+				else {
+					let dirty = void 0;
+					const issues = [];
+					for (const option of options) {
+						const childCtx = {
+							...ctx,
+							common: {
+								...ctx.common,
+								issues: []
+							},
+							parent: null
+						};
+						const result = option._parseSync({
+							data: ctx.data,
+							path: ctx.path,
+							parent: childCtx
+						});
+						if (result.status === "valid") return result;
+						else if (result.status === "dirty" && !dirty) dirty = {
+							result,
+							ctx: childCtx
+						};
+						if (childCtx.common.issues.length) issues.push(childCtx.common.issues);
+					}
+					if (dirty) {
+						ctx.common.issues.push(...dirty.ctx.common.issues);
+						return dirty.result;
+					}
+					const unionErrors = issues.map((issues) => new ZodError(issues));
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_union,
+						unionErrors
+					});
+					return INVALID;
+				}
+			}
+			get options() {
+				return this._def.options;
+			}
+		};
+		ZodUnion.create = (types, params) => {
+			return new ZodUnion({
+				options: types,
+				typeName: ZodFirstPartyTypeKind.ZodUnion,
+				...processCreateParams(params)
+			});
+		};
+		const getDiscriminator = (type) => {
+			if (type instanceof ZodLazy) return getDiscriminator(type.schema);
+			else if (type instanceof ZodEffects) return getDiscriminator(type.innerType());
+			else if (type instanceof ZodLiteral) return [type.value];
+			else if (type instanceof ZodEnum) return type.options;
+			else if (type instanceof ZodNativeEnum) return util.objectValues(type.enum);
+			else if (type instanceof ZodDefault) return getDiscriminator(type._def.innerType);
+			else if (type instanceof ZodUndefined) return [void 0];
+			else if (type instanceof ZodNull) return [null];
+			else if (type instanceof ZodOptional) return [void 0, ...getDiscriminator(type.unwrap())];
+			else if (type instanceof ZodNullable) return [null, ...getDiscriminator(type.unwrap())];
+			else if (type instanceof ZodBranded) return getDiscriminator(type.unwrap());
+			else if (type instanceof ZodReadonly) return getDiscriminator(type.unwrap());
+			else if (type instanceof ZodCatch) return getDiscriminator(type._def.innerType);
+			else return [];
+		};
+		var ZodDiscriminatedUnion = class ZodDiscriminatedUnion extends ZodType {
+			_parse(input) {
+				const { ctx } = this._processInputParams(input);
+				if (ctx.parsedType !== ZodParsedType.object) {
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.object,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				const discriminator = this.discriminator;
+				const discriminatorValue = ctx.data[discriminator];
+				const option = this.optionsMap.get(discriminatorValue);
+				if (!option) {
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_union_discriminator,
+						options: Array.from(this.optionsMap.keys()),
+						path: [discriminator]
+					});
+					return INVALID;
+				}
+				if (ctx.common.async) return option._parseAsync({
+					data: ctx.data,
+					path: ctx.path,
+					parent: ctx
+				});
+				else return option._parseSync({
+					data: ctx.data,
+					path: ctx.path,
+					parent: ctx
+				});
+			}
+			get discriminator() {
+				return this._def.discriminator;
+			}
+			get options() {
+				return this._def.options;
+			}
+			get optionsMap() {
+				return this._def.optionsMap;
+			}
+			/**
+			* The constructor of the discriminated union schema. Its behaviour is very similar to that of the normal z.union() constructor.
+			* However, it only allows a union of objects, all of which need to share a discriminator property. This property must
+			* have a different value for each object in the union.
+			* @param discriminator the name of the discriminator property
+			* @param types an array of object schemas
+			* @param params
+			*/
+			static create(discriminator, options, params) {
+				const optionsMap = /* @__PURE__ */ new Map();
+				for (const type of options) {
+					const discriminatorValues = getDiscriminator(type.shape[discriminator]);
+					if (!discriminatorValues.length) throw new Error(`A discriminator value for key \`${discriminator}\` could not be extracted from all schema options`);
+					for (const value of discriminatorValues) {
+						if (optionsMap.has(value)) throw new Error(`Discriminator property ${String(discriminator)} has duplicate value ${String(value)}`);
+						optionsMap.set(value, type);
+					}
+				}
+				return new ZodDiscriminatedUnion({
+					typeName: ZodFirstPartyTypeKind.ZodDiscriminatedUnion,
+					discriminator,
+					options,
+					optionsMap,
+					...processCreateParams(params)
+				});
+			}
+		};
+		function mergeValues$1(a, b) {
+			const aType = getParsedType(a);
+			const bType = getParsedType(b);
+			if (a === b) return {
+				valid: true,
+				data: a
+			};
+			else if (aType === ZodParsedType.object && bType === ZodParsedType.object) {
+				const bKeys = util.objectKeys(b);
+				const sharedKeys = util.objectKeys(a).filter((key) => bKeys.indexOf(key) !== -1);
+				const newObj = {
+					...a,
+					...b
+				};
+				for (const key of sharedKeys) {
+					const sharedValue = mergeValues$1(a[key], b[key]);
+					if (!sharedValue.valid) return { valid: false };
+					newObj[key] = sharedValue.data;
+				}
+				return {
+					valid: true,
+					data: newObj
+				};
+			} else if (aType === ZodParsedType.array && bType === ZodParsedType.array) {
+				if (a.length !== b.length) return { valid: false };
+				const newArray = [];
+				for (let index = 0; index < a.length; index++) {
+					const itemA = a[index];
+					const itemB = b[index];
+					const sharedValue = mergeValues$1(itemA, itemB);
+					if (!sharedValue.valid) return { valid: false };
+					newArray.push(sharedValue.data);
+				}
+				return {
+					valid: true,
+					data: newArray
+				};
+			} else if (aType === ZodParsedType.date && bType === ZodParsedType.date && +a === +b) return {
+				valid: true,
+				data: a
+			};
+			else return { valid: false };
+		}
+		var ZodIntersection = class extends ZodType {
+			_parse(input) {
+				const { status, ctx } = this._processInputParams(input);
+				const handleParsed = (parsedLeft, parsedRight) => {
+					if (isAborted(parsedLeft) || isAborted(parsedRight)) return INVALID;
+					const merged = mergeValues$1(parsedLeft.value, parsedRight.value);
+					if (!merged.valid) {
+						addIssueToContext(ctx, { code: ZodIssueCode.invalid_intersection_types });
+						return INVALID;
+					}
+					if (isDirty(parsedLeft) || isDirty(parsedRight)) status.dirty();
+					return {
+						status: status.value,
+						value: merged.data
+					};
+				};
+				if (ctx.common.async) return Promise.all([this._def.left._parseAsync({
+					data: ctx.data,
+					path: ctx.path,
+					parent: ctx
+				}), this._def.right._parseAsync({
+					data: ctx.data,
+					path: ctx.path,
+					parent: ctx
+				})]).then(([left, right]) => handleParsed(left, right));
+				else return handleParsed(this._def.left._parseSync({
+					data: ctx.data,
+					path: ctx.path,
+					parent: ctx
+				}), this._def.right._parseSync({
+					data: ctx.data,
+					path: ctx.path,
+					parent: ctx
+				}));
+			}
+		};
+		ZodIntersection.create = (left, right, params) => {
+			return new ZodIntersection({
+				left,
+				right,
+				typeName: ZodFirstPartyTypeKind.ZodIntersection,
+				...processCreateParams(params)
+			});
+		};
+		var ZodTuple = class ZodTuple extends ZodType {
+			_parse(input) {
+				const { status, ctx } = this._processInputParams(input);
+				if (ctx.parsedType !== ZodParsedType.array) {
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.array,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				if (ctx.data.length < this._def.items.length) {
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.too_small,
+						minimum: this._def.items.length,
+						inclusive: true,
+						exact: false,
+						type: "array"
+					});
+					return INVALID;
+				}
+				if (!this._def.rest && ctx.data.length > this._def.items.length) {
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.too_big,
+						maximum: this._def.items.length,
+						inclusive: true,
+						exact: false,
+						type: "array"
+					});
+					status.dirty();
+				}
+				const items = [...ctx.data].map((item, itemIndex) => {
+					const schema = this._def.items[itemIndex] || this._def.rest;
+					if (!schema) return null;
+					return schema._parse(new ParseInputLazyPath(ctx, item, ctx.path, itemIndex));
+				}).filter((x) => !!x);
+				if (ctx.common.async) return Promise.all(items).then((results) => {
+					return ParseStatus.mergeArray(status, results);
+				});
+				else return ParseStatus.mergeArray(status, items);
+			}
+			get items() {
+				return this._def.items;
+			}
+			rest(rest) {
+				return new ZodTuple({
+					...this._def,
+					rest
+				});
+			}
+		};
+		ZodTuple.create = (schemas, params) => {
+			if (!Array.isArray(schemas)) throw new Error("You must pass an array of schemas to z.tuple([ ... ])");
+			return new ZodTuple({
+				items: schemas,
+				typeName: ZodFirstPartyTypeKind.ZodTuple,
+				rest: null,
+				...processCreateParams(params)
+			});
+		};
+		var ZodRecord = class ZodRecord extends ZodType {
+			get keySchema() {
+				return this._def.keyType;
+			}
+			get valueSchema() {
+				return this._def.valueType;
+			}
+			_parse(input) {
+				const { status, ctx } = this._processInputParams(input);
+				if (ctx.parsedType !== ZodParsedType.object) {
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.object,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				const pairs = [];
+				const keyType = this._def.keyType;
+				const valueType = this._def.valueType;
+				for (const key in ctx.data) pairs.push({
+					key: keyType._parse(new ParseInputLazyPath(ctx, key, ctx.path, key)),
+					value: valueType._parse(new ParseInputLazyPath(ctx, ctx.data[key], ctx.path, key)),
+					alwaysSet: key in ctx.data
+				});
+				if (ctx.common.async) return ParseStatus.mergeObjectAsync(status, pairs);
+				else return ParseStatus.mergeObjectSync(status, pairs);
+			}
+			get element() {
+				return this._def.valueType;
+			}
+			static create(first, second, third) {
+				if (second instanceof ZodType) return new ZodRecord({
+					keyType: first,
+					valueType: second,
+					typeName: ZodFirstPartyTypeKind.ZodRecord,
+					...processCreateParams(third)
+				});
+				return new ZodRecord({
+					keyType: ZodString.create(),
+					valueType: first,
+					typeName: ZodFirstPartyTypeKind.ZodRecord,
+					...processCreateParams(second)
+				});
+			}
+		};
+		var ZodMap = class extends ZodType {
+			get keySchema() {
+				return this._def.keyType;
+			}
+			get valueSchema() {
+				return this._def.valueType;
+			}
+			_parse(input) {
+				const { status, ctx } = this._processInputParams(input);
+				if (ctx.parsedType !== ZodParsedType.map) {
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.map,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				const keyType = this._def.keyType;
+				const valueType = this._def.valueType;
+				const pairs = [...ctx.data.entries()].map(([key, value], index) => {
+					return {
+						key: keyType._parse(new ParseInputLazyPath(ctx, key, ctx.path, [index, "key"])),
+						value: valueType._parse(new ParseInputLazyPath(ctx, value, ctx.path, [index, "value"]))
+					};
+				});
+				if (ctx.common.async) {
+					const finalMap = /* @__PURE__ */ new Map();
+					return Promise.resolve().then(async () => {
+						for (const pair of pairs) {
+							const key = await pair.key;
+							const value = await pair.value;
+							if (key.status === "aborted" || value.status === "aborted") return INVALID;
+							if (key.status === "dirty" || value.status === "dirty") status.dirty();
+							finalMap.set(key.value, value.value);
+						}
+						return {
+							status: status.value,
+							value: finalMap
+						};
+					});
+				} else {
+					const finalMap = /* @__PURE__ */ new Map();
+					for (const pair of pairs) {
+						const key = pair.key;
+						const value = pair.value;
+						if (key.status === "aborted" || value.status === "aborted") return INVALID;
+						if (key.status === "dirty" || value.status === "dirty") status.dirty();
+						finalMap.set(key.value, value.value);
+					}
+					return {
+						status: status.value,
+						value: finalMap
+					};
+				}
+			}
+		};
+		ZodMap.create = (keyType, valueType, params) => {
+			return new ZodMap({
+				valueType,
+				keyType,
+				typeName: ZodFirstPartyTypeKind.ZodMap,
+				...processCreateParams(params)
+			});
+		};
+		var ZodSet = class ZodSet extends ZodType {
+			_parse(input) {
+				const { status, ctx } = this._processInputParams(input);
+				if (ctx.parsedType !== ZodParsedType.set) {
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.set,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				const def = this._def;
+				if (def.minSize !== null) {
+					if (ctx.data.size < def.minSize.value) {
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.too_small,
+							minimum: def.minSize.value,
+							type: "set",
+							inclusive: true,
+							exact: false,
+							message: def.minSize.message
+						});
+						status.dirty();
+					}
+				}
+				if (def.maxSize !== null) {
+					if (ctx.data.size > def.maxSize.value) {
+						addIssueToContext(ctx, {
+							code: ZodIssueCode.too_big,
+							maximum: def.maxSize.value,
+							type: "set",
+							inclusive: true,
+							exact: false,
+							message: def.maxSize.message
+						});
+						status.dirty();
+					}
+				}
+				const valueType = this._def.valueType;
+				function finalizeSet(elements) {
+					const parsedSet = /* @__PURE__ */ new Set();
+					for (const element of elements) {
+						if (element.status === "aborted") return INVALID;
+						if (element.status === "dirty") status.dirty();
+						parsedSet.add(element.value);
+					}
+					return {
+						status: status.value,
+						value: parsedSet
+					};
+				}
+				const elements = [...ctx.data.values()].map((item, i) => valueType._parse(new ParseInputLazyPath(ctx, item, ctx.path, i)));
+				if (ctx.common.async) return Promise.all(elements).then((elements) => finalizeSet(elements));
+				else return finalizeSet(elements);
+			}
+			min(minSize, message) {
+				return new ZodSet({
+					...this._def,
+					minSize: {
+						value: minSize,
+						message: errorUtil.toString(message)
+					}
+				});
+			}
+			max(maxSize, message) {
+				return new ZodSet({
+					...this._def,
+					maxSize: {
+						value: maxSize,
+						message: errorUtil.toString(message)
+					}
+				});
+			}
+			size(size, message) {
+				return this.min(size, message).max(size, message);
+			}
+			nonempty(message) {
+				return this.min(1, message);
+			}
+		};
+		ZodSet.create = (valueType, params) => {
+			return new ZodSet({
+				valueType,
+				minSize: null,
+				maxSize: null,
+				typeName: ZodFirstPartyTypeKind.ZodSet,
+				...processCreateParams(params)
+			});
+		};
+		var ZodFunction = class ZodFunction extends ZodType {
+			constructor() {
+				super(...arguments);
+				this.validate = this.implement;
+			}
+			_parse(input) {
+				const { ctx } = this._processInputParams(input);
+				if (ctx.parsedType !== ZodParsedType.function) {
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.function,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				function makeArgsIssue(args, error) {
+					return makeIssue({
+						data: args,
+						path: ctx.path,
+						errorMaps: [
+							ctx.common.contextualErrorMap,
+							ctx.schemaErrorMap,
+							getErrorMap(),
+							errorMap
+						].filter((x) => !!x),
+						issueData: {
+							code: ZodIssueCode.invalid_arguments,
+							argumentsError: error
+						}
+					});
+				}
+				function makeReturnsIssue(returns, error) {
+					return makeIssue({
+						data: returns,
+						path: ctx.path,
+						errorMaps: [
+							ctx.common.contextualErrorMap,
+							ctx.schemaErrorMap,
+							getErrorMap(),
+							errorMap
+						].filter((x) => !!x),
+						issueData: {
+							code: ZodIssueCode.invalid_return_type,
+							returnTypeError: error
+						}
+					});
+				}
+				const params = { errorMap: ctx.common.contextualErrorMap };
+				const fn = ctx.data;
+				if (this._def.returns instanceof ZodPromise) {
+					const me = this;
+					return OK(async function(...args) {
+						const error = new ZodError([]);
+						const parsedArgs = await me._def.args.parseAsync(args, params).catch((e) => {
+							error.addIssue(makeArgsIssue(args, e));
+							throw error;
+						});
+						const result = await Reflect.apply(fn, this, parsedArgs);
+						return await me._def.returns._def.type.parseAsync(result, params).catch((e) => {
+							error.addIssue(makeReturnsIssue(result, e));
+							throw error;
+						});
+					});
+				} else {
+					const me = this;
+					return OK(function(...args) {
+						const parsedArgs = me._def.args.safeParse(args, params);
+						if (!parsedArgs.success) throw new ZodError([makeArgsIssue(args, parsedArgs.error)]);
+						const result = Reflect.apply(fn, this, parsedArgs.data);
+						const parsedReturns = me._def.returns.safeParse(result, params);
+						if (!parsedReturns.success) throw new ZodError([makeReturnsIssue(result, parsedReturns.error)]);
+						return parsedReturns.data;
+					});
+				}
+			}
+			parameters() {
+				return this._def.args;
+			}
+			returnType() {
+				return this._def.returns;
+			}
+			args(...items) {
+				return new ZodFunction({
+					...this._def,
+					args: ZodTuple.create(items).rest(ZodUnknown.create())
+				});
+			}
+			returns(returnType) {
+				return new ZodFunction({
+					...this._def,
+					returns: returnType
+				});
+			}
+			implement(func) {
+				return this.parse(func);
+			}
+			strictImplement(func) {
+				return this.parse(func);
+			}
+			static create(args, returns, params) {
+				return new ZodFunction({
+					args: args ? args : ZodTuple.create([]).rest(ZodUnknown.create()),
+					returns: returns || ZodUnknown.create(),
+					typeName: ZodFirstPartyTypeKind.ZodFunction,
+					...processCreateParams(params)
+				});
+			}
+		};
+		var ZodLazy = class extends ZodType {
+			get schema() {
+				return this._def.getter();
+			}
+			_parse(input) {
+				const { ctx } = this._processInputParams(input);
+				return this._def.getter()._parse({
+					data: ctx.data,
+					path: ctx.path,
+					parent: ctx
+				});
+			}
+		};
+		ZodLazy.create = (getter, params) => {
+			return new ZodLazy({
+				getter,
+				typeName: ZodFirstPartyTypeKind.ZodLazy,
+				...processCreateParams(params)
+			});
+		};
+		var ZodLiteral = class extends ZodType {
+			_parse(input) {
+				if (input.data !== this._def.value) {
+					const ctx = this._getOrReturnCtx(input);
+					addIssueToContext(ctx, {
+						received: ctx.data,
+						code: ZodIssueCode.invalid_literal,
+						expected: this._def.value
+					});
+					return INVALID;
+				}
+				return {
+					status: "valid",
+					value: input.data
+				};
+			}
+			get value() {
+				return this._def.value;
+			}
+		};
+		ZodLiteral.create = (value, params) => {
+			return new ZodLiteral({
+				value,
+				typeName: ZodFirstPartyTypeKind.ZodLiteral,
+				...processCreateParams(params)
+			});
+		};
+		function createZodEnum(values, params) {
+			return new ZodEnum({
+				values,
+				typeName: ZodFirstPartyTypeKind.ZodEnum,
+				...processCreateParams(params)
+			});
+		}
+		var ZodEnum = class ZodEnum extends ZodType {
+			constructor() {
+				super(...arguments);
+				_ZodEnum_cache.set(this, void 0);
+			}
+			_parse(input) {
+				if (typeof input.data !== "string") {
+					const ctx = this._getOrReturnCtx(input);
+					const expectedValues = this._def.values;
+					addIssueToContext(ctx, {
+						expected: util.joinValues(expectedValues),
+						received: ctx.parsedType,
+						code: ZodIssueCode.invalid_type
+					});
+					return INVALID;
+				}
+				if (!__classPrivateFieldGet(this, _ZodEnum_cache, "f")) __classPrivateFieldSet(this, _ZodEnum_cache, new Set(this._def.values), "f");
+				if (!__classPrivateFieldGet(this, _ZodEnum_cache, "f").has(input.data)) {
+					const ctx = this._getOrReturnCtx(input);
+					const expectedValues = this._def.values;
+					addIssueToContext(ctx, {
+						received: ctx.data,
+						code: ZodIssueCode.invalid_enum_value,
+						options: expectedValues
+					});
+					return INVALID;
+				}
+				return OK(input.data);
+			}
+			get options() {
+				return this._def.values;
+			}
+			get enum() {
+				const enumValues = {};
+				for (const val of this._def.values) enumValues[val] = val;
+				return enumValues;
+			}
+			get Values() {
+				const enumValues = {};
+				for (const val of this._def.values) enumValues[val] = val;
+				return enumValues;
+			}
+			get Enum() {
+				const enumValues = {};
+				for (const val of this._def.values) enumValues[val] = val;
+				return enumValues;
+			}
+			extract(values, newDef = this._def) {
+				return ZodEnum.create(values, {
+					...this._def,
+					...newDef
+				});
+			}
+			exclude(values, newDef = this._def) {
+				return ZodEnum.create(this.options.filter((opt) => !values.includes(opt)), {
+					...this._def,
+					...newDef
+				});
+			}
+		};
+		_ZodEnum_cache = /* @__PURE__ */ new WeakMap();
+		ZodEnum.create = createZodEnum;
+		var ZodNativeEnum = class extends ZodType {
+			constructor() {
+				super(...arguments);
+				_ZodNativeEnum_cache.set(this, void 0);
+			}
+			_parse(input) {
+				const nativeEnumValues = util.getValidEnumValues(this._def.values);
+				const ctx = this._getOrReturnCtx(input);
+				if (ctx.parsedType !== ZodParsedType.string && ctx.parsedType !== ZodParsedType.number) {
+					const expectedValues = util.objectValues(nativeEnumValues);
+					addIssueToContext(ctx, {
+						expected: util.joinValues(expectedValues),
+						received: ctx.parsedType,
+						code: ZodIssueCode.invalid_type
+					});
+					return INVALID;
+				}
+				if (!__classPrivateFieldGet(this, _ZodNativeEnum_cache, "f")) __classPrivateFieldSet(this, _ZodNativeEnum_cache, new Set(util.getValidEnumValues(this._def.values)), "f");
+				if (!__classPrivateFieldGet(this, _ZodNativeEnum_cache, "f").has(input.data)) {
+					const expectedValues = util.objectValues(nativeEnumValues);
+					addIssueToContext(ctx, {
+						received: ctx.data,
+						code: ZodIssueCode.invalid_enum_value,
+						options: expectedValues
+					});
+					return INVALID;
+				}
+				return OK(input.data);
+			}
+			get enum() {
+				return this._def.values;
+			}
+		};
+		_ZodNativeEnum_cache = /* @__PURE__ */ new WeakMap();
+		ZodNativeEnum.create = (values, params) => {
+			return new ZodNativeEnum({
+				values,
+				typeName: ZodFirstPartyTypeKind.ZodNativeEnum,
+				...processCreateParams(params)
+			});
+		};
+		var ZodPromise = class extends ZodType {
+			unwrap() {
+				return this._def.type;
+			}
+			_parse(input) {
+				const { ctx } = this._processInputParams(input);
+				if (ctx.parsedType !== ZodParsedType.promise && ctx.common.async === false) {
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.promise,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				const promisified = ctx.parsedType === ZodParsedType.promise ? ctx.data : Promise.resolve(ctx.data);
+				return OK(promisified.then((data) => {
+					return this._def.type.parseAsync(data, {
+						path: ctx.path,
+						errorMap: ctx.common.contextualErrorMap
+					});
+				}));
+			}
+		};
+		ZodPromise.create = (schema, params) => {
+			return new ZodPromise({
+				type: schema,
+				typeName: ZodFirstPartyTypeKind.ZodPromise,
+				...processCreateParams(params)
+			});
+		};
+		var ZodEffects = class extends ZodType {
+			innerType() {
+				return this._def.schema;
+			}
+			sourceType() {
+				return this._def.schema._def.typeName === ZodFirstPartyTypeKind.ZodEffects ? this._def.schema.sourceType() : this._def.schema;
+			}
+			_parse(input) {
+				const { status, ctx } = this._processInputParams(input);
+				const effect = this._def.effect || null;
+				const checkCtx = {
+					addIssue: (arg) => {
+						addIssueToContext(ctx, arg);
+						if (arg.fatal) status.abort();
+						else status.dirty();
+					},
+					get path() {
+						return ctx.path;
+					}
+				};
+				checkCtx.addIssue = checkCtx.addIssue.bind(checkCtx);
+				if (effect.type === "preprocess") {
+					const processed = effect.transform(ctx.data, checkCtx);
+					if (ctx.common.async) return Promise.resolve(processed).then(async (processed) => {
+						if (status.value === "aborted") return INVALID;
+						const result = await this._def.schema._parseAsync({
+							data: processed,
+							path: ctx.path,
+							parent: ctx
+						});
+						if (result.status === "aborted") return INVALID;
+						if (result.status === "dirty") return DIRTY(result.value);
+						if (status.value === "dirty") return DIRTY(result.value);
+						return result;
+					});
+					else {
+						if (status.value === "aborted") return INVALID;
+						const result = this._def.schema._parseSync({
+							data: processed,
+							path: ctx.path,
+							parent: ctx
+						});
+						if (result.status === "aborted") return INVALID;
+						if (result.status === "dirty") return DIRTY(result.value);
+						if (status.value === "dirty") return DIRTY(result.value);
+						return result;
+					}
+				}
+				if (effect.type === "refinement") {
+					const executeRefinement = (acc) => {
+						const result = effect.refinement(acc, checkCtx);
+						if (ctx.common.async) return Promise.resolve(result);
+						if (result instanceof Promise) throw new Error("Async refinement encountered during synchronous parse operation. Use .parseAsync instead.");
+						return acc;
+					};
+					if (ctx.common.async === false) {
+						const inner = this._def.schema._parseSync({
+							data: ctx.data,
+							path: ctx.path,
+							parent: ctx
+						});
+						if (inner.status === "aborted") return INVALID;
+						if (inner.status === "dirty") status.dirty();
+						executeRefinement(inner.value);
+						return {
+							status: status.value,
+							value: inner.value
+						};
+					} else return this._def.schema._parseAsync({
+						data: ctx.data,
+						path: ctx.path,
+						parent: ctx
+					}).then((inner) => {
+						if (inner.status === "aborted") return INVALID;
+						if (inner.status === "dirty") status.dirty();
+						return executeRefinement(inner.value).then(() => {
+							return {
+								status: status.value,
+								value: inner.value
+							};
+						});
+					});
+				}
+				if (effect.type === "transform") {
+					if (ctx.common.async === false) {
+						const base = this._def.schema._parseSync({
+							data: ctx.data,
+							path: ctx.path,
+							parent: ctx
+						});
+						if (!isValid(base)) return base;
+						const result = effect.transform(base.value, checkCtx);
+						if (result instanceof Promise) throw new Error(`Asynchronous transform encountered during synchronous parse operation. Use .parseAsync instead.`);
+						return {
+							status: status.value,
+							value: result
+						};
+					} else return this._def.schema._parseAsync({
+						data: ctx.data,
+						path: ctx.path,
+						parent: ctx
+					}).then((base) => {
+						if (!isValid(base)) return base;
+						return Promise.resolve(effect.transform(base.value, checkCtx)).then((result) => ({
+							status: status.value,
+							value: result
+						}));
+					});
+				}
+				util.assertNever(effect);
+			}
+		};
+		ZodEffects.create = (schema, effect, params) => {
+			return new ZodEffects({
+				schema,
+				typeName: ZodFirstPartyTypeKind.ZodEffects,
+				effect,
+				...processCreateParams(params)
+			});
+		};
+		ZodEffects.createWithPreprocess = (preprocess, schema, params) => {
+			return new ZodEffects({
+				schema,
+				effect: {
+					type: "preprocess",
+					transform: preprocess
+				},
+				typeName: ZodFirstPartyTypeKind.ZodEffects,
+				...processCreateParams(params)
+			});
+		};
+		var ZodOptional = class extends ZodType {
+			_parse(input) {
+				if (this._getType(input) === ZodParsedType.undefined) return OK(void 0);
+				return this._def.innerType._parse(input);
+			}
+			unwrap() {
+				return this._def.innerType;
+			}
+		};
+		ZodOptional.create = (type, params) => {
+			return new ZodOptional({
+				innerType: type,
+				typeName: ZodFirstPartyTypeKind.ZodOptional,
+				...processCreateParams(params)
+			});
+		};
+		var ZodNullable = class extends ZodType {
+			_parse(input) {
+				if (this._getType(input) === ZodParsedType.null) return OK(null);
+				return this._def.innerType._parse(input);
+			}
+			unwrap() {
+				return this._def.innerType;
+			}
+		};
+		ZodNullable.create = (type, params) => {
+			return new ZodNullable({
+				innerType: type,
+				typeName: ZodFirstPartyTypeKind.ZodNullable,
+				...processCreateParams(params)
+			});
+		};
+		var ZodDefault = class extends ZodType {
+			_parse(input) {
+				const { ctx } = this._processInputParams(input);
+				let data = ctx.data;
+				if (ctx.parsedType === ZodParsedType.undefined) data = this._def.defaultValue();
+				return this._def.innerType._parse({
+					data,
+					path: ctx.path,
+					parent: ctx
+				});
+			}
+			removeDefault() {
+				return this._def.innerType;
+			}
+		};
+		ZodDefault.create = (type, params) => {
+			return new ZodDefault({
+				innerType: type,
+				typeName: ZodFirstPartyTypeKind.ZodDefault,
+				defaultValue: typeof params.default === "function" ? params.default : () => params.default,
+				...processCreateParams(params)
+			});
+		};
+		var ZodCatch = class extends ZodType {
+			_parse(input) {
+				const { ctx } = this._processInputParams(input);
+				const newCtx = {
+					...ctx,
+					common: {
+						...ctx.common,
+						issues: []
+					}
+				};
+				const result = this._def.innerType._parse({
+					data: newCtx.data,
+					path: newCtx.path,
+					parent: { ...newCtx }
+				});
+				if (isAsync(result)) return result.then((result) => {
+					return {
+						status: "valid",
+						value: result.status === "valid" ? result.value : this._def.catchValue({
+							get error() {
+								return new ZodError(newCtx.common.issues);
+							},
+							input: newCtx.data
+						})
+					};
+				});
+				else return {
+					status: "valid",
+					value: result.status === "valid" ? result.value : this._def.catchValue({
+						get error() {
+							return new ZodError(newCtx.common.issues);
+						},
+						input: newCtx.data
+					})
+				};
+			}
+			removeCatch() {
+				return this._def.innerType;
+			}
+		};
+		ZodCatch.create = (type, params) => {
+			return new ZodCatch({
+				innerType: type,
+				typeName: ZodFirstPartyTypeKind.ZodCatch,
+				catchValue: typeof params.catch === "function" ? params.catch : () => params.catch,
+				...processCreateParams(params)
+			});
+		};
+		var ZodNaN = class extends ZodType {
+			_parse(input) {
+				if (this._getType(input) !== ZodParsedType.nan) {
+					const ctx = this._getOrReturnCtx(input);
+					addIssueToContext(ctx, {
+						code: ZodIssueCode.invalid_type,
+						expected: ZodParsedType.nan,
+						received: ctx.parsedType
+					});
+					return INVALID;
+				}
+				return {
+					status: "valid",
+					value: input.data
+				};
+			}
+		};
+		ZodNaN.create = (params) => {
+			return new ZodNaN({
+				typeName: ZodFirstPartyTypeKind.ZodNaN,
+				...processCreateParams(params)
+			});
+		};
+		const BRAND = Symbol("zod_brand");
+		var ZodBranded = class extends ZodType {
+			_parse(input) {
+				const { ctx } = this._processInputParams(input);
+				const data = ctx.data;
+				return this._def.type._parse({
+					data,
+					path: ctx.path,
+					parent: ctx
+				});
+			}
+			unwrap() {
+				return this._def.type;
+			}
+		};
+		var ZodPipeline = class ZodPipeline extends ZodType {
+			_parse(input) {
+				const { status, ctx } = this._processInputParams(input);
+				if (ctx.common.async) {
+					const handleAsync = async () => {
+						const inResult = await this._def.in._parseAsync({
+							data: ctx.data,
+							path: ctx.path,
+							parent: ctx
+						});
+						if (inResult.status === "aborted") return INVALID;
+						if (inResult.status === "dirty") {
+							status.dirty();
+							return DIRTY(inResult.value);
+						} else return this._def.out._parseAsync({
+							data: inResult.value,
+							path: ctx.path,
+							parent: ctx
+						});
+					};
+					return handleAsync();
+				} else {
+					const inResult = this._def.in._parseSync({
+						data: ctx.data,
+						path: ctx.path,
+						parent: ctx
+					});
+					if (inResult.status === "aborted") return INVALID;
+					if (inResult.status === "dirty") {
+						status.dirty();
+						return {
+							status: "dirty",
+							value: inResult.value
+						};
+					} else return this._def.out._parseSync({
+						data: inResult.value,
+						path: ctx.path,
+						parent: ctx
+					});
+				}
+			}
+			static create(a, b) {
+				return new ZodPipeline({
+					in: a,
+					out: b,
+					typeName: ZodFirstPartyTypeKind.ZodPipeline
+				});
+			}
+		};
+		var ZodReadonly = class extends ZodType {
+			_parse(input) {
+				const result = this._def.innerType._parse(input);
+				const freeze = (data) => {
+					if (isValid(data)) data.value = Object.freeze(data.value);
+					return data;
+				};
+				return isAsync(result) ? result.then((data) => freeze(data)) : freeze(result);
+			}
+			unwrap() {
+				return this._def.innerType;
+			}
+		};
+		ZodReadonly.create = (type, params) => {
+			return new ZodReadonly({
+				innerType: type,
+				typeName: ZodFirstPartyTypeKind.ZodReadonly,
+				...processCreateParams(params)
+			});
+		};
+		function custom(check, params = {}, fatal) {
+			if (check) return ZodAny.create().superRefine((data, ctx) => {
+				var _a, _b;
+				if (!check(data)) {
+					const p = typeof params === "function" ? params(data) : typeof params === "string" ? { message: params } : params;
+					const _fatal = (_b = (_a = p.fatal) !== null && _a !== void 0 ? _a : fatal) !== null && _b !== void 0 ? _b : true;
+					const p2 = typeof p === "string" ? { message: p } : p;
+					ctx.addIssue({
+						code: "custom",
+						...p2,
+						fatal: _fatal
+					});
+				}
+			});
+			return ZodAny.create();
+		}
+		const late = { object: ZodObject.lazycreate };
+		var ZodFirstPartyTypeKind;
+		(function(ZodFirstPartyTypeKind) {
+			ZodFirstPartyTypeKind["ZodString"] = "ZodString";
+			ZodFirstPartyTypeKind["ZodNumber"] = "ZodNumber";
+			ZodFirstPartyTypeKind["ZodNaN"] = "ZodNaN";
+			ZodFirstPartyTypeKind["ZodBigInt"] = "ZodBigInt";
+			ZodFirstPartyTypeKind["ZodBoolean"] = "ZodBoolean";
+			ZodFirstPartyTypeKind["ZodDate"] = "ZodDate";
+			ZodFirstPartyTypeKind["ZodSymbol"] = "ZodSymbol";
+			ZodFirstPartyTypeKind["ZodUndefined"] = "ZodUndefined";
+			ZodFirstPartyTypeKind["ZodNull"] = "ZodNull";
+			ZodFirstPartyTypeKind["ZodAny"] = "ZodAny";
+			ZodFirstPartyTypeKind["ZodUnknown"] = "ZodUnknown";
+			ZodFirstPartyTypeKind["ZodNever"] = "ZodNever";
+			ZodFirstPartyTypeKind["ZodVoid"] = "ZodVoid";
+			ZodFirstPartyTypeKind["ZodArray"] = "ZodArray";
+			ZodFirstPartyTypeKind["ZodObject"] = "ZodObject";
+			ZodFirstPartyTypeKind["ZodUnion"] = "ZodUnion";
+			ZodFirstPartyTypeKind["ZodDiscriminatedUnion"] = "ZodDiscriminatedUnion";
+			ZodFirstPartyTypeKind["ZodIntersection"] = "ZodIntersection";
+			ZodFirstPartyTypeKind["ZodTuple"] = "ZodTuple";
+			ZodFirstPartyTypeKind["ZodRecord"] = "ZodRecord";
+			ZodFirstPartyTypeKind["ZodMap"] = "ZodMap";
+			ZodFirstPartyTypeKind["ZodSet"] = "ZodSet";
+			ZodFirstPartyTypeKind["ZodFunction"] = "ZodFunction";
+			ZodFirstPartyTypeKind["ZodLazy"] = "ZodLazy";
+			ZodFirstPartyTypeKind["ZodLiteral"] = "ZodLiteral";
+			ZodFirstPartyTypeKind["ZodEnum"] = "ZodEnum";
+			ZodFirstPartyTypeKind["ZodEffects"] = "ZodEffects";
+			ZodFirstPartyTypeKind["ZodNativeEnum"] = "ZodNativeEnum";
+			ZodFirstPartyTypeKind["ZodOptional"] = "ZodOptional";
+			ZodFirstPartyTypeKind["ZodNullable"] = "ZodNullable";
+			ZodFirstPartyTypeKind["ZodDefault"] = "ZodDefault";
+			ZodFirstPartyTypeKind["ZodCatch"] = "ZodCatch";
+			ZodFirstPartyTypeKind["ZodPromise"] = "ZodPromise";
+			ZodFirstPartyTypeKind["ZodBranded"] = "ZodBranded";
+			ZodFirstPartyTypeKind["ZodPipeline"] = "ZodPipeline";
+			ZodFirstPartyTypeKind["ZodReadonly"] = "ZodReadonly";
+		})(ZodFirstPartyTypeKind || (ZodFirstPartyTypeKind = {}));
+		const instanceOfType = (cls, params = { message: `Input not instance of ${cls.name}` }) => custom((data) => data instanceof cls, params);
+		const stringType = ZodString.create;
+		const numberType = ZodNumber.create;
+		const nanType = ZodNaN.create;
+		const bigIntType = ZodBigInt.create;
+		const booleanType = ZodBoolean.create;
+		const dateType = ZodDate.create;
+		const symbolType = ZodSymbol.create;
+		const undefinedType = ZodUndefined.create;
+		const nullType = ZodNull.create;
+		const anyType = ZodAny.create;
+		const unknownType = ZodUnknown.create;
+		const neverType = ZodNever.create;
+		const voidType = ZodVoid.create;
+		const arrayType = ZodArray.create;
+		const objectType = ZodObject.create;
+		const strictObjectType = ZodObject.strictCreate;
+		const unionType = ZodUnion.create;
+		const discriminatedUnionType = ZodDiscriminatedUnion.create;
+		const intersectionType = ZodIntersection.create;
+		const tupleType = ZodTuple.create;
+		const recordType = ZodRecord.create;
+		const mapType = ZodMap.create;
+		const setType = ZodSet.create;
+		const functionType = ZodFunction.create;
+		const lazyType = ZodLazy.create;
+		const literalType = ZodLiteral.create;
+		const enumType = ZodEnum.create;
+		const nativeEnumType = ZodNativeEnum.create;
+		const promiseType = ZodPromise.create;
+		const effectsType = ZodEffects.create;
+		const optionalType = ZodOptional.create;
+		const nullableType = ZodNullable.create;
+		const preprocessType = ZodEffects.createWithPreprocess;
+		const pipelineType = ZodPipeline.create;
+		const ostring = () => stringType().optional();
+		const onumber = () => numberType().optional();
+		const oboolean = () => booleanType().optional();
+		var z = /*#__PURE__*/ Object.freeze({
+			__proto__: null,
+			defaultErrorMap: errorMap,
+			setErrorMap,
+			getErrorMap,
+			makeIssue,
+			EMPTY_PATH,
+			addIssueToContext,
+			ParseStatus,
+			INVALID,
+			DIRTY,
+			OK,
+			isAborted,
+			isDirty,
+			isValid,
+			isAsync,
+			get util() {
+				return util;
+			},
+			get objectUtil() {
+				return objectUtil;
+			},
+			ZodParsedType,
+			getParsedType,
+			ZodType,
+			datetimeRegex,
+			ZodString,
+			ZodNumber,
+			ZodBigInt,
+			ZodBoolean,
+			ZodDate,
+			ZodSymbol,
+			ZodUndefined,
+			ZodNull,
+			ZodAny,
+			ZodUnknown,
+			ZodNever,
+			ZodVoid,
+			ZodArray,
+			ZodObject,
+			ZodUnion,
+			ZodDiscriminatedUnion,
+			ZodIntersection,
+			ZodTuple,
+			ZodRecord,
+			ZodMap,
+			ZodSet,
+			ZodFunction,
+			ZodLazy,
+			ZodLiteral,
+			ZodEnum,
+			ZodNativeEnum,
+			ZodPromise,
+			ZodEffects,
+			ZodTransformer: ZodEffects,
+			ZodOptional,
+			ZodNullable,
+			ZodDefault,
+			ZodCatch,
+			ZodNaN,
+			BRAND,
+			ZodBranded,
+			ZodPipeline,
+			ZodReadonly,
+			custom,
+			Schema: ZodType,
+			ZodSchema: ZodType,
+			late,
+			get ZodFirstPartyTypeKind() {
+				return ZodFirstPartyTypeKind;
+			},
+			coerce: {
+				string: ((arg) => ZodString.create({
+					...arg,
+					coerce: true
+				})),
+				number: ((arg) => ZodNumber.create({
+					...arg,
+					coerce: true
+				})),
+				boolean: ((arg) => ZodBoolean.create({
+					...arg,
+					coerce: true
+				})),
+				bigint: ((arg) => ZodBigInt.create({
+					...arg,
+					coerce: true
+				})),
+				date: ((arg) => ZodDate.create({
+					...arg,
+					coerce: true
+				}))
+			},
+			any: anyType,
+			array: arrayType,
+			bigint: bigIntType,
+			boolean: booleanType,
+			date: dateType,
+			discriminatedUnion: discriminatedUnionType,
+			effect: effectsType,
+			"enum": enumType,
+			"function": functionType,
+			"instanceof": instanceOfType,
+			intersection: intersectionType,
+			lazy: lazyType,
+			literal: literalType,
+			map: mapType,
+			nan: nanType,
+			nativeEnum: nativeEnumType,
+			never: neverType,
+			"null": nullType,
+			nullable: nullableType,
+			number: numberType,
+			object: objectType,
+			oboolean,
+			onumber,
+			optional: optionalType,
+			ostring,
+			pipeline: pipelineType,
+			preprocess: preprocessType,
+			promise: promiseType,
+			record: recordType,
+			set: setType,
+			strictObject: strictObjectType,
+			string: stringType,
+			symbol: symbolType,
+			transformer: effectsType,
+			tuple: tupleType,
+			"undefined": undefinedType,
+			union: unionType,
+			unknown: unknownType,
+			"void": voidType,
+			NEVER: INVALID,
+			ZodIssueCode,
+			quotelessJson,
+			ZodError
+		});
+		//#endregion
+		//#region ../engine/src/schema.ts
+		const transitionSchema = z.enum(["none", "fade"]).default("none");
+		const easingSchema = z.enum([
+			"linear",
+			"in",
+			"out",
+			"inOut",
+			"bounce",
+			"elastic"
+		]);
+		const keyframeSchema = z.object({
+			t: z.number(),
+			v: z.number(),
+			e: easingSchema.optional()
+		});
+		const animationsSchema = z.object({
+			x: z.array(keyframeSchema).optional(),
+			y: z.array(keyframeSchema).optional(),
+			scale: z.array(keyframeSchema).optional(),
+			opacity: z.array(keyframeSchema).optional(),
+			rotation: z.array(keyframeSchema).optional(),
+			volume: z.array(keyframeSchema).optional()
+		});
+		const filterSchema = z.object({
+			brightness: z.number().min(0).max(3).optional(),
+			contrast: z.number().min(0).max(3).optional(),
+			saturate: z.number().min(0).max(3).optional(),
+			blur: z.number().min(0).max(20).optional(),
+			grayscale: z.number().min(0).max(1).optional(),
+			sepia: z.number().min(0).max(1).optional(),
+			hueRotate: z.number().min(0).max(360).optional()
+		});
+		const clipSchema = z.object({
+			id: z.string(),
+			type: z.enum(["video", "image"]),
+			src: z.string(),
+			inPoint: z.number().min(0),
+			clipDuration: z.number().positive(),
+			transition: transitionSchema,
+			volume: z.number().min(0).max(1).default(1),
+			atSeconds: z.number().min(0).optional(),
+			box: z.object({
+				x: z.number().min(0).max(1),
+				y: z.number().min(0).max(1),
+				w: z.number().min(.01).max(1),
+				h: z.number().min(.01).max(1)
+			}).optional(),
+			speed: z.number().min(.1).max(10).default(1),
+			filter: filterSchema.optional(),
+			animations: animationsSchema.optional()
+		});
+		const videoTrackSchema = z.object({
+			id: z.string(),
+			name: z.string().optional(),
+			clips: z.array(clipSchema).default([])
+		});
+		const audioClipSchema = z.object({
+			id: z.string(),
+			src: z.string(),
+			inPoint: z.number().min(0).default(0),
+			duration: z.number().positive(),
+			volume: z.number().min(0).max(1).default(1),
+			atSeconds: z.number().min(0).default(0),
+			speed: z.number().min(.1).max(10).default(1),
+			animations: animationsSchema.optional()
+		});
+		const audioTrackV2Schema = z.object({
+			id: z.string(),
+			name: z.string().optional(),
+			volume: z.number().min(0).max(1).default(1),
+			muted: z.boolean().default(false),
+			clips: z.array(audioClipSchema).default([])
+		});
+		const legacyAudioSchema = z.object({
+			src: z.string(),
+			volume: z.number().min(0).max(1).default(1),
+			startAtSeconds: z.number().min(0).default(0)
+		});
+		const overlaySchema = z.object({
+			text: z.string(),
+			startSeconds: z.number().min(0),
+			endSeconds: z.number().min(0),
+			position: z.enum([
+				"top",
+				"center",
+				"bottom"
+			]).default("bottom"),
+			fontSize: z.number().positive().default(64),
+			color: z.string().default("#ffffff"),
+			fontFamily: z.string().optional(),
+			fontWeight: z.number().int().min(100).max(900).optional(),
+			animations: animationsSchema.optional()
+		});
+		const metaSchema = z.object({
+			fps: z.number().positive(),
+			width: z.number().int().positive(),
+			height: z.number().int().positive()
+		});
+		const timelineInputSchema = z.object({
+			meta: metaSchema,
+			videoTracks: z.array(videoTrackSchema).optional(),
+			audioTracks: z.array(audioTrackV2Schema).optional(),
+			clips: z.array(clipSchema).optional(),
+			audio: legacyAudioSchema.nullable().optional(),
+			overlays: z.array(overlaySchema).default([])
+		});
+		z.object({
+			meta: metaSchema,
+			version: z.literal(2).default(2),
+			videoTracks: z.array(videoTrackSchema).min(1),
+			audioTracks: z.array(audioTrackV2Schema),
+			overlays: z.array(overlaySchema)
+		});
+		function shiftAnimations(animations, seconds) {
+			if (!animations) return void 0;
+			return Object.fromEntries(Object.entries(animations).map(([channel, frames]) => [channel, frames?.map((frame) => ({
+				...frame,
+				t: frame.t - seconds
+			}))]));
+		}
+		const SEC$1 = (fps, s) => Math.round(s * fps);
+		const DEFAULT_BOX = {
+			x: .66,
+			y: .66,
+			w: .3,
+			h: .3
+		};
+		const clipBox = (c) => c.box ?? DEFAULT_BOX;
+		let trackSeq = 0;
+		const autoId = (p) => `${p}${Date.now().toString(36)}${(trackSeq++).toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+		const EASING = {
+			linear: (f) => f,
+			in: (f) => f * f * f,
+			out: (f) => 1 - Math.pow(1 - f, 3),
+			inOut: (f) => f < .5 ? 4 * f * f * f : 1 - Math.pow(-2 * f + 2, 3) / 2,
+			bounce: (f) => {
+				const n1 = 7.5625;
+				const d1 = 2.75;
+				if (f < 1 / d1) return n1 * f * f;
+				if (f < 2 / d1) return n1 * (f -= 1.5 / d1) * f + .75;
+				if (f < 2.5 / d1) return n1 * (f -= 2.25 / d1) * f + .9375;
+				return n1 * (f -= 2.625 / d1) * f + .984375;
+			},
+			elastic: (f) => {
+				if (f === 0 || f === 1) return f;
+				const c4 = 2 * Math.PI / 3;
+				return Math.pow(2, -10 * f) * Math.sin((f * 10 - .75) * c4) + 1;
+			}
+		};
+		const evalKeyframes = (kfs, sec) => {
+			if (!kfs || kfs.length === 0) return void 0;
+			if (kfs.length === 1) return kfs[0].v;
+			const sorted = [...kfs].sort((a, b) => a.t - b.t);
+			if (sec <= sorted[0].t) return sorted[0].v;
+			const last = sorted[sorted.length - 1];
+			if (sec >= last.t) return last.v;
+			for (let i = 0; i < sorted.length - 1; i++) {
+				const a = sorted[i];
+				const b = sorted[i + 1];
+				if (sec >= a.t && sec <= b.t) {
+					const f = (sec - a.t) / (b.t - a.t);
+					const eased = EASING[a.e ?? "linear"](f);
+					return a.v + (b.v - a.v) * eased;
+				}
+			}
+			return last.v;
+		};
+		function normalize(input) {
+			let videoTracks = input.videoTracks ?? [];
+			let audioTracks = input.audioTracks ?? [];
+			if (!videoTracks.length && input.clips?.length) videoTracks = [{
+				id: "v1",
+				name: "主轨道",
+				clips: input.clips
+			}];
+			if (!videoTracks.length) videoTracks = [{
+				id: "v1",
+				name: "主轨道",
+				clips: []
+			}];
+			if (!audioTracks.length && input.audio) {
+				const mainDur = videoTracks[0].clips.reduce((s, c) => s + c.clipDuration, 0);
+				const startAt = input.audio.startAtSeconds ?? 0;
+				audioTracks = [{
+					id: "a1",
+					name: "配乐",
+					volume: input.audio.volume ?? 1,
+					muted: false,
+					clips: [{
+						id: autoId("ac"),
+						src: input.audio.src,
+						inPoint: 0,
+						duration: Math.max(.1, mainDur - startAt),
+						volume: 1,
+						atSeconds: startAt,
+						speed: 1
+					}]
+				}];
+			}
+			return {
+				meta: input.meta,
+				version: 2,
+				videoTracks,
+				audioTracks,
+				overlays: input.overlays
+			};
+		}
+		const timelineDurationInFrames = (t) => {
+			const fps = t.meta.fps;
+			let frames = t.videoTracks[0]?.clips.reduce((acc, c) => acc + SEC$1(fps, c.clipDuration), 0) ?? 0;
+			for (const tr of t.videoTracks.slice(1)) for (const c of tr.clips) frames = Math.max(frames, SEC$1(fps, (c.atSeconds ?? 0) + c.clipDuration));
+			for (const tr of t.audioTracks) {
+				if (tr.muted) continue;
+				for (const c of tr.clips) frames = Math.max(frames, SEC$1(fps, c.atSeconds + c.duration));
+			}
+			for (const ov of t.overlays) frames = Math.max(frames, SEC$1(fps, ov.endSeconds));
+			return Math.max(1, frames);
+		};
+		const parseTimeline = (input) => {
+			const data = typeof input === "string" ? JSON.parse(input) : input;
+			const result = timelineInputSchema.safeParse(data);
+			if (!result.success) {
+				const issues = result.error.issues.map((i) => `  - ${i.path.join(".") || "(root)"}: ${i.message}`).join("\n");
+				throw new Error(`时间线 JSON 校验失败：\n${issues}`);
+			}
+			return normalize(result.data);
+		};
+		//#endregion
+		//#region src/client/api.ts
+		const DEFAULT_PORT = 5180;
+		const PORT_CACHE_KEY = "djian.enginePort";
+		const hostBase = () => typeof window !== "undefined" && window.location ? `${window.location.protocol}//${window.location.hostname}` : "http://127.0.0.1";
+		let API_BASE = `${hostBase()}:${DEFAULT_PORT}`;
+		let exportDownloadUrl = `${API_BASE}/api/export/download`;
+		const applyBase = (port) => {
+			API_BASE = `${hostBase()}:${port}`;
+			exportDownloadUrl = `${API_BASE}/api/export/download`;
+		};
+		async function isEngine(base) {
+			try {
+				const r = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(1500) });
+				if (!r.ok) return false;
+				return (await r.json().catch(() => null))?.service === "djian-engine";
+			} catch {
+				return false;
+			}
+		}
+		function fragmentPort() {
+			try {
+				const m = /(?:^|[#&])djian-engine=(\d+)/.exec(window.location.hash || "");
+				const p = m ? Number(m[1]) : 0;
+				return p > 0 && p < 65536 ? p : 0;
+			} catch {
+				return 0;
+			}
+		}
+		let discovery = null;
+		let generation = 0;
+		function ensureEngineBase() {
+			if (typeof window === "undefined") return Promise.resolve();
+			discovery ?? (discovery = (async (gen) => {
+				const candidates = [];
+				const frag = fragmentPort();
+				if (frag > 0) candidates.push(frag);
+				let cached = 0;
+				try {
+					cached = Number(window.localStorage.getItem(PORT_CACHE_KEY));
+				} catch {}
+				if (cached > 0) candidates.push(cached);
+				for (let p = DEFAULT_PORT; p <= 5190; p++) if (!candidates.includes(p)) candidates.push(p);
+				for (const p of candidates) if (await isEngine(`${hostBase()}:${p}`)) {
+					if (gen !== generation) return;
+					try {
+						window.localStorage.setItem(PORT_CACHE_KEY, String(p));
+					} catch {}
+					applyBase(p);
+					return;
+				}
+			})(generation));
+			return discovery;
+		}
+		let lastHealAt = 0;
+		async function apiFetch(path, init) {
+			await ensureEngineBase();
+			try {
+				return await fetch(`${API_BASE}${path}`, init);
+			} catch (e) {
+				if (!(e instanceof TypeError)) throw e;
+				if (Date.now() - lastHealAt < 1e4) throw e;
+				lastHealAt = Date.now();
+				discovery = null;
+				generation++;
+				try {
+					window.localStorage.removeItem(PORT_CACHE_KEY);
+				} catch {}
+				await ensureEngineBase();
+				return fetch(`${API_BASE}${path}`, init);
+			}
+		}
+		ensureEngineBase();
+		const assetUrl = (src) => /^(?:[a-z]+:)?\/\//i.test(src) ? src : `${API_BASE}/${src.replace(/^\/+/, "")}`;
+		async function getTimeline(sessionId, peek = false) {
+			const r = await apiFetch(`/api/internal/timeline${sessionId ? `?session=${encodeURIComponent(sessionId)}${peek ? "&peek=1" : ""}` : ""}`);
+			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+			return r.json();
+		}
+		async function putTimeline(t, sessionId) {
+			const r = await apiFetch(`/api/internal/timeline`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(sessionId ? {
+					timeline: t,
+					sessionId
+				} : t)
+			});
+			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+		}
+		async function getExportStatus() {
+			return (await apiFetch(`/api/export/status`)).json();
+		}
+		async function startExportWith(timeline, opts) {
+			const r = await apiFetch(`/api/export`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					timeline,
+					scale: opts.scale ?? 1,
+					quality: opts.quality ?? "standard"
+				})
+			});
+			if (r.status !== 202) {
+				const d = await r.json().catch(() => ({}));
+				throw new Error(d.error ?? `HTTP ${r.status}`);
+			}
+		}
+		async function sessionProject(sessionId) {
+			const r = await apiFetch(`/api/session-project`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ sessionId })
+			});
+			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+			return (await r.json()).project ?? null;
+		}
+		async function listFonts() {
+			const r = await apiFetch(`/api/fonts`);
+			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+			return (await r.json()).fonts ?? [];
+		}
+		async function listAssets() {
+			const r = await apiFetch(`/api/assets`);
+			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+			return (await r.json()).assets ?? [];
+		}
+		async function uploadAsset(file) {
+			const r = await apiFetch(`/api/assets?name=${encodeURIComponent(file.name)}`, {
+				method: "POST",
+				headers: { "Content-Type": "application/octet-stream" },
+				body: file
+			});
+			const d = await r.json().catch(() => ({}));
+			if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
+			return d;
+		}
+		async function deleteAsset(name) {
+			const r = await apiFetch(`/api/assets/${encodeURIComponent(name)}`, { method: "DELETE" });
+			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+		}
+		const assetThumbUrl = (name) => `${API_BASE}/api/assets/${encodeURIComponent(name)}/thumb`;
+		//#endregion
+		//#region src/client/TrackMedia.tsx
+		const frames = /* @__PURE__ */ new Map();
+		function filmFrames(src, start, duration) {
+			const key = `${src}|${start}|${duration}`;
+			let cached = frames.get(key);
+			if (cached) return cached;
+			cached = new Promise((resolve) => {
+				const video = document.createElement("video");
+				video.crossOrigin = "anonymous";
+				video.muted = true;
+				video.preload = "auto";
+				const canvas = document.createElement("canvas");
+				canvas.width = 128;
+				canvas.height = 72;
+				const results = [];
+				let done = false;
+				const finish = () => {
+					if (done) return;
+					done = true;
+					clearTimeout(timer);
+					video.onloadeddata = video.onseeked = video.onerror = null;
+					video.removeAttribute("src");
+					video.load();
+					resolve(results);
+				};
+				const timer = window.setTimeout(finish, 12e3);
+				const seek = () => {
+					const target = Math.min(Math.max(0, video.duration - .05), start + duration * results.length / 3);
+					if (Math.abs(video.currentTime - target) < .001 && video.readyState >= 2) capture();
+					else video.currentTime = target;
+				};
+				const capture = () => {
+					if (done) return;
+					try {
+						canvas.getContext("2d")?.drawImage(video, 0, 0, 128, 72);
+						results.push(canvas.toDataURL("image/jpeg", .65));
+						if (results.length === 3) finish();
+						else seek();
+					} catch {
+						finish();
+					}
+				};
+				video.onloadeddata = seek;
+				video.onseeked = capture;
+				video.onerror = finish;
+				video.src = src;
+			});
+			frames.set(key, cached);
+			if (frames.size > 48) frames.delete(frames.keys().next().value);
+			return cached;
+		}
+		function Filmstrip({ src, type, inPoint, duration, speed = 1 }) {
+			const url = assetUrl(src);
+			const [images, setImages] = (0, react.useState)([]);
+			(0, react.useEffect)(() => {
+				let active = true;
+				setImages([]);
+				if (type === "image") setImages([url]);
+				else filmFrames(url, inPoint, duration * speed).then((value) => {
+					if (active) setImages(value);
+				});
+				return () => {
+					active = false;
+				};
+			}, [
+				url,
+				type,
+				inPoint,
+				duration,
+				speed
+			]);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "djp-filmstrip",
+				"aria-hidden": "true",
+				children: images.map((image, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { style: { backgroundImage: `url("${image}")` } }, i))
+			});
+		}
+		const waveforms = /* @__PURE__ */ new Map();
+		function loadWaveform(src) {
+			let cached = waveforms.get(src);
+			if (cached) return cached;
+			cached = (async () => {
+				let context;
+				try {
+					const response = await fetch(src, { signal: AbortSignal.timeout(15e3) });
+					if (!response.ok || Number(response.headers.get("content-length")) > 2e7) {
+						await response.body?.cancel();
+						return null;
+					}
+					const reader = response.body?.getReader();
+					if (!reader) return null;
+					const chunks = [];
+					let size = 0;
+					while (true) {
+						const { value, done } = await reader.read();
+						if (done) break;
+						size += value.byteLength;
+						if (size > 2e7) {
+							await reader.cancel();
+							return null;
+						}
+						chunks.push(value);
+					}
+					const bytes = new Uint8Array(size);
+					let offset = 0;
+					for (const chunk of chunks) {
+						bytes.set(chunk, offset);
+						offset += chunk.length;
+					}
+					context = new AudioContext({ sampleRate: 8e3 });
+					const audio = await context.decodeAudioData(bytes.buffer);
+					const count = Math.min(12e3, Math.ceil(audio.duration * 60));
+					const values = Array.from({ length: count }, () => 0);
+					for (let c = 0; c < audio.numberOfChannels; c++) {
+						const channel = audio.getChannelData(c);
+						for (let i = 0; i < channel.length; i++) {
+							const bin = Math.min(count - 1, Math.floor(i / channel.length * count));
+							values[bin] = Math.max(values[bin], Math.abs(channel[i]));
+						}
+					}
+					return {
+						values,
+						duration: audio.duration
+					};
+				} catch {
+					return null;
+				} finally {
+					if (context) context.close();
+				}
+			})();
+			waveforms.set(src, cached);
+			if (waveforms.size > 12) waveforms.delete(waveforms.keys().next().value);
+			return cached;
+		}
+		function Waveform({ src, inPoint, duration, speed = 1 }) {
+			const url = assetUrl(src);
+			const [peaks, setPeaks] = (0, react.useState)(null);
+			(0, react.useEffect)(() => {
+				let active = true;
+				setPeaks(null);
+				loadWaveform(url).then((value) => {
+					if (active) setPeaks(value);
+				});
+				return () => {
+					active = false;
+				};
+			}, [url]);
+			if (!peaks) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: "djp-wave-baseline",
+				"aria-hidden": "true"
+			});
+			const bars = Array.from({ length: 180 }, (_, i) => {
+				const from = Math.floor((inPoint + duration * speed * i / 180) / peaks.duration * peaks.values.length);
+				const to = Math.ceil((inPoint + duration * speed * (i + 1) / 180) / peaks.duration * peaks.values.length);
+				let peak = 0;
+				for (let j = Math.max(0, from); j < Math.min(peaks.values.length, to); j++) peak = Math.max(peak, peaks.values[j]);
+				const height = Math.max(.5, peak * 27);
+				return `L${i * 3 + 1} ${28 - height}`;
+			}).join("");
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("svg", {
+				className: "djp-waveform",
+				viewBox: "0 0 540 28",
+				preserveAspectRatio: "none",
+				"aria-hidden": "true",
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", {
+					d: `M0 28${bars}L540 28Z`,
+					fill: "currentColor"
+				})
+			});
+		}
+		//#endregion
+		//#region src/client/TrackStrip.tsx
+		const modeNames = {
+			main: "主轨道",
+			audio: "音频",
+			pip: "画中画",
+			subs: "字幕"
+		};
+		const fmtSec$1 = (sec) => `${sec.toFixed(1)}s`;
+		const timecode = (sec, fps) => {
+			const frames = Math.max(0, Math.round(sec * fps));
+			return [
+				Math.floor(frames / fps / 60),
+				Math.floor(frames / fps) % 60,
+				frames % fps
+			].map((n) => String(n).padStart(2, "0")).join(":");
+		};
+		function TrackRow({ code, name, kind, children, muted, action }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				"aria-label": name,
+				className: `djp-trow djp-lane-${kind} ${muted ? "djp-lane-muted" : ""}`,
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "djp-trow-name",
+					title: name,
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "djp-track-code",
+							children: code
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "djp-track-name",
+							children: name
+						}),
+						action
+					]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "djp-track djp-trow-lane",
+					children
+				})]
+			});
+		}
+		const TrackStrip = ({ t, o, playheadRef, onSeekClip, onAudio, onAdd, mode, onModeChange }) => {
+			const total = Math.max(1, timelineDurationInFrames(t) / t.meta.fps);
+			const [zoom, setZoom] = (0, react.useState)(1);
+			const [selected, setSelected] = (0, react.useState)(null);
+			const [snapping, setSnapping] = (0, react.useState)(true);
+			const [viewport, setViewport] = (0, react.useState)(320);
+			const scrollRef = (0, react.useRef)(null);
+			const programmaticScroll = (0, react.useRef)(0);
+			const manualUntil = (0, react.useRef)(0);
+			const pan = (0, react.useRef)(null);
+			const scrubRef = (0, react.useRef)(false);
+			(0, react.useEffect)(() => {
+				const el = scrollRef.current;
+				if (!el) return;
+				const observer = new ResizeObserver(() => setViewport(el.clientWidth));
+				observer.observe(el);
+				return () => observer.disconnect();
+			}, []);
+			const dragRef = (0, react.useRef)(null);
+			const justDragged = (0, react.useRef)(false);
+			const [, forceRender] = (0, react.useState)(0);
+			const ctxRef = (0, react.useRef)({
+				t,
+				o,
+				total,
+				snapping,
+				zoom
+			});
+			ctxRef.current = {
+				t,
+				o,
+				total,
+				snapping,
+				zoom
+			};
+			(0, react.useLayoutEffect)(() => {
+				const x = playheadRef.current * 56 * zoom;
+				programmaticScroll.current = x;
+				manualUntil.current = 0;
+				if (scrollRef.current) scrollRef.current.scrollLeft = x;
+			}, [
+				zoom,
+				viewport,
+				total,
+				playheadRef
+			]);
+			(0, react.useLayoutEffect)(() => {
+				dragRef.current = null;
+				pan.current = null;
+				scrubRef.current = false;
+				setSelected(null);
+				if (scrollRef.current) scrollRef.current.scrollTop = 0;
+			}, [mode]);
+			(0, react.useEffect)(() => {
+				let raf = 0;
+				const tick = () => {
+					const p = playerBus.ref;
+					if (p) {
+						const sec = p.getCurrentFrame() / ctxRef.current.t.meta.fps;
+						playheadRef.current = sec;
+						const scroll = scrollRef.current;
+						if (scroll && !dragRef.current && !pan.current && !scrubRef.current && performance.now() > manualUntil.current) {
+							const x = sec * 56 * ctxRef.current.zoom;
+							if (Math.abs(scroll.scrollLeft - x) > .5) {
+								programmaticScroll.current = x;
+								scroll.scrollLeft = x;
+							}
+						}
+					}
+					raf = requestAnimationFrame(tick);
+				};
+				raf = requestAnimationFrame(tick);
+				return () => cancelAnimationFrame(raf);
+			}, [playheadRef]);
+			(0, react.useEffect)(() => {
+				const snapV = (cur, v) => {
+					const SNAP = ctxRef.current.snapping ? cur.secPerPx * 7 : 0;
+					const tt = ctxRef.current.t;
+					const pts = [0, playheadRef.current];
+					if (cur.lane === "main") {
+						let a = 0;
+						for (const c of tt.videoTracks[0]?.clips ?? []) {
+							if (c.id !== cur.id) pts.push(a, a + c.clipDuration);
+							a += c.clipDuration;
+						}
+					} else if (cur.lane === "pip") {
+						for (const tr of tt.videoTracks.slice(1)) for (const c of tr.clips) if (c.id !== cur.id) pts.push(c.atSeconds ?? 0, (c.atSeconds ?? 0) + c.clipDuration);
+					} else if (cur.lane === "subs") tt.overlays.forEach((ov, i) => {
+						if ("sub-" + i !== cur.id) pts.push(ov.startSeconds, ov.endSeconds);
+					});
+					else for (const tr of tt.audioTracks) for (const c of tr.clips) if (c.id !== cur.id) pts.push(c.atSeconds, c.atSeconds + c.duration);
+					let best = v;
+					let bd = SNAP;
+					for (const p of pts) {
+						const dd = Math.abs(p - v);
+						if (dd < bd) {
+							bd = dd;
+							best = p;
+						}
+					}
+					return Math.round(best * tt.meta.fps) / tt.meta.fps;
+				};
+				const onMove = (e) => {
+					const cur = dragRef.current;
+					if (!cur) return;
+					if (Math.abs(e.clientX - cur.startX) < 3) return;
+					const dsec = (e.clientX - cur.startX) * cur.secPerPx;
+					if (cur.kind === "reorder") cur.previewAt = Math.max(0, cur.origAt + dsec);
+					else if (cur.kind === "move") cur.previewAt = Math.max(0, snapV(cur, cur.origAt + dsec));
+					else if (cur.kind === "trimL") {
+						let at = snapV(cur, cur.origAt + dsec);
+						const earliest = cur.lane === "subs" ? 0 : Math.max(0, cur.origAt - (cur.origIn ?? 0) / (cur.speed ?? 1));
+						at = Math.min(Math.max(earliest, at), cur.origAt + cur.origDur - .1);
+						cur.previewAt = at;
+						cur.previewDur = cur.origDur - (at - cur.origAt);
+					} else cur.previewDur = Math.max(cur.origAt + .1, snapV(cur, cur.origAt + cur.origDur + dsec)) - cur.origAt;
+					forceRender((x) => x + 1);
+				};
+				const onUp = () => {
+					const cur = dragRef.current;
+					dragRef.current = null;
+					if (cur) {
+						const moved = Math.abs(cur.previewAt - cur.origAt) > .001 || Math.abs(cur.previewDur - cur.origDur) > .001;
+						if (moved) {
+							justDragged.current = true;
+							window.setTimeout(() => {
+								justDragged.current = false;
+							}, 0);
+						}
+						if (!moved) {
+							forceRender((x) => x + 1);
+							return;
+						}
+						const { o: oo } = ctxRef.current;
+						const at = cur.previewAt;
+						const dur = Math.max(.1, cur.previewDur);
+						if (cur.lane === "subs") oo.updateOverlay(Number(cur.id.slice(4)), {
+							startSeconds: at,
+							endSeconds: at + dur,
+							...cur.kind === "trimL" ? { animations: shiftAnimations(cur.origAnimations, at - cur.origAt) } : {}
+						});
+						else if (cur.kind === "reorder") {
+							const clips = ctxRef.current.t.videoTracks[0]?.clips ?? [];
+							let elapsed = 0;
+							const target = cur.previewAt + cur.origDur / 2;
+							let index = 0;
+							for (const clip of clips) {
+								if (clip.id !== cur.id && target > elapsed + clip.clipDuration / 2) index++;
+								elapsed += clip.clipDuration;
+							}
+							const ids = clips.filter((clip) => clip.id !== cur.id).map((clip) => clip.id);
+							ids.splice(index, 0, cur.id);
+							oo.reorderClips(ids);
+						} else if (cur.kind === "move") {
+							if (cur.lane === "pip") oo.updateClip(cur.id, { atSeconds: at });
+							else oo.updateAudioClip(cur.id, { atSeconds: at });
+						} else if (cur.lane === "main") {
+							const patch = { clipDuration: dur };
+							if (cur.kind === "trimL") patch.animations = shiftAnimations(cur.origAnimations, at - cur.origAt);
+							if (cur.kind === "trimL" && cur.origIn !== void 0) patch.inPoint = Math.max(0, cur.origIn + (at - cur.origAt) * (cur.speed ?? 1));
+							oo.updateClip(cur.id, patch);
+						} else if (cur.lane === "pip") {
+							const patch = { clipDuration: dur };
+							if (cur.kind === "trimL") patch.animations = shiftAnimations(cur.origAnimations, at - cur.origAt);
+							if (cur.kind === "trimL") {
+								patch.atSeconds = at;
+								if (cur.origIn !== void 0) patch.inPoint = Math.max(0, cur.origIn + (at - cur.origAt) * (cur.speed ?? 1));
+							}
+							oo.updateClip(cur.id, patch);
+						} else {
+							const patch = { duration: dur };
+							if (cur.kind === "trimL") patch.animations = shiftAnimations(cur.origAnimations, at - cur.origAt);
+							if (cur.kind === "trimL") {
+								patch.atSeconds = at;
+								if (cur.origIn !== void 0) patch.inPoint = Math.max(0, cur.origIn + (at - cur.origAt) * (cur.speed ?? 1));
+							}
+							oo.updateAudioClip(cur.id, patch);
+						}
+					}
+					forceRender((x) => x + 1);
+				};
+				const cancel = () => {
+					dragRef.current = null;
+					forceRender((x) => x + 1);
+				};
+				const escape = (e) => {
+					if (e.key === "Escape") cancel();
+				};
+				window.addEventListener("keydown", escape);
+				window.addEventListener("pointermove", onMove);
+				window.addEventListener("pointerup", onUp);
+				window.addEventListener("pointercancel", cancel);
+				return () => {
+					window.removeEventListener("pointermove", onMove);
+					window.removeEventListener("pointerup", onUp);
+					window.removeEventListener("pointercancel", cancel);
+					window.removeEventListener("keydown", escape);
+				};
+			}, [playheadRef]);
+			const beginDrag = (e, init) => {
+				if (e.button !== 0) return;
+				e.stopPropagation();
+				e.preventDefault();
+				e.currentTarget.setPointerCapture(e.pointerId);
+				e.currentTarget.closest(".djp-track-block")?.focus();
+				setSelected(init.id);
+				const laneEl = e.currentTarget.closest(".djp-trow-lane");
+				if (!laneEl) return;
+				const rect = laneEl.getBoundingClientRect();
+				dragRef.current = {
+					...init,
+					startX: e.clientX,
+					secPerPx: total / Math.max(1, rect.width),
+					previewAt: init.origAt,
+					previewDur: init.origDur
+				};
+				forceRender((x) => x + 1);
+			};
+			const seek = (clientX, el) => {
+				const rect = el.getBoundingClientRect();
+				const seconds = Math.max(0, Math.min((timelineDurationInFrames(t) - 1) / t.meta.fps, (clientX - rect.left) / rect.width * total));
+				seekToSeconds(seconds, t.meta.fps);
+			};
+			const drag = dragRef.current;
+			const pct = (v) => `${Math.max(0, v) / total * 100}%`;
+			const laneWidth = total * 56 * zoom;
+			const step = [
+				1 / t.meta.fps,
+				.1,
+				.25,
+				.5,
+				1,
+				2,
+				5,
+				10,
+				15,
+				30,
+				60,
+				120,
+				300,
+				600,
+				1800,
+				3600
+			].find((n) => n * laneWidth / total >= 64) ?? total / 4;
+			const ticks = Array.from({ length: Math.ceil(total / step) }, (_, i) => i * step);
+			const subtitleRows = [];
+			t.overlays.map((overlay, index) => ({
+				overlay,
+				index
+			})).sort((a, b) => a.overlay.startSeconds - b.overlay.startSeconds).forEach((item) => {
+				const row = subtitleRows.find((items) => items[items.length - 1].overlay.endSeconds <= item.overlay.startSeconds);
+				if (row) row.push(item);
+				else subtitleRows.push([item]);
+			});
+			const block = (lane, id, label, at, duration, clip, overlay) => {
+				const isD = drag?.id === id && drag.lane === lane;
+				const start = isD ? drag.previewAt : at;
+				const dur = isD ? drag.previewDur : duration;
+				const init = {
+					lane,
+					id,
+					origAt: at,
+					origDur: duration,
+					origIn: clip?.inPoint,
+					speed: clip?.speed,
+					origAnimations: clip?.animations ?? overlay?.animations
+				};
+				const activate = () => {
+					setSelected(id);
+					seekToSeconds(at, t.meta.fps);
+				};
+				return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					role: "button",
+					tabIndex: 0,
+					"aria-pressed": selected === id,
+					"aria-label": `${label}，${fmtSec$1(at)} 到 ${fmtSec$1(at + duration)}，双击编辑属性`,
+					"data-clip-id": id,
+					className: `djp-track-block djp-${lane}-block ${selected === id ? "djp-clip-selected" : ""} ${isD ? "djp-dragging" : ""}`,
+					style: {
+						left: pct(start),
+						width: pct(dur)
+					},
+					title: `${label} · ${fmtSec$1(duration)} · 双击编辑属性`,
+					onPointerDown: (e) => beginDrag(e, {
+						...init,
+						kind: lane === "main" ? "reorder" : "move"
+					}),
+					onClick: (e) => {
+						e.stopPropagation();
+						if (!justDragged.current) activate();
+					},
+					onDoubleClick: (e) => {
+						e.stopPropagation();
+						if (!justDragged.current) onSeekClip(at, lane, id);
+					},
+					onKeyDown: (e) => {
+						if (e.key === "Enter") {
+							e.preventDefault();
+							e.stopPropagation();
+							onSeekClip(at, lane, id);
+						}
+						if (e.key.toLowerCase() === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+							e.preventDefault();
+							e.stopPropagation();
+							if (lane !== "subs") o.splitClip(id, playheadRef.current);
+						}
+					},
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "djp-clip-caption",
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: lane === "subs" ? "T" : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: lane === "audio" ? "volume" : "film" }) }),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: label }),
+								(clip?.speed ?? 1) !== 1 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("small", { children: [clip?.speed, "×"] })
+							]
+						}),
+						clip && lane !== "audio" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Filmstrip, {
+							src: clip.src,
+							type: clip.type,
+							inPoint: clip.inPoint,
+							duration,
+							speed: clip.speed
+						}),
+						clip && lane === "audio" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Waveform, {
+							src: clip.src,
+							inPoint: clip.inPoint,
+							duration,
+							speed: clip.speed
+						}),
+						lane === "main" && clip?.transition === "fade" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "djp-transition-mark",
+							title: "淡入转场"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "djp-handle djp-hl",
+							title: "裁剪头部",
+							onDoubleClick: (e) => e.stopPropagation(),
+							onPointerDown: (e) => beginDrag(e, {
+								...init,
+								kind: "trimL"
+							})
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "djp-handle djp-hr",
+							title: "裁剪尾部",
+							onDoubleClick: (e) => e.stopPropagation(),
+							onPointerDown: (e) => beginDrag(e, {
+								...init,
+								kind: "trimR"
+							})
+						})
+					]
+				}, id);
+			};
+			let elapsed = 0;
+			const mainBlocks = (t.videoTracks[0]?.clips ?? []).map((clip) => {
+				const at = elapsed;
+				elapsed += drag?.id === clip.id && drag.kind !== "reorder" ? drag.previewDur : clip.clipDuration;
+				return block("main", clip.id, clip.src.split(/[\\/]/).pop() ?? clip.src, at, clip.clipDuration, clip);
+			});
+			let mainAt = 0;
+			const collapsed = [
+				{
+					mode: "main",
+					clips: (t.videoTracks[0]?.clips ?? []).map((clip) => {
+						const at = mainAt;
+						mainAt += clip.clipDuration;
+						return {
+							at,
+							duration: clip.clipDuration
+						};
+					})
+				},
+				{
+					mode: "audio",
+					clips: t.audioTracks.flatMap((track) => track.clips.map((clip) => ({
+						at: clip.atSeconds,
+						duration: clip.duration
+					})))
+				},
+				{
+					mode: "pip",
+					clips: t.videoTracks.slice(1).flatMap((track) => track.clips.map((clip) => ({
+						at: clip.atSeconds ?? 0,
+						duration: clip.clipDuration
+					})))
+				},
+				{
+					mode: "subs",
+					clips: t.overlays.map((overlay) => ({
+						at: overlay.startSeconds,
+						duration: overlay.endSeconds - overlay.startSeconds
+					}))
+				}
+			].filter((entry) => entry.mode !== mode && entry.clips.length);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "djp-editor-timeline",
+				"data-mode": mode,
+				style: { "--djp-summary-count": collapsed.length },
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "djp-timeline-tools",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: "djp-iconbtn djp-snap",
+							"aria-label": "吸附",
+							title: "吸附到播放头与片段边缘",
+							"aria-pressed": snapping,
+							onClick: () => setSnapping(!snapping),
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "magnet" })
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+							className: "djp-zoom",
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									"aria-hidden": "true",
+									children: "−"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+									"aria-label": "时间线缩放",
+									type: "range",
+									min: "0.25",
+									max: "8",
+									step: "0.25",
+									value: zoom,
+									onChange: (e) => setZoom(Number(e.target.value))
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									"aria-hidden": "true",
+									children: "+"
+								})
+							]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: "djp-iconbtn",
+							title: "适合窗口",
+							"aria-label": "适合窗口",
+							onClick: () => setZoom(Math.max(.25, Math.min(8, viewport * .8 / (56 * total)))),
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "fit" })
+						})
+					]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "djp-timeline-viewport",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "djp-timeline-scroll",
+							ref: scrollRef,
+							"aria-label": "剪辑轨道",
+							onScroll: (e) => {
+								const x = e.currentTarget.scrollLeft;
+								if (Math.abs(x - programmaticScroll.current) < 1 || dragRef.current) return;
+								programmaticScroll.current = x;
+								manualUntil.current = performance.now() + 120;
+								playerBus.ref?.pause();
+								seekToSeconds(Math.min((timelineDurationInFrames(t) - 1) / t.meta.fps, x / (56 * zoom)), t.meta.fps);
+							},
+							onPointerDown: (e) => {
+								if (e.button !== 0 || e.target.closest(".djp-track-block, button, .djp-ruler")) return;
+								e.preventDefault();
+								e.currentTarget.setPointerCapture(e.pointerId);
+								pan.current = {
+									x: e.clientX,
+									scroll: e.currentTarget.scrollLeft
+								};
+								playerBus.ref?.pause();
+							},
+							onPointerMove: (e) => {
+								if (pan.current) e.currentTarget.scrollLeft = pan.current.scroll + pan.current.x - e.clientX;
+							},
+							onPointerUp: () => {
+								pan.current = null;
+							},
+							onPointerCancel: () => {
+								pan.current = null;
+							},
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "djp-tstrip",
+								style: {
+									width: laneWidth + viewport,
+									paddingInline: viewport / 2,
+									"--djp-grid-step": `${step * laneWidth / total}px`
+								},
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "djp-trow djp-ruler-row",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "djp-trow-name djp-ruler-unit",
+											children: [t.meta.fps, " FPS"]
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "djp-ruler",
+											"aria-label": "时间标尺",
+											onPointerDown: (e) => {
+												if (e.button !== 0) return;
+												e.preventDefault();
+												e.currentTarget.setPointerCapture(e.pointerId);
+												scrubRef.current = true;
+												playerBus.ref?.pause();
+												seek(e.clientX, e.currentTarget);
+											},
+											onPointerMove: (e) => {
+												if (scrubRef.current) seek(e.clientX, e.currentTarget);
+											},
+											onPointerUp: () => {
+												scrubRef.current = false;
+											},
+											onPointerCancel: () => {
+												scrubRef.current = false;
+											},
+											children: ticks.map((sec) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+												className: "djp-tick",
+												style: { left: pct(sec) },
+												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: step >= 1 ? timecode(sec, t.meta.fps).slice(0, 5) : timecode(sec, t.meta.fps) })
+											}, sec))
+										})]
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "djp-track-overview",
+										"aria-label": "其他轨道概览",
+										children: collapsed.map((entry) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+											className: `djp-track-summary djp-summary-${entry.mode}`,
+											"aria-label": `切换到${modeNames[entry.mode]}模式`,
+											title: `${modeNames[entry.mode]} · ${entry.clips.length} 个片段 · 点击展开`,
+											onClick: () => onModeChange(entry.mode),
+											children: entry.clips.map((clip, index) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { style: {
+												left: pct(clip.at),
+												width: pct(clip.duration)
+											} }, index))
+										}, entry.mode))
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "djp-active-tracks",
+										role: "group",
+										"aria-label": `${modeNames[mode]}编辑轨道`,
+										children: [
+											mode === "main" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(TrackRow, {
+												code: "V1",
+												name: "主画面",
+												kind: "main",
+												children: [mainBlocks, !mainBlocks.length && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+													className: "djp-empty-audio",
+													onClick: onAdd,
+													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" }), "添加画面"]
+												})]
+											}),
+											mode === "audio" && t.audioTracks.map((tr, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackRow, {
+												code: `A${i + 1}`,
+												name: tr.name ?? "音频",
+												kind: "audio",
+												muted: tr.muted,
+												action: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+													className: "djp-track-mute",
+													title: tr.muted ? "取消静音" : "静音轨道",
+													"aria-label": `${tr.name ?? "音频"}${tr.muted ? "取消静音" : "静音"}`,
+													"aria-pressed": tr.muted,
+													onClick: () => o.updateAudioTrack(tr.id, { muted: !tr.muted }),
+													children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: tr.muted ? "muted" : "volume" })
+												}),
+												children: tr.clips.map((c) => block("audio", c.id, c.src, c.atSeconds, c.duration, c))
+											}, tr.id)),
+											mode === "audio" && !t.audioTracks.length && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackRow, {
+												code: "A1",
+												name: "音频",
+												kind: "audio",
+												children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+													className: "djp-empty-audio",
+													onClick: (e) => {
+														e.stopPropagation();
+														onAudio();
+													},
+													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" }), "添加音频"]
+												})
+											}),
+											mode === "pip" && t.videoTracks.slice(1).map((tr, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackRow, {
+												code: `V${i + 2}`,
+												name: tr.name ?? "画中画",
+												kind: "pip",
+												children: tr.clips.map((c) => block("pip", c.id, c.src, c.atSeconds ?? 0, c.clipDuration, c))
+											}, tr.id)),
+											mode === "subs" && subtitleRows.map((row, lane) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackRow, {
+												code: `T${lane + 1}`,
+												name: "字幕",
+												kind: "subs",
+												children: row.map(({ overlay: ov, index }) => block("subs", "sub-" + index, ov.text, ov.startSeconds, ov.endSeconds - ov.startSeconds, void 0, ov))
+											}, lane)),
+											(mode === "pip" && !t.videoTracks.slice(1).some((track) => track.clips.length) || mode === "subs" && !t.overlays.length) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackRow, {
+												code: "",
+												name: modeNames[mode],
+												kind: mode,
+												children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+													className: "djp-empty-audio",
+													onClick: onAdd,
+													children: [
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" }),
+														"添加",
+														modeNames[mode]
+													]
+												})
+											})
+										]
+									})
+								]
+							})
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "djp-center-playhead",
+							"aria-hidden": "true"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: "djp-timeline-add",
+							"aria-label": `添加${mode === "main" ? "素材" : modeNames[mode]}`,
+							title: `添加${mode === "main" ? "素材" : modeNames[mode]}`,
+							onClick: onAdd,
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" })
+						})
+					]
+				})]
+			});
+		};
+		//#endregion
+		//#region src/client/MoreTools.tsx
+		function MoreTools({ children }) {
+			const ref = (0, react.useRef)(null);
+			(0, react.useEffect)(() => {
+				const dismiss = (event) => {
+					if (ref.current && !ref.current.contains(event.target)) ref.current.open = false;
+				};
+				document.addEventListener("pointerdown", dismiss);
+				return () => document.removeEventListener("pointerdown", dismiss);
+			}, []);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
+				className: "djp-more",
+				ref,
+				onKeyDown: (event) => {
+					if (event.key === "Escape" && ref.current?.open) {
+						event.stopPropagation();
+						ref.current.open = false;
+						ref.current.querySelector("summary")?.focus();
+					}
+				},
+				onClick: (event) => {
+					if (event.target.closest("button") && ref.current) ref.current.open = false;
+				},
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", {
+					className: "djp-iconbtn",
+					"aria-label": "更多工具",
+					title: "更多工具",
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+						width: "16",
+						height: "16",
+						viewBox: "0 0 16 16",
+						fill: "currentColor",
+						"aria-hidden": "true",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+								cx: "3",
+								cy: "8",
+								r: "1.3"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+								cx: "8",
+								cy: "8",
+								r: "1.3"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+								cx: "13",
+								cy: "8",
+								r: "1.3"
+							})
+						]
+					})
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "djp-more-content",
+					children
+				})]
+			});
+		}
+		//#endregion
+		//#region src/client/useDialog.ts
+		function useDialog(onClose) {
+			const ref = (0, react.useRef)(null);
+			const close = (0, react.useRef)(onClose);
+			close.current = onClose;
+			(0, react.useEffect)(() => {
+				const previous = document.activeElement;
+				const dialog = ref.current;
+				if (!dialog) return;
+				const targets = () => Array.from(dialog.querySelectorAll("button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, a[href], [tabindex=\"0\"]")).filter((node) => node.getClientRects().length > 0);
+				(targets()[0] ?? dialog).focus();
+				const onKey = (event) => {
+					if (event.key === "Escape") {
+						event.preventDefault();
+						event.stopPropagation();
+						close.current();
+					}
+					if (event.key !== "Tab") return;
+					const items = targets();
+					const first = items[0], last = items[items.length - 1];
+					if (!first) {
+						event.preventDefault();
+						return;
+					}
+					if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+						event.preventDefault();
+						last.focus();
+					} else if (!event.shiftKey && document.activeElement === last) {
+						event.preventDefault();
+						first.focus();
+					}
+				};
+				dialog.addEventListener("keydown", onKey);
+				return () => {
+					dialog.removeEventListener("keydown", onKey);
+					queueMicrotask(() => {
+						if (previous?.isConnected) previous.focus();
+					});
+				};
+			}, []);
+			return ref;
+		}
+		//#endregion
+		//#region src/client/InspectorRow.tsx
+		function InspectorDrawer({ title, summary, id, onClose, children, container }) {
+			const dialog = useDialog(onClose);
+			const mask = (0, react.useRef)(null);
+			(0, react.useEffect)(() => {
+				const siblings = Array.from(container.children).filter((node) => node !== mask.current);
+				const previous = siblings.map((node) => node.hasAttribute("inert"));
+				siblings.forEach((node) => node.setAttribute("inert", ""));
+				return () => siblings.forEach((node, index) => {
+					if (!previous[index]) node.removeAttribute("inert");
+				});
+			}, [container]);
+			return (0, react_dom.createPortal)(/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "djp-drawer-mask",
+				ref: mask,
+				onClick: onClose,
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "djp-property-drawer",
+					ref: dialog,
+					id,
+					role: "dialog",
+					"aria-modal": "true",
+					"aria-label": `${title} 参数`,
+					tabIndex: -1,
+					onClick: (event) => event.stopPropagation(),
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
+							className: "djp-drawer-head",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "djp-drawer-label",
+									children: "片段属性"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", {
+									title,
+									children: title
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "djp-item-summary",
+									children: summary
+								})
+							] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "djp-iconbtn",
+								"aria-label": "关闭属性面板",
+								title: "关闭（Esc）",
+								onClick: onClose,
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "close" })
+							})]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "djp-inspector djp-drawer-body",
+							children
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("footer", {
+							className: "djp-drawer-footer",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "修改自动保存" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "djp-btn",
+								onClick: onClose,
+								children: "完成"
+							})]
+						})
+					]
+				})
+			}), container);
+		}
+		function InspectorRow({ title, summary, index, open, onToggle, onDragStart, children }) {
+			const id = (0, react.useId)();
+			const row = (0, react.useRef)(null);
+			const [container, setContainer] = (0, react.useState)(null);
+			(0, react.useEffect)(() => {
+				setContainer(row.current?.closest(".djp-root") ?? null);
+			}, []);
+			(0, react.useEffect)(() => {
+				if (open) row.current?.scrollIntoView({ block: "nearest" });
+			}, [open]);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: `djp-item${open ? " djp-item-open" : ""}`,
+				"data-index": index,
+				ref: row,
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+					className: "djp-item-trigger",
+					type: "button",
+					"aria-haspopup": "dialog",
+					"aria-expanded": open,
+					"aria-controls": id,
+					onClick: onToggle,
+					draggable: Boolean(onDragStart),
+					onDragStart,
+					children: [
+						onDragStart && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "djp-drag",
+							title: "拖拽排序",
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "grip" })
+						}),
+						index !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "djp-item-number",
+							children: String(index + 1).padStart(2, "0")
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "djp-item-name",
+							title,
+							children: title
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "djp-item-summary",
+							children: summary
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("svg", {
+							className: "djp-chevron",
+							width: "14",
+							height: "14",
+							viewBox: "0 0 16 16",
+							fill: "none",
+							stroke: "currentColor",
+							strokeWidth: "1.5",
+							"aria-hidden": "true",
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "m6 4 4 4-4 4" })
+						})
+					]
+				}), open && container && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(InspectorDrawer, {
+					title,
+					summary,
+					id,
+					onClose: onToggle,
+					container,
+					children
+				})]
+			});
+		}
+		function AdvancedSettings({ children, label = "滤镜与动画" }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
+				className: "djp-advanced",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: label }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "djp-fields",
+					children
+				})]
+			});
+		}
+		//#endregion
 		//#region \0@oxc-project+runtime@0.150.0/helpers/esm/typeof.js
 		function _typeof(o) {
 			"@babel/helpers - typeof";
@@ -990,6 +6170,15 @@ ${stack}`;
 			scope.remotion_renderReady = false;
 			return handle;
 		};
+		var delayRender = (label2, options) => {
+			if (typeof window === "undefined") return Math.random();
+			return delayRenderInternal({
+				scope: window,
+				environment: getRemotionEnvironment(),
+				label: label2 ?? null,
+				options: options ?? {}
+			});
+		};
 		var continueRenderInternal = ({ scope, handle, environment, logLevel }) => {
 			if (typeof handle === "undefined") throw new TypeError("The continueRender() method must be called with a parameter that is the return value of delayRender(). No value was passed.");
 			if (typeof handle !== "number") throw new TypeError("The parameter passed into continueRender() must be the return value of delayRender() which is a number. Got: " + JSON.stringify(handle));
@@ -1011,6 +6200,15 @@ ${stack}`;
 			}
 			scope.remotion_delayRenderHandles = scope.remotion_delayRenderHandles.filter((h) => h !== handle);
 			if (scope.remotion_delayRenderHandles.length === 0) scope.remotion_renderReady = true;
+		};
+		var continueRender = (handle) => {
+			if (typeof window === "undefined") return;
+			continueRenderInternal({
+				scope: window,
+				handle,
+				environment: getRemotionEnvironment(),
+				logLevel: window.remotion_logLevel ?? "info"
+			});
 		};
 		var LogLevelContext = (0, react.createContext)({
 			logLevel: "info",
@@ -4173,7 +9371,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		var selectActiveKeys = (schema, values) => {
 			return Object.keys(flattenActiveSchema(schema, (key) => values[key]));
 		};
-		var mergeValues$1 = ({ flatSchema, props, valuesDotNotation, schemaKeys, propsToDelete }) => {
+		var mergeValues = ({ flatSchema, props, valuesDotNotation, schemaKeys, propsToDelete }) => {
 			const merged = { ...props };
 			for (const key of schemaKeys) {
 				const value = valuesDotNotation[key];
@@ -4296,7 +9494,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					frame
 				]);
 				const activeKeys = selectActiveKeys(schemaWithSequenceName, valuesDotNotation);
-				const mergedProps = mergeValues$1({
+				const mergedProps = mergeValues({
 					flatSchema,
 					props: cleanProps,
 					valuesDotNotation,
@@ -10684,6 +15882,71 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			supportsEffects: false
 		}), { Sequence: SeriesSequence });
 		addSequenceStackTraces(Series);
+		var problematicCharacters = {
+			"%3A": ":",
+			"%2F": "/",
+			"%3F": "?",
+			"%23": "#",
+			"%5B": "[",
+			"%5D": "]",
+			"%40": "@",
+			"%21": "!",
+			"%24": "$",
+			"%26": "&",
+			"%27": "'",
+			"%28": "(",
+			"%29": ")",
+			"%2A": "*",
+			"%2B": "+",
+			"%2C": ",",
+			"%3B": ";"
+		};
+		var didWarn2 = {};
+		var warnOnce3 = (message) => {
+			if (didWarn2[message]) return;
+			console.warn(message);
+			didWarn2[message] = true;
+		};
+		var includesHexOfUnsafeChar = (path) => {
+			for (const key of Object.keys(problematicCharacters)) if (path.includes(key)) return {
+				containsHex: true,
+				hexCode: key
+			};
+			return { containsHex: false };
+		};
+		var trimLeadingSlash = (path) => {
+			if (path.startsWith("/")) return trimLeadingSlash(path.substring(1));
+			return path;
+		};
+		var inner = (path) => {
+			if (typeof window !== "undefined" && window.remotion_staticBase) {
+				if (path.startsWith(window.remotion_staticBase)) throw new Error(`The value "${path}" is already prefixed with the static base ${window.remotion_staticBase}. You don't need to call staticFile() on it.`);
+				return `${window.remotion_staticBase}/${trimLeadingSlash(path)}`;
+			}
+			return `/${trimLeadingSlash(path)}`;
+		};
+		var encodeBySplitting = (path) => {
+			return path.split("/").map((element) => {
+				return encodeURIComponent(element);
+			}).join("/");
+		};
+		var staticFile = (path) => {
+			if (path === null) throw new TypeError("null was passed to staticFile()");
+			if (typeof path === "undefined") throw new TypeError("undefined was passed to staticFile()");
+			if (path.startsWith("http://") || path.startsWith("https://")) throw new TypeError(`staticFile() does not support remote URLs - got "${path}". Instead, pass the URL without wrapping it in staticFile(). See: https://remotion.dev/docs/staticfile-remote-urls`);
+			if (path.startsWith("..") || path.startsWith("./")) throw new TypeError(`staticFile() does not support relative paths - got "${path}". Instead, pass the name of a file that is inside the public/ folder. See: https://remotion.dev/docs/staticfile-relative-paths`);
+			if (path.startsWith("/Users") || path.startsWith("/home") || path.startsWith("/tmp") || path.startsWith("/etc") || path.startsWith("/opt") || path.startsWith("/var") || path.startsWith("C:") || path.startsWith("D:") || path.startsWith("E:")) throw new TypeError(`staticFile() does not support absolute paths - got "${path}". Instead, pass the name of a file that is inside the public/ folder. See: https://remotion.dev/docs/staticfile-relative-paths`);
+			if (path.startsWith("public/")) throw new TypeError(`Do not include the public/ prefix when using staticFile() - got "${path}". See: https://remotion.dev/docs/staticfile-relative-paths`);
+			const includesHex = includesHexOfUnsafeChar(path);
+			if (includesHex.containsHex) warnOnce3(`WARNING: You seem to pass an already encoded path (path contains ${includesHex.hexCode}). Since Remotion 4.0, the encoding is done by staticFile() itself. You may want to remove a encodeURIComponent() wrapping.`);
+			if (typeof window !== "undefined") {
+				const matchingStaticFile = window.remotion_staticFiles?.find((file) => file.name === trimLeadingSlash(path));
+				if (matchingStaticFile) return matchingStaticFile.src;
+			}
+			const preparsed = inner(encodeBySplitting(path));
+			if (!preparsed.startsWith("/")) return `/${preparsed}`;
+			return preparsed;
+		};
 		var Still = (props2) => {
 			const newProps = {
 				...props2,
@@ -11069,6 +16332,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		};
 		var Html5Video = (0, react.forwardRef)(VideoForwardingFunction);
 		addSequenceStackTraces(Html5Video);
+		var Video = Html5Video;
 		checkMultipleRemotionVersions();
 		var Config = new Proxy({}, { get(_, prop) {
 			if (prop === "Bundling" || prop === "Rendering" || prop === "Log" || prop === "Puppeteer" || prop === "Output") return Config;
@@ -13146,10 +18410,10 @@ Check that all your Remotion packages are on the same version. If your dependenc
             rotate: 360deg;
           }
         }
-        
+
         .${className} {
             animation: ${remotionBufferingAnimation} 1s linear infinite;
-        }        
+        }
 			`
 			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				style,
@@ -16112,3766 +21376,6 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		};
 		(0, react.forwardRef)(ThumbnailFn);
 		//#endregion
-		//#region ../../node_modules/zod/lib/index.mjs
-		var util;
-		(function(util) {
-			util.assertEqual = (val) => val;
-			function assertIs(_arg) {}
-			util.assertIs = assertIs;
-			function assertNever(_x) {
-				throw new Error();
-			}
-			util.assertNever = assertNever;
-			util.arrayToEnum = (items) => {
-				const obj = {};
-				for (const item of items) obj[item] = item;
-				return obj;
-			};
-			util.getValidEnumValues = (obj) => {
-				const validKeys = util.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
-				const filtered = {};
-				for (const k of validKeys) filtered[k] = obj[k];
-				return util.objectValues(filtered);
-			};
-			util.objectValues = (obj) => {
-				return util.objectKeys(obj).map(function(e) {
-					return obj[e];
-				});
-			};
-			util.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object) => {
-				const keys = [];
-				for (const key in object) if (Object.prototype.hasOwnProperty.call(object, key)) keys.push(key);
-				return keys;
-			};
-			util.find = (arr, checker) => {
-				for (const item of arr) if (checker(item)) return item;
-			};
-			util.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && isFinite(val) && Math.floor(val) === val;
-			function joinValues(array, separator = " | ") {
-				return array.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
-			}
-			util.joinValues = joinValues;
-			util.jsonStringifyReplacer = (_, value) => {
-				if (typeof value === "bigint") return value.toString();
-				return value;
-			};
-		})(util || (util = {}));
-		var objectUtil;
-		(function(objectUtil) {
-			objectUtil.mergeShapes = (first, second) => {
-				return {
-					...first,
-					...second
-				};
-			};
-		})(objectUtil || (objectUtil = {}));
-		const ZodParsedType = util.arrayToEnum([
-			"string",
-			"nan",
-			"number",
-			"integer",
-			"float",
-			"boolean",
-			"date",
-			"bigint",
-			"symbol",
-			"function",
-			"undefined",
-			"null",
-			"array",
-			"object",
-			"unknown",
-			"promise",
-			"void",
-			"never",
-			"map",
-			"set"
-		]);
-		const getParsedType = (data) => {
-			switch (typeof data) {
-				case "undefined": return ZodParsedType.undefined;
-				case "string": return ZodParsedType.string;
-				case "number": return isNaN(data) ? ZodParsedType.nan : ZodParsedType.number;
-				case "boolean": return ZodParsedType.boolean;
-				case "function": return ZodParsedType.function;
-				case "bigint": return ZodParsedType.bigint;
-				case "symbol": return ZodParsedType.symbol;
-				case "object":
-					if (Array.isArray(data)) return ZodParsedType.array;
-					if (data === null) return ZodParsedType.null;
-					if (data.then && typeof data.then === "function" && data.catch && typeof data.catch === "function") return ZodParsedType.promise;
-					if (typeof Map !== "undefined" && data instanceof Map) return ZodParsedType.map;
-					if (typeof Set !== "undefined" && data instanceof Set) return ZodParsedType.set;
-					if (typeof Date !== "undefined" && data instanceof Date) return ZodParsedType.date;
-					return ZodParsedType.object;
-				default: return ZodParsedType.unknown;
-			}
-		};
-		const ZodIssueCode = util.arrayToEnum([
-			"invalid_type",
-			"invalid_literal",
-			"custom",
-			"invalid_union",
-			"invalid_union_discriminator",
-			"invalid_enum_value",
-			"unrecognized_keys",
-			"invalid_arguments",
-			"invalid_return_type",
-			"invalid_date",
-			"invalid_string",
-			"too_small",
-			"too_big",
-			"invalid_intersection_types",
-			"not_multiple_of",
-			"not_finite"
-		]);
-		const quotelessJson = (obj) => {
-			return JSON.stringify(obj, null, 2).replace(/"([^"]+)":/g, "$1:");
-		};
-		var ZodError = class ZodError extends Error {
-			constructor(issues) {
-				super();
-				this.issues = [];
-				this.addIssue = (sub) => {
-					this.issues = [...this.issues, sub];
-				};
-				this.addIssues = (subs = []) => {
-					this.issues = [...this.issues, ...subs];
-				};
-				const actualProto = new.target.prototype;
-				if (Object.setPrototypeOf) Object.setPrototypeOf(this, actualProto);
-				else this.__proto__ = actualProto;
-				this.name = "ZodError";
-				this.issues = issues;
-			}
-			get errors() {
-				return this.issues;
-			}
-			format(_mapper) {
-				const mapper = _mapper || function(issue) {
-					return issue.message;
-				};
-				const fieldErrors = { _errors: [] };
-				const processError = (error) => {
-					for (const issue of error.issues) if (issue.code === "invalid_union") issue.unionErrors.map(processError);
-					else if (issue.code === "invalid_return_type") processError(issue.returnTypeError);
-					else if (issue.code === "invalid_arguments") processError(issue.argumentsError);
-					else if (issue.path.length === 0) fieldErrors._errors.push(mapper(issue));
-					else {
-						let curr = fieldErrors;
-						let i = 0;
-						while (i < issue.path.length) {
-							const el = issue.path[i];
-							if (!(i === issue.path.length - 1)) curr[el] = curr[el] || { _errors: [] };
-							else {
-								curr[el] = curr[el] || { _errors: [] };
-								curr[el]._errors.push(mapper(issue));
-							}
-							curr = curr[el];
-							i++;
-						}
-					}
-				};
-				processError(this);
-				return fieldErrors;
-			}
-			static assert(value) {
-				if (!(value instanceof ZodError)) throw new Error(`Not a ZodError: ${value}`);
-			}
-			toString() {
-				return this.message;
-			}
-			get message() {
-				return JSON.stringify(this.issues, util.jsonStringifyReplacer, 2);
-			}
-			get isEmpty() {
-				return this.issues.length === 0;
-			}
-			flatten(mapper = (issue) => issue.message) {
-				const fieldErrors = {};
-				const formErrors = [];
-				for (const sub of this.issues) if (sub.path.length > 0) {
-					fieldErrors[sub.path[0]] = fieldErrors[sub.path[0]] || [];
-					fieldErrors[sub.path[0]].push(mapper(sub));
-				} else formErrors.push(mapper(sub));
-				return {
-					formErrors,
-					fieldErrors
-				};
-			}
-			get formErrors() {
-				return this.flatten();
-			}
-		};
-		ZodError.create = (issues) => {
-			return new ZodError(issues);
-		};
-		const errorMap = (issue, _ctx) => {
-			let message;
-			switch (issue.code) {
-				case ZodIssueCode.invalid_type:
-					if (issue.received === ZodParsedType.undefined) message = "Required";
-					else message = `Expected ${issue.expected}, received ${issue.received}`;
-					break;
-				case ZodIssueCode.invalid_literal:
-					message = `Invalid literal value, expected ${JSON.stringify(issue.expected, util.jsonStringifyReplacer)}`;
-					break;
-				case ZodIssueCode.unrecognized_keys:
-					message = `Unrecognized key(s) in object: ${util.joinValues(issue.keys, ", ")}`;
-					break;
-				case ZodIssueCode.invalid_union:
-					message = `Invalid input`;
-					break;
-				case ZodIssueCode.invalid_union_discriminator:
-					message = `Invalid discriminator value. Expected ${util.joinValues(issue.options)}`;
-					break;
-				case ZodIssueCode.invalid_enum_value:
-					message = `Invalid enum value. Expected ${util.joinValues(issue.options)}, received '${issue.received}'`;
-					break;
-				case ZodIssueCode.invalid_arguments:
-					message = `Invalid function arguments`;
-					break;
-				case ZodIssueCode.invalid_return_type:
-					message = `Invalid function return type`;
-					break;
-				case ZodIssueCode.invalid_date:
-					message = `Invalid date`;
-					break;
-				case ZodIssueCode.invalid_string:
-					if (typeof issue.validation === "object") {
-						if ("includes" in issue.validation) {
-							message = `Invalid input: must include "${issue.validation.includes}"`;
-							if (typeof issue.validation.position === "number") message = `${message} at one or more positions greater than or equal to ${issue.validation.position}`;
-						} else if ("startsWith" in issue.validation) message = `Invalid input: must start with "${issue.validation.startsWith}"`;
-						else if ("endsWith" in issue.validation) message = `Invalid input: must end with "${issue.validation.endsWith}"`;
-						else util.assertNever(issue.validation);
-					} else if (issue.validation !== "regex") message = `Invalid ${issue.validation}`;
-					else message = "Invalid";
-					break;
-				case ZodIssueCode.too_small:
-					if (issue.type === "array") message = `Array must contain ${issue.exact ? "exactly" : issue.inclusive ? `at least` : `more than`} ${issue.minimum} element(s)`;
-					else if (issue.type === "string") message = `String must contain ${issue.exact ? "exactly" : issue.inclusive ? `at least` : `over`} ${issue.minimum} character(s)`;
-					else if (issue.type === "number") message = `Number must be ${issue.exact ? `exactly equal to ` : issue.inclusive ? `greater than or equal to ` : `greater than `}${issue.minimum}`;
-					else if (issue.type === "date") message = `Date must be ${issue.exact ? `exactly equal to ` : issue.inclusive ? `greater than or equal to ` : `greater than `}${new Date(Number(issue.minimum))}`;
-					else message = "Invalid input";
-					break;
-				case ZodIssueCode.too_big:
-					if (issue.type === "array") message = `Array must contain ${issue.exact ? `exactly` : issue.inclusive ? `at most` : `less than`} ${issue.maximum} element(s)`;
-					else if (issue.type === "string") message = `String must contain ${issue.exact ? `exactly` : issue.inclusive ? `at most` : `under`} ${issue.maximum} character(s)`;
-					else if (issue.type === "number") message = `Number must be ${issue.exact ? `exactly` : issue.inclusive ? `less than or equal to` : `less than`} ${issue.maximum}`;
-					else if (issue.type === "bigint") message = `BigInt must be ${issue.exact ? `exactly` : issue.inclusive ? `less than or equal to` : `less than`} ${issue.maximum}`;
-					else if (issue.type === "date") message = `Date must be ${issue.exact ? `exactly` : issue.inclusive ? `smaller than or equal to` : `smaller than`} ${new Date(Number(issue.maximum))}`;
-					else message = "Invalid input";
-					break;
-				case ZodIssueCode.custom:
-					message = `Invalid input`;
-					break;
-				case ZodIssueCode.invalid_intersection_types:
-					message = `Intersection results could not be merged`;
-					break;
-				case ZodIssueCode.not_multiple_of:
-					message = `Number must be a multiple of ${issue.multipleOf}`;
-					break;
-				case ZodIssueCode.not_finite:
-					message = "Number must be finite";
-					break;
-				default:
-					message = _ctx.defaultError;
-					util.assertNever(issue);
-			}
-			return { message };
-		};
-		let overrideErrorMap = errorMap;
-		function setErrorMap(map) {
-			overrideErrorMap = map;
-		}
-		function getErrorMap() {
-			return overrideErrorMap;
-		}
-		const makeIssue = (params) => {
-			const { data, path, errorMaps, issueData } = params;
-			const fullPath = [...path, ...issueData.path || []];
-			const fullIssue = {
-				...issueData,
-				path: fullPath
-			};
-			if (issueData.message !== void 0) return {
-				...issueData,
-				path: fullPath,
-				message: issueData.message
-			};
-			let errorMessage = "";
-			const maps = errorMaps.filter((m) => !!m).slice().reverse();
-			for (const map of maps) errorMessage = map(fullIssue, {
-				data,
-				defaultError: errorMessage
-			}).message;
-			return {
-				...issueData,
-				path: fullPath,
-				message: errorMessage
-			};
-		};
-		const EMPTY_PATH = [];
-		function addIssueToContext(ctx, issueData) {
-			const overrideMap = getErrorMap();
-			const issue = makeIssue({
-				issueData,
-				data: ctx.data,
-				path: ctx.path,
-				errorMaps: [
-					ctx.common.contextualErrorMap,
-					ctx.schemaErrorMap,
-					overrideMap,
-					overrideMap === errorMap ? void 0 : errorMap
-				].filter((x) => !!x)
-			});
-			ctx.common.issues.push(issue);
-		}
-		var ParseStatus = class ParseStatus {
-			constructor() {
-				this.value = "valid";
-			}
-			dirty() {
-				if (this.value === "valid") this.value = "dirty";
-			}
-			abort() {
-				if (this.value !== "aborted") this.value = "aborted";
-			}
-			static mergeArray(status, results) {
-				const arrayValue = [];
-				for (const s of results) {
-					if (s.status === "aborted") return INVALID;
-					if (s.status === "dirty") status.dirty();
-					arrayValue.push(s.value);
-				}
-				return {
-					status: status.value,
-					value: arrayValue
-				};
-			}
-			static async mergeObjectAsync(status, pairs) {
-				const syncPairs = [];
-				for (const pair of pairs) {
-					const key = await pair.key;
-					const value = await pair.value;
-					syncPairs.push({
-						key,
-						value
-					});
-				}
-				return ParseStatus.mergeObjectSync(status, syncPairs);
-			}
-			static mergeObjectSync(status, pairs) {
-				const finalObject = {};
-				for (const pair of pairs) {
-					const { key, value } = pair;
-					if (key.status === "aborted") return INVALID;
-					if (value.status === "aborted") return INVALID;
-					if (key.status === "dirty") status.dirty();
-					if (value.status === "dirty") status.dirty();
-					if (key.value !== "__proto__" && (typeof value.value !== "undefined" || pair.alwaysSet)) finalObject[key.value] = value.value;
-				}
-				return {
-					status: status.value,
-					value: finalObject
-				};
-			}
-		};
-		const INVALID = Object.freeze({ status: "aborted" });
-		const DIRTY = (value) => ({
-			status: "dirty",
-			value
-		});
-		const OK = (value) => ({
-			status: "valid",
-			value
-		});
-		const isAborted = (x) => x.status === "aborted";
-		const isDirty = (x) => x.status === "dirty";
-		const isValid = (x) => x.status === "valid";
-		const isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
-		/******************************************************************************
-		Copyright (c) Microsoft Corporation.
-		
-		Permission to use, copy, modify, and/or distribute this software for any
-		purpose with or without fee is hereby granted.
-		
-		THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
-		REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
-		AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
-		INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
-		LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
-		OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
-		PERFORMANCE OF THIS SOFTWARE.
-		***************************************************************************** */
-		function __classPrivateFieldGet(receiver, state, kind, f) {
-			if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a getter");
-			if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
-			return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
-		}
-		function __classPrivateFieldSet(receiver, state, value, kind, f) {
-			if (kind === "m") throw new TypeError("Private method is not writable");
-			if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a setter");
-			if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot write private member to an object whose class did not declare it");
-			return kind === "a" ? f.call(receiver, value) : f ? f.value = value : state.set(receiver, value), value;
-		}
-		var errorUtil;
-		(function(errorUtil) {
-			errorUtil.errToObj = (message) => typeof message === "string" ? { message } : message || {};
-			errorUtil.toString = (message) => typeof message === "string" ? message : message === null || message === void 0 ? void 0 : message.message;
-		})(errorUtil || (errorUtil = {}));
-		var _ZodEnum_cache;
-		var _ZodNativeEnum_cache;
-		var ParseInputLazyPath = class {
-			constructor(parent, value, path, key) {
-				this._cachedPath = [];
-				this.parent = parent;
-				this.data = value;
-				this._path = path;
-				this._key = key;
-			}
-			get path() {
-				if (!this._cachedPath.length) {
-					if (this._key instanceof Array) this._cachedPath.push(...this._path, ...this._key);
-					else this._cachedPath.push(...this._path, this._key);
-				}
-				return this._cachedPath;
-			}
-		};
-		const handleResult = (ctx, result) => {
-			if (isValid(result)) return {
-				success: true,
-				data: result.value
-			};
-			else {
-				if (!ctx.common.issues.length) throw new Error("Validation failed but no issues detected.");
-				return {
-					success: false,
-					get error() {
-						if (this._error) return this._error;
-						const error = new ZodError(ctx.common.issues);
-						this._error = error;
-						return this._error;
-					}
-				};
-			}
-		};
-		function processCreateParams(params) {
-			if (!params) return {};
-			const { errorMap, invalid_type_error, required_error, description } = params;
-			if (errorMap && (invalid_type_error || required_error)) throw new Error(`Can't use "invalid_type_error" or "required_error" in conjunction with custom error map.`);
-			if (errorMap) return {
-				errorMap,
-				description
-			};
-			const customMap = (iss, ctx) => {
-				var _a, _b;
-				const { message } = params;
-				if (iss.code === "invalid_enum_value") return { message: message !== null && message !== void 0 ? message : ctx.defaultError };
-				if (typeof ctx.data === "undefined") return { message: (_a = message !== null && message !== void 0 ? message : required_error) !== null && _a !== void 0 ? _a : ctx.defaultError };
-				if (iss.code !== "invalid_type") return { message: ctx.defaultError };
-				return { message: (_b = message !== null && message !== void 0 ? message : invalid_type_error) !== null && _b !== void 0 ? _b : ctx.defaultError };
-			};
-			return {
-				errorMap: customMap,
-				description
-			};
-		}
-		var ZodType = class {
-			constructor(def) {
-				/** Alias of safeParseAsync */
-				this.spa = this.safeParseAsync;
-				this._def = def;
-				this.parse = this.parse.bind(this);
-				this.safeParse = this.safeParse.bind(this);
-				this.parseAsync = this.parseAsync.bind(this);
-				this.safeParseAsync = this.safeParseAsync.bind(this);
-				this.spa = this.spa.bind(this);
-				this.refine = this.refine.bind(this);
-				this.refinement = this.refinement.bind(this);
-				this.superRefine = this.superRefine.bind(this);
-				this.optional = this.optional.bind(this);
-				this.nullable = this.nullable.bind(this);
-				this.nullish = this.nullish.bind(this);
-				this.array = this.array.bind(this);
-				this.promise = this.promise.bind(this);
-				this.or = this.or.bind(this);
-				this.and = this.and.bind(this);
-				this.transform = this.transform.bind(this);
-				this.brand = this.brand.bind(this);
-				this.default = this.default.bind(this);
-				this.catch = this.catch.bind(this);
-				this.describe = this.describe.bind(this);
-				this.pipe = this.pipe.bind(this);
-				this.readonly = this.readonly.bind(this);
-				this.isNullable = this.isNullable.bind(this);
-				this.isOptional = this.isOptional.bind(this);
-			}
-			get description() {
-				return this._def.description;
-			}
-			_getType(input) {
-				return getParsedType(input.data);
-			}
-			_getOrReturnCtx(input, ctx) {
-				return ctx || {
-					common: input.parent.common,
-					data: input.data,
-					parsedType: getParsedType(input.data),
-					schemaErrorMap: this._def.errorMap,
-					path: input.path,
-					parent: input.parent
-				};
-			}
-			_processInputParams(input) {
-				return {
-					status: new ParseStatus(),
-					ctx: {
-						common: input.parent.common,
-						data: input.data,
-						parsedType: getParsedType(input.data),
-						schemaErrorMap: this._def.errorMap,
-						path: input.path,
-						parent: input.parent
-					}
-				};
-			}
-			_parseSync(input) {
-				const result = this._parse(input);
-				if (isAsync(result)) throw new Error("Synchronous parse encountered promise.");
-				return result;
-			}
-			_parseAsync(input) {
-				const result = this._parse(input);
-				return Promise.resolve(result);
-			}
-			parse(data, params) {
-				const result = this.safeParse(data, params);
-				if (result.success) return result.data;
-				throw result.error;
-			}
-			safeParse(data, params) {
-				var _a;
-				const ctx = {
-					common: {
-						issues: [],
-						async: (_a = params === null || params === void 0 ? void 0 : params.async) !== null && _a !== void 0 ? _a : false,
-						contextualErrorMap: params === null || params === void 0 ? void 0 : params.errorMap
-					},
-					path: (params === null || params === void 0 ? void 0 : params.path) || [],
-					schemaErrorMap: this._def.errorMap,
-					parent: null,
-					data,
-					parsedType: getParsedType(data)
-				};
-				const result = this._parseSync({
-					data,
-					path: ctx.path,
-					parent: ctx
-				});
-				return handleResult(ctx, result);
-			}
-			async parseAsync(data, params) {
-				const result = await this.safeParseAsync(data, params);
-				if (result.success) return result.data;
-				throw result.error;
-			}
-			async safeParseAsync(data, params) {
-				const ctx = {
-					common: {
-						issues: [],
-						contextualErrorMap: params === null || params === void 0 ? void 0 : params.errorMap,
-						async: true
-					},
-					path: (params === null || params === void 0 ? void 0 : params.path) || [],
-					schemaErrorMap: this._def.errorMap,
-					parent: null,
-					data,
-					parsedType: getParsedType(data)
-				};
-				const maybeAsyncResult = this._parse({
-					data,
-					path: ctx.path,
-					parent: ctx
-				});
-				const result = await (isAsync(maybeAsyncResult) ? maybeAsyncResult : Promise.resolve(maybeAsyncResult));
-				return handleResult(ctx, result);
-			}
-			refine(check, message) {
-				const getIssueProperties = (val) => {
-					if (typeof message === "string" || typeof message === "undefined") return { message };
-					else if (typeof message === "function") return message(val);
-					else return message;
-				};
-				return this._refinement((val, ctx) => {
-					const result = check(val);
-					const setError = () => ctx.addIssue({
-						code: ZodIssueCode.custom,
-						...getIssueProperties(val)
-					});
-					if (typeof Promise !== "undefined" && result instanceof Promise) return result.then((data) => {
-						if (!data) {
-							setError();
-							return false;
-						} else return true;
-					});
-					if (!result) {
-						setError();
-						return false;
-					} else return true;
-				});
-			}
-			refinement(check, refinementData) {
-				return this._refinement((val, ctx) => {
-					if (!check(val)) {
-						ctx.addIssue(typeof refinementData === "function" ? refinementData(val, ctx) : refinementData);
-						return false;
-					} else return true;
-				});
-			}
-			_refinement(refinement) {
-				return new ZodEffects({
-					schema: this,
-					typeName: ZodFirstPartyTypeKind.ZodEffects,
-					effect: {
-						type: "refinement",
-						refinement
-					}
-				});
-			}
-			superRefine(refinement) {
-				return this._refinement(refinement);
-			}
-			optional() {
-				return ZodOptional.create(this, this._def);
-			}
-			nullable() {
-				return ZodNullable.create(this, this._def);
-			}
-			nullish() {
-				return this.nullable().optional();
-			}
-			array() {
-				return ZodArray.create(this, this._def);
-			}
-			promise() {
-				return ZodPromise.create(this, this._def);
-			}
-			or(option) {
-				return ZodUnion.create([this, option], this._def);
-			}
-			and(incoming) {
-				return ZodIntersection.create(this, incoming, this._def);
-			}
-			transform(transform) {
-				return new ZodEffects({
-					...processCreateParams(this._def),
-					schema: this,
-					typeName: ZodFirstPartyTypeKind.ZodEffects,
-					effect: {
-						type: "transform",
-						transform
-					}
-				});
-			}
-			default(def) {
-				const defaultValueFunc = typeof def === "function" ? def : () => def;
-				return new ZodDefault({
-					...processCreateParams(this._def),
-					innerType: this,
-					defaultValue: defaultValueFunc,
-					typeName: ZodFirstPartyTypeKind.ZodDefault
-				});
-			}
-			brand() {
-				return new ZodBranded({
-					typeName: ZodFirstPartyTypeKind.ZodBranded,
-					type: this,
-					...processCreateParams(this._def)
-				});
-			}
-			catch(def) {
-				const catchValueFunc = typeof def === "function" ? def : () => def;
-				return new ZodCatch({
-					...processCreateParams(this._def),
-					innerType: this,
-					catchValue: catchValueFunc,
-					typeName: ZodFirstPartyTypeKind.ZodCatch
-				});
-			}
-			describe(description) {
-				const This = this.constructor;
-				return new This({
-					...this._def,
-					description
-				});
-			}
-			pipe(target) {
-				return ZodPipeline.create(this, target);
-			}
-			readonly() {
-				return ZodReadonly.create(this);
-			}
-			isOptional() {
-				return this.safeParse(void 0).success;
-			}
-			isNullable() {
-				return this.safeParse(null).success;
-			}
-		};
-		const cuidRegex = /^c[^\s-]{8,}$/i;
-		const cuid2Regex = /^[0-9a-z]+$/;
-		const ulidRegex = /^[0-9A-HJKMNP-TV-Z]{26}$/;
-		const uuidRegex = /^[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}$/i;
-		const nanoidRegex = /^[a-z0-9_-]{21}$/i;
-		const durationRegex = /^[-+]?P(?!$)(?:(?:[-+]?\d+Y)|(?:[-+]?\d+[.,]\d+Y$))?(?:(?:[-+]?\d+M)|(?:[-+]?\d+[.,]\d+M$))?(?:(?:[-+]?\d+W)|(?:[-+]?\d+[.,]\d+W$))?(?:(?:[-+]?\d+D)|(?:[-+]?\d+[.,]\d+D$))?(?:T(?=[\d+-])(?:(?:[-+]?\d+H)|(?:[-+]?\d+[.,]\d+H$))?(?:(?:[-+]?\d+M)|(?:[-+]?\d+[.,]\d+M$))?(?:[-+]?\d+(?:[.,]\d+)?S)?)??$/;
-		const emailRegex = /^(?!\.)(?!.*\.\.)([A-Z0-9_'+\-\.]*)[A-Z0-9_+-]@([A-Z0-9][A-Z0-9\-]*\.)+[A-Z]{2,}$/i;
-		const _emojiRegex = `^(\\p{Extended_Pictographic}|\\p{Emoji_Component})+$`;
-		let emojiRegex;
-		const ipv4Regex = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$/;
-		const ipv6Regex = /^(([a-f0-9]{1,4}:){7}|::([a-f0-9]{1,4}:){0,6}|([a-f0-9]{1,4}:){1}:([a-f0-9]{1,4}:){0,5}|([a-f0-9]{1,4}:){2}:([a-f0-9]{1,4}:){0,4}|([a-f0-9]{1,4}:){3}:([a-f0-9]{1,4}:){0,3}|([a-f0-9]{1,4}:){4}:([a-f0-9]{1,4}:){0,2}|([a-f0-9]{1,4}:){5}:([a-f0-9]{1,4}:){0,1})([a-f0-9]{1,4}|(((25[0-5])|(2[0-4][0-9])|(1[0-9]{2})|([0-9]{1,2}))\.){3}((25[0-5])|(2[0-4][0-9])|(1[0-9]{2})|([0-9]{1,2})))$/;
-		const base64Regex = /^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/;
-		const dateRegexSource = `((\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-((0[13578]|1[02])-(0[1-9]|[12]\\d|3[01])|(0[469]|11)-(0[1-9]|[12]\\d|30)|(02)-(0[1-9]|1\\d|2[0-8])))`;
-		const dateRegex = new RegExp(`^${dateRegexSource}$`);
-		function timeRegexSource(args) {
-			let regex = `([01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d`;
-			if (args.precision) regex = `${regex}\\.\\d{${args.precision}}`;
-			else if (args.precision == null) regex = `${regex}(\\.\\d+)?`;
-			return regex;
-		}
-		function timeRegex(args) {
-			return new RegExp(`^${timeRegexSource(args)}$`);
-		}
-		function datetimeRegex(args) {
-			let regex = `${dateRegexSource}T${timeRegexSource(args)}`;
-			const opts = [];
-			opts.push(args.local ? `Z?` : `Z`);
-			if (args.offset) opts.push(`([+-]\\d{2}:?\\d{2})`);
-			regex = `${regex}(${opts.join("|")})`;
-			return new RegExp(`^${regex}$`);
-		}
-		function isValidIP(ip, version) {
-			if ((version === "v4" || !version) && ipv4Regex.test(ip)) return true;
-			if ((version === "v6" || !version) && ipv6Regex.test(ip)) return true;
-			return false;
-		}
-		var ZodString = class ZodString extends ZodType {
-			_parse(input) {
-				if (this._def.coerce) input.data = String(input.data);
-				if (this._getType(input) !== ZodParsedType.string) {
-					const ctx = this._getOrReturnCtx(input);
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.string,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				const status = new ParseStatus();
-				let ctx = void 0;
-				for (const check of this._def.checks) if (check.kind === "min") {
-					if (input.data.length < check.value) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.too_small,
-							minimum: check.value,
-							type: "string",
-							inclusive: true,
-							exact: false,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "max") {
-					if (input.data.length > check.value) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.too_big,
-							maximum: check.value,
-							type: "string",
-							inclusive: true,
-							exact: false,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "length") {
-					const tooBig = input.data.length > check.value;
-					const tooSmall = input.data.length < check.value;
-					if (tooBig || tooSmall) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						if (tooBig) addIssueToContext(ctx, {
-							code: ZodIssueCode.too_big,
-							maximum: check.value,
-							type: "string",
-							inclusive: true,
-							exact: true,
-							message: check.message
-						});
-						else if (tooSmall) addIssueToContext(ctx, {
-							code: ZodIssueCode.too_small,
-							minimum: check.value,
-							type: "string",
-							inclusive: true,
-							exact: true,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "email") {
-					if (!emailRegex.test(input.data)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							validation: "email",
-							code: ZodIssueCode.invalid_string,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "emoji") {
-					if (!emojiRegex) emojiRegex = new RegExp(_emojiRegex, "u");
-					if (!emojiRegex.test(input.data)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							validation: "emoji",
-							code: ZodIssueCode.invalid_string,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "uuid") {
-					if (!uuidRegex.test(input.data)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							validation: "uuid",
-							code: ZodIssueCode.invalid_string,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "nanoid") {
-					if (!nanoidRegex.test(input.data)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							validation: "nanoid",
-							code: ZodIssueCode.invalid_string,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "cuid") {
-					if (!cuidRegex.test(input.data)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							validation: "cuid",
-							code: ZodIssueCode.invalid_string,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "cuid2") {
-					if (!cuid2Regex.test(input.data)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							validation: "cuid2",
-							code: ZodIssueCode.invalid_string,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "ulid") {
-					if (!ulidRegex.test(input.data)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							validation: "ulid",
-							code: ZodIssueCode.invalid_string,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "url") try {
-					new URL(input.data);
-				} catch (_a) {
-					ctx = this._getOrReturnCtx(input, ctx);
-					addIssueToContext(ctx, {
-						validation: "url",
-						code: ZodIssueCode.invalid_string,
-						message: check.message
-					});
-					status.dirty();
-				}
-				else if (check.kind === "regex") {
-					check.regex.lastIndex = 0;
-					if (!check.regex.test(input.data)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							validation: "regex",
-							code: ZodIssueCode.invalid_string,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "trim") input.data = input.data.trim();
-				else if (check.kind === "includes") {
-					if (!input.data.includes(check.value, check.position)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.invalid_string,
-							validation: {
-								includes: check.value,
-								position: check.position
-							},
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "toLowerCase") input.data = input.data.toLowerCase();
-				else if (check.kind === "toUpperCase") input.data = input.data.toUpperCase();
-				else if (check.kind === "startsWith") {
-					if (!input.data.startsWith(check.value)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.invalid_string,
-							validation: { startsWith: check.value },
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "endsWith") {
-					if (!input.data.endsWith(check.value)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.invalid_string,
-							validation: { endsWith: check.value },
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "datetime") {
-					if (!datetimeRegex(check).test(input.data)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.invalid_string,
-							validation: "datetime",
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "date") {
-					if (!dateRegex.test(input.data)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.invalid_string,
-							validation: "date",
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "time") {
-					if (!timeRegex(check).test(input.data)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.invalid_string,
-							validation: "time",
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "duration") {
-					if (!durationRegex.test(input.data)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							validation: "duration",
-							code: ZodIssueCode.invalid_string,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "ip") {
-					if (!isValidIP(input.data, check.version)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							validation: "ip",
-							code: ZodIssueCode.invalid_string,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "base64") {
-					if (!base64Regex.test(input.data)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							validation: "base64",
-							code: ZodIssueCode.invalid_string,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else util.assertNever(check);
-				return {
-					status: status.value,
-					value: input.data
-				};
-			}
-			_regex(regex, validation, message) {
-				return this.refinement((data) => regex.test(data), {
-					validation,
-					code: ZodIssueCode.invalid_string,
-					...errorUtil.errToObj(message)
-				});
-			}
-			_addCheck(check) {
-				return new ZodString({
-					...this._def,
-					checks: [...this._def.checks, check]
-				});
-			}
-			email(message) {
-				return this._addCheck({
-					kind: "email",
-					...errorUtil.errToObj(message)
-				});
-			}
-			url(message) {
-				return this._addCheck({
-					kind: "url",
-					...errorUtil.errToObj(message)
-				});
-			}
-			emoji(message) {
-				return this._addCheck({
-					kind: "emoji",
-					...errorUtil.errToObj(message)
-				});
-			}
-			uuid(message) {
-				return this._addCheck({
-					kind: "uuid",
-					...errorUtil.errToObj(message)
-				});
-			}
-			nanoid(message) {
-				return this._addCheck({
-					kind: "nanoid",
-					...errorUtil.errToObj(message)
-				});
-			}
-			cuid(message) {
-				return this._addCheck({
-					kind: "cuid",
-					...errorUtil.errToObj(message)
-				});
-			}
-			cuid2(message) {
-				return this._addCheck({
-					kind: "cuid2",
-					...errorUtil.errToObj(message)
-				});
-			}
-			ulid(message) {
-				return this._addCheck({
-					kind: "ulid",
-					...errorUtil.errToObj(message)
-				});
-			}
-			base64(message) {
-				return this._addCheck({
-					kind: "base64",
-					...errorUtil.errToObj(message)
-				});
-			}
-			ip(options) {
-				return this._addCheck({
-					kind: "ip",
-					...errorUtil.errToObj(options)
-				});
-			}
-			datetime(options) {
-				var _a, _b;
-				if (typeof options === "string") return this._addCheck({
-					kind: "datetime",
-					precision: null,
-					offset: false,
-					local: false,
-					message: options
-				});
-				return this._addCheck({
-					kind: "datetime",
-					precision: typeof (options === null || options === void 0 ? void 0 : options.precision) === "undefined" ? null : options === null || options === void 0 ? void 0 : options.precision,
-					offset: (_a = options === null || options === void 0 ? void 0 : options.offset) !== null && _a !== void 0 ? _a : false,
-					local: (_b = options === null || options === void 0 ? void 0 : options.local) !== null && _b !== void 0 ? _b : false,
-					...errorUtil.errToObj(options === null || options === void 0 ? void 0 : options.message)
-				});
-			}
-			date(message) {
-				return this._addCheck({
-					kind: "date",
-					message
-				});
-			}
-			time(options) {
-				if (typeof options === "string") return this._addCheck({
-					kind: "time",
-					precision: null,
-					message: options
-				});
-				return this._addCheck({
-					kind: "time",
-					precision: typeof (options === null || options === void 0 ? void 0 : options.precision) === "undefined" ? null : options === null || options === void 0 ? void 0 : options.precision,
-					...errorUtil.errToObj(options === null || options === void 0 ? void 0 : options.message)
-				});
-			}
-			duration(message) {
-				return this._addCheck({
-					kind: "duration",
-					...errorUtil.errToObj(message)
-				});
-			}
-			regex(regex, message) {
-				return this._addCheck({
-					kind: "regex",
-					regex,
-					...errorUtil.errToObj(message)
-				});
-			}
-			includes(value, options) {
-				return this._addCheck({
-					kind: "includes",
-					value,
-					position: options === null || options === void 0 ? void 0 : options.position,
-					...errorUtil.errToObj(options === null || options === void 0 ? void 0 : options.message)
-				});
-			}
-			startsWith(value, message) {
-				return this._addCheck({
-					kind: "startsWith",
-					value,
-					...errorUtil.errToObj(message)
-				});
-			}
-			endsWith(value, message) {
-				return this._addCheck({
-					kind: "endsWith",
-					value,
-					...errorUtil.errToObj(message)
-				});
-			}
-			min(minLength, message) {
-				return this._addCheck({
-					kind: "min",
-					value: minLength,
-					...errorUtil.errToObj(message)
-				});
-			}
-			max(maxLength, message) {
-				return this._addCheck({
-					kind: "max",
-					value: maxLength,
-					...errorUtil.errToObj(message)
-				});
-			}
-			length(len, message) {
-				return this._addCheck({
-					kind: "length",
-					value: len,
-					...errorUtil.errToObj(message)
-				});
-			}
-			/**
-			* @deprecated Use z.string().min(1) instead.
-			* @see {@link ZodString.min}
-			*/
-			nonempty(message) {
-				return this.min(1, errorUtil.errToObj(message));
-			}
-			trim() {
-				return new ZodString({
-					...this._def,
-					checks: [...this._def.checks, { kind: "trim" }]
-				});
-			}
-			toLowerCase() {
-				return new ZodString({
-					...this._def,
-					checks: [...this._def.checks, { kind: "toLowerCase" }]
-				});
-			}
-			toUpperCase() {
-				return new ZodString({
-					...this._def,
-					checks: [...this._def.checks, { kind: "toUpperCase" }]
-				});
-			}
-			get isDatetime() {
-				return !!this._def.checks.find((ch) => ch.kind === "datetime");
-			}
-			get isDate() {
-				return !!this._def.checks.find((ch) => ch.kind === "date");
-			}
-			get isTime() {
-				return !!this._def.checks.find((ch) => ch.kind === "time");
-			}
-			get isDuration() {
-				return !!this._def.checks.find((ch) => ch.kind === "duration");
-			}
-			get isEmail() {
-				return !!this._def.checks.find((ch) => ch.kind === "email");
-			}
-			get isURL() {
-				return !!this._def.checks.find((ch) => ch.kind === "url");
-			}
-			get isEmoji() {
-				return !!this._def.checks.find((ch) => ch.kind === "emoji");
-			}
-			get isUUID() {
-				return !!this._def.checks.find((ch) => ch.kind === "uuid");
-			}
-			get isNANOID() {
-				return !!this._def.checks.find((ch) => ch.kind === "nanoid");
-			}
-			get isCUID() {
-				return !!this._def.checks.find((ch) => ch.kind === "cuid");
-			}
-			get isCUID2() {
-				return !!this._def.checks.find((ch) => ch.kind === "cuid2");
-			}
-			get isULID() {
-				return !!this._def.checks.find((ch) => ch.kind === "ulid");
-			}
-			get isIP() {
-				return !!this._def.checks.find((ch) => ch.kind === "ip");
-			}
-			get isBase64() {
-				return !!this._def.checks.find((ch) => ch.kind === "base64");
-			}
-			get minLength() {
-				let min = null;
-				for (const ch of this._def.checks) if (ch.kind === "min") {
-					if (min === null || ch.value > min) min = ch.value;
-				}
-				return min;
-			}
-			get maxLength() {
-				let max = null;
-				for (const ch of this._def.checks) if (ch.kind === "max") {
-					if (max === null || ch.value < max) max = ch.value;
-				}
-				return max;
-			}
-		};
-		ZodString.create = (params) => {
-			var _a;
-			return new ZodString({
-				checks: [],
-				typeName: ZodFirstPartyTypeKind.ZodString,
-				coerce: (_a = params === null || params === void 0 ? void 0 : params.coerce) !== null && _a !== void 0 ? _a : false,
-				...processCreateParams(params)
-			});
-		};
-		function floatSafeRemainder(val, step) {
-			const valDecCount = (val.toString().split(".")[1] || "").length;
-			const stepDecCount = (step.toString().split(".")[1] || "").length;
-			const decCount = valDecCount > stepDecCount ? valDecCount : stepDecCount;
-			return parseInt(val.toFixed(decCount).replace(".", "")) % parseInt(step.toFixed(decCount).replace(".", "")) / Math.pow(10, decCount);
-		}
-		var ZodNumber = class ZodNumber extends ZodType {
-			constructor() {
-				super(...arguments);
-				this.min = this.gte;
-				this.max = this.lte;
-				this.step = this.multipleOf;
-			}
-			_parse(input) {
-				if (this._def.coerce) input.data = Number(input.data);
-				if (this._getType(input) !== ZodParsedType.number) {
-					const ctx = this._getOrReturnCtx(input);
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.number,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				let ctx = void 0;
-				const status = new ParseStatus();
-				for (const check of this._def.checks) if (check.kind === "int") {
-					if (!util.isInteger(input.data)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.invalid_type,
-							expected: "integer",
-							received: "float",
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "min") {
-					if (check.inclusive ? input.data < check.value : input.data <= check.value) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.too_small,
-							minimum: check.value,
-							type: "number",
-							inclusive: check.inclusive,
-							exact: false,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "max") {
-					if (check.inclusive ? input.data > check.value : input.data >= check.value) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.too_big,
-							maximum: check.value,
-							type: "number",
-							inclusive: check.inclusive,
-							exact: false,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "multipleOf") {
-					if (floatSafeRemainder(input.data, check.value) !== 0) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.not_multiple_of,
-							multipleOf: check.value,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "finite") {
-					if (!Number.isFinite(input.data)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.not_finite,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else util.assertNever(check);
-				return {
-					status: status.value,
-					value: input.data
-				};
-			}
-			gte(value, message) {
-				return this.setLimit("min", value, true, errorUtil.toString(message));
-			}
-			gt(value, message) {
-				return this.setLimit("min", value, false, errorUtil.toString(message));
-			}
-			lte(value, message) {
-				return this.setLimit("max", value, true, errorUtil.toString(message));
-			}
-			lt(value, message) {
-				return this.setLimit("max", value, false, errorUtil.toString(message));
-			}
-			setLimit(kind, value, inclusive, message) {
-				return new ZodNumber({
-					...this._def,
-					checks: [...this._def.checks, {
-						kind,
-						value,
-						inclusive,
-						message: errorUtil.toString(message)
-					}]
-				});
-			}
-			_addCheck(check) {
-				return new ZodNumber({
-					...this._def,
-					checks: [...this._def.checks, check]
-				});
-			}
-			int(message) {
-				return this._addCheck({
-					kind: "int",
-					message: errorUtil.toString(message)
-				});
-			}
-			positive(message) {
-				return this._addCheck({
-					kind: "min",
-					value: 0,
-					inclusive: false,
-					message: errorUtil.toString(message)
-				});
-			}
-			negative(message) {
-				return this._addCheck({
-					kind: "max",
-					value: 0,
-					inclusive: false,
-					message: errorUtil.toString(message)
-				});
-			}
-			nonpositive(message) {
-				return this._addCheck({
-					kind: "max",
-					value: 0,
-					inclusive: true,
-					message: errorUtil.toString(message)
-				});
-			}
-			nonnegative(message) {
-				return this._addCheck({
-					kind: "min",
-					value: 0,
-					inclusive: true,
-					message: errorUtil.toString(message)
-				});
-			}
-			multipleOf(value, message) {
-				return this._addCheck({
-					kind: "multipleOf",
-					value,
-					message: errorUtil.toString(message)
-				});
-			}
-			finite(message) {
-				return this._addCheck({
-					kind: "finite",
-					message: errorUtil.toString(message)
-				});
-			}
-			safe(message) {
-				return this._addCheck({
-					kind: "min",
-					inclusive: true,
-					value: Number.MIN_SAFE_INTEGER,
-					message: errorUtil.toString(message)
-				})._addCheck({
-					kind: "max",
-					inclusive: true,
-					value: Number.MAX_SAFE_INTEGER,
-					message: errorUtil.toString(message)
-				});
-			}
-			get minValue() {
-				let min = null;
-				for (const ch of this._def.checks) if (ch.kind === "min") {
-					if (min === null || ch.value > min) min = ch.value;
-				}
-				return min;
-			}
-			get maxValue() {
-				let max = null;
-				for (const ch of this._def.checks) if (ch.kind === "max") {
-					if (max === null || ch.value < max) max = ch.value;
-				}
-				return max;
-			}
-			get isInt() {
-				return !!this._def.checks.find((ch) => ch.kind === "int" || ch.kind === "multipleOf" && util.isInteger(ch.value));
-			}
-			get isFinite() {
-				let max = null, min = null;
-				for (const ch of this._def.checks) if (ch.kind === "finite" || ch.kind === "int" || ch.kind === "multipleOf") return true;
-				else if (ch.kind === "min") {
-					if (min === null || ch.value > min) min = ch.value;
-				} else if (ch.kind === "max") {
-					if (max === null || ch.value < max) max = ch.value;
-				}
-				return Number.isFinite(min) && Number.isFinite(max);
-			}
-		};
-		ZodNumber.create = (params) => {
-			return new ZodNumber({
-				checks: [],
-				typeName: ZodFirstPartyTypeKind.ZodNumber,
-				coerce: (params === null || params === void 0 ? void 0 : params.coerce) || false,
-				...processCreateParams(params)
-			});
-		};
-		var ZodBigInt = class ZodBigInt extends ZodType {
-			constructor() {
-				super(...arguments);
-				this.min = this.gte;
-				this.max = this.lte;
-			}
-			_parse(input) {
-				if (this._def.coerce) input.data = BigInt(input.data);
-				if (this._getType(input) !== ZodParsedType.bigint) {
-					const ctx = this._getOrReturnCtx(input);
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.bigint,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				let ctx = void 0;
-				const status = new ParseStatus();
-				for (const check of this._def.checks) if (check.kind === "min") {
-					if (check.inclusive ? input.data < check.value : input.data <= check.value) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.too_small,
-							type: "bigint",
-							minimum: check.value,
-							inclusive: check.inclusive,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "max") {
-					if (check.inclusive ? input.data > check.value : input.data >= check.value) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.too_big,
-							type: "bigint",
-							maximum: check.value,
-							inclusive: check.inclusive,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "multipleOf") {
-					if (input.data % check.value !== BigInt(0)) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.not_multiple_of,
-							multipleOf: check.value,
-							message: check.message
-						});
-						status.dirty();
-					}
-				} else util.assertNever(check);
-				return {
-					status: status.value,
-					value: input.data
-				};
-			}
-			gte(value, message) {
-				return this.setLimit("min", value, true, errorUtil.toString(message));
-			}
-			gt(value, message) {
-				return this.setLimit("min", value, false, errorUtil.toString(message));
-			}
-			lte(value, message) {
-				return this.setLimit("max", value, true, errorUtil.toString(message));
-			}
-			lt(value, message) {
-				return this.setLimit("max", value, false, errorUtil.toString(message));
-			}
-			setLimit(kind, value, inclusive, message) {
-				return new ZodBigInt({
-					...this._def,
-					checks: [...this._def.checks, {
-						kind,
-						value,
-						inclusive,
-						message: errorUtil.toString(message)
-					}]
-				});
-			}
-			_addCheck(check) {
-				return new ZodBigInt({
-					...this._def,
-					checks: [...this._def.checks, check]
-				});
-			}
-			positive(message) {
-				return this._addCheck({
-					kind: "min",
-					value: BigInt(0),
-					inclusive: false,
-					message: errorUtil.toString(message)
-				});
-			}
-			negative(message) {
-				return this._addCheck({
-					kind: "max",
-					value: BigInt(0),
-					inclusive: false,
-					message: errorUtil.toString(message)
-				});
-			}
-			nonpositive(message) {
-				return this._addCheck({
-					kind: "max",
-					value: BigInt(0),
-					inclusive: true,
-					message: errorUtil.toString(message)
-				});
-			}
-			nonnegative(message) {
-				return this._addCheck({
-					kind: "min",
-					value: BigInt(0),
-					inclusive: true,
-					message: errorUtil.toString(message)
-				});
-			}
-			multipleOf(value, message) {
-				return this._addCheck({
-					kind: "multipleOf",
-					value,
-					message: errorUtil.toString(message)
-				});
-			}
-			get minValue() {
-				let min = null;
-				for (const ch of this._def.checks) if (ch.kind === "min") {
-					if (min === null || ch.value > min) min = ch.value;
-				}
-				return min;
-			}
-			get maxValue() {
-				let max = null;
-				for (const ch of this._def.checks) if (ch.kind === "max") {
-					if (max === null || ch.value < max) max = ch.value;
-				}
-				return max;
-			}
-		};
-		ZodBigInt.create = (params) => {
-			var _a;
-			return new ZodBigInt({
-				checks: [],
-				typeName: ZodFirstPartyTypeKind.ZodBigInt,
-				coerce: (_a = params === null || params === void 0 ? void 0 : params.coerce) !== null && _a !== void 0 ? _a : false,
-				...processCreateParams(params)
-			});
-		};
-		var ZodBoolean = class extends ZodType {
-			_parse(input) {
-				if (this._def.coerce) input.data = Boolean(input.data);
-				if (this._getType(input) !== ZodParsedType.boolean) {
-					const ctx = this._getOrReturnCtx(input);
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.boolean,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				return OK(input.data);
-			}
-		};
-		ZodBoolean.create = (params) => {
-			return new ZodBoolean({
-				typeName: ZodFirstPartyTypeKind.ZodBoolean,
-				coerce: (params === null || params === void 0 ? void 0 : params.coerce) || false,
-				...processCreateParams(params)
-			});
-		};
-		var ZodDate = class ZodDate extends ZodType {
-			_parse(input) {
-				if (this._def.coerce) input.data = new Date(input.data);
-				if (this._getType(input) !== ZodParsedType.date) {
-					const ctx = this._getOrReturnCtx(input);
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.date,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				if (isNaN(input.data.getTime())) {
-					addIssueToContext(this._getOrReturnCtx(input), { code: ZodIssueCode.invalid_date });
-					return INVALID;
-				}
-				const status = new ParseStatus();
-				let ctx = void 0;
-				for (const check of this._def.checks) if (check.kind === "min") {
-					if (input.data.getTime() < check.value) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.too_small,
-							message: check.message,
-							inclusive: true,
-							exact: false,
-							minimum: check.value,
-							type: "date"
-						});
-						status.dirty();
-					}
-				} else if (check.kind === "max") {
-					if (input.data.getTime() > check.value) {
-						ctx = this._getOrReturnCtx(input, ctx);
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.too_big,
-							message: check.message,
-							inclusive: true,
-							exact: false,
-							maximum: check.value,
-							type: "date"
-						});
-						status.dirty();
-					}
-				} else util.assertNever(check);
-				return {
-					status: status.value,
-					value: new Date(input.data.getTime())
-				};
-			}
-			_addCheck(check) {
-				return new ZodDate({
-					...this._def,
-					checks: [...this._def.checks, check]
-				});
-			}
-			min(minDate, message) {
-				return this._addCheck({
-					kind: "min",
-					value: minDate.getTime(),
-					message: errorUtil.toString(message)
-				});
-			}
-			max(maxDate, message) {
-				return this._addCheck({
-					kind: "max",
-					value: maxDate.getTime(),
-					message: errorUtil.toString(message)
-				});
-			}
-			get minDate() {
-				let min = null;
-				for (const ch of this._def.checks) if (ch.kind === "min") {
-					if (min === null || ch.value > min) min = ch.value;
-				}
-				return min != null ? new Date(min) : null;
-			}
-			get maxDate() {
-				let max = null;
-				for (const ch of this._def.checks) if (ch.kind === "max") {
-					if (max === null || ch.value < max) max = ch.value;
-				}
-				return max != null ? new Date(max) : null;
-			}
-		};
-		ZodDate.create = (params) => {
-			return new ZodDate({
-				checks: [],
-				coerce: (params === null || params === void 0 ? void 0 : params.coerce) || false,
-				typeName: ZodFirstPartyTypeKind.ZodDate,
-				...processCreateParams(params)
-			});
-		};
-		var ZodSymbol = class extends ZodType {
-			_parse(input) {
-				if (this._getType(input) !== ZodParsedType.symbol) {
-					const ctx = this._getOrReturnCtx(input);
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.symbol,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				return OK(input.data);
-			}
-		};
-		ZodSymbol.create = (params) => {
-			return new ZodSymbol({
-				typeName: ZodFirstPartyTypeKind.ZodSymbol,
-				...processCreateParams(params)
-			});
-		};
-		var ZodUndefined = class extends ZodType {
-			_parse(input) {
-				if (this._getType(input) !== ZodParsedType.undefined) {
-					const ctx = this._getOrReturnCtx(input);
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.undefined,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				return OK(input.data);
-			}
-		};
-		ZodUndefined.create = (params) => {
-			return new ZodUndefined({
-				typeName: ZodFirstPartyTypeKind.ZodUndefined,
-				...processCreateParams(params)
-			});
-		};
-		var ZodNull = class extends ZodType {
-			_parse(input) {
-				if (this._getType(input) !== ZodParsedType.null) {
-					const ctx = this._getOrReturnCtx(input);
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.null,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				return OK(input.data);
-			}
-		};
-		ZodNull.create = (params) => {
-			return new ZodNull({
-				typeName: ZodFirstPartyTypeKind.ZodNull,
-				...processCreateParams(params)
-			});
-		};
-		var ZodAny = class extends ZodType {
-			constructor() {
-				super(...arguments);
-				this._any = true;
-			}
-			_parse(input) {
-				return OK(input.data);
-			}
-		};
-		ZodAny.create = (params) => {
-			return new ZodAny({
-				typeName: ZodFirstPartyTypeKind.ZodAny,
-				...processCreateParams(params)
-			});
-		};
-		var ZodUnknown = class extends ZodType {
-			constructor() {
-				super(...arguments);
-				this._unknown = true;
-			}
-			_parse(input) {
-				return OK(input.data);
-			}
-		};
-		ZodUnknown.create = (params) => {
-			return new ZodUnknown({
-				typeName: ZodFirstPartyTypeKind.ZodUnknown,
-				...processCreateParams(params)
-			});
-		};
-		var ZodNever = class extends ZodType {
-			_parse(input) {
-				const ctx = this._getOrReturnCtx(input);
-				addIssueToContext(ctx, {
-					code: ZodIssueCode.invalid_type,
-					expected: ZodParsedType.never,
-					received: ctx.parsedType
-				});
-				return INVALID;
-			}
-		};
-		ZodNever.create = (params) => {
-			return new ZodNever({
-				typeName: ZodFirstPartyTypeKind.ZodNever,
-				...processCreateParams(params)
-			});
-		};
-		var ZodVoid = class extends ZodType {
-			_parse(input) {
-				if (this._getType(input) !== ZodParsedType.undefined) {
-					const ctx = this._getOrReturnCtx(input);
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.void,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				return OK(input.data);
-			}
-		};
-		ZodVoid.create = (params) => {
-			return new ZodVoid({
-				typeName: ZodFirstPartyTypeKind.ZodVoid,
-				...processCreateParams(params)
-			});
-		};
-		var ZodArray = class ZodArray extends ZodType {
-			_parse(input) {
-				const { ctx, status } = this._processInputParams(input);
-				const def = this._def;
-				if (ctx.parsedType !== ZodParsedType.array) {
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.array,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				if (def.exactLength !== null) {
-					const tooBig = ctx.data.length > def.exactLength.value;
-					const tooSmall = ctx.data.length < def.exactLength.value;
-					if (tooBig || tooSmall) {
-						addIssueToContext(ctx, {
-							code: tooBig ? ZodIssueCode.too_big : ZodIssueCode.too_small,
-							minimum: tooSmall ? def.exactLength.value : void 0,
-							maximum: tooBig ? def.exactLength.value : void 0,
-							type: "array",
-							inclusive: true,
-							exact: true,
-							message: def.exactLength.message
-						});
-						status.dirty();
-					}
-				}
-				if (def.minLength !== null) {
-					if (ctx.data.length < def.minLength.value) {
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.too_small,
-							minimum: def.minLength.value,
-							type: "array",
-							inclusive: true,
-							exact: false,
-							message: def.minLength.message
-						});
-						status.dirty();
-					}
-				}
-				if (def.maxLength !== null) {
-					if (ctx.data.length > def.maxLength.value) {
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.too_big,
-							maximum: def.maxLength.value,
-							type: "array",
-							inclusive: true,
-							exact: false,
-							message: def.maxLength.message
-						});
-						status.dirty();
-					}
-				}
-				if (ctx.common.async) return Promise.all([...ctx.data].map((item, i) => {
-					return def.type._parseAsync(new ParseInputLazyPath(ctx, item, ctx.path, i));
-				})).then((result) => {
-					return ParseStatus.mergeArray(status, result);
-				});
-				const result = [...ctx.data].map((item, i) => {
-					return def.type._parseSync(new ParseInputLazyPath(ctx, item, ctx.path, i));
-				});
-				return ParseStatus.mergeArray(status, result);
-			}
-			get element() {
-				return this._def.type;
-			}
-			min(minLength, message) {
-				return new ZodArray({
-					...this._def,
-					minLength: {
-						value: minLength,
-						message: errorUtil.toString(message)
-					}
-				});
-			}
-			max(maxLength, message) {
-				return new ZodArray({
-					...this._def,
-					maxLength: {
-						value: maxLength,
-						message: errorUtil.toString(message)
-					}
-				});
-			}
-			length(len, message) {
-				return new ZodArray({
-					...this._def,
-					exactLength: {
-						value: len,
-						message: errorUtil.toString(message)
-					}
-				});
-			}
-			nonempty(message) {
-				return this.min(1, message);
-			}
-		};
-		ZodArray.create = (schema, params) => {
-			return new ZodArray({
-				type: schema,
-				minLength: null,
-				maxLength: null,
-				exactLength: null,
-				typeName: ZodFirstPartyTypeKind.ZodArray,
-				...processCreateParams(params)
-			});
-		};
-		function deepPartialify(schema) {
-			if (schema instanceof ZodObject) {
-				const newShape = {};
-				for (const key in schema.shape) {
-					const fieldSchema = schema.shape[key];
-					newShape[key] = ZodOptional.create(deepPartialify(fieldSchema));
-				}
-				return new ZodObject({
-					...schema._def,
-					shape: () => newShape
-				});
-			} else if (schema instanceof ZodArray) return new ZodArray({
-				...schema._def,
-				type: deepPartialify(schema.element)
-			});
-			else if (schema instanceof ZodOptional) return ZodOptional.create(deepPartialify(schema.unwrap()));
-			else if (schema instanceof ZodNullable) return ZodNullable.create(deepPartialify(schema.unwrap()));
-			else if (schema instanceof ZodTuple) return ZodTuple.create(schema.items.map((item) => deepPartialify(item)));
-			else return schema;
-		}
-		var ZodObject = class ZodObject extends ZodType {
-			constructor() {
-				super(...arguments);
-				this._cached = null;
-				/**
-				* @deprecated In most cases, this is no longer needed - unknown properties are now silently stripped.
-				* If you want to pass through unknown properties, use `.passthrough()` instead.
-				*/
-				this.nonstrict = this.passthrough;
-				/**
-				* @deprecated Use `.extend` instead
-				*  */
-				this.augment = this.extend;
-			}
-			_getCached() {
-				if (this._cached !== null) return this._cached;
-				const shape = this._def.shape();
-				const keys = util.objectKeys(shape);
-				return this._cached = {
-					shape,
-					keys
-				};
-			}
-			_parse(input) {
-				if (this._getType(input) !== ZodParsedType.object) {
-					const ctx = this._getOrReturnCtx(input);
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.object,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				const { status, ctx } = this._processInputParams(input);
-				const { shape, keys: shapeKeys } = this._getCached();
-				const extraKeys = [];
-				if (!(this._def.catchall instanceof ZodNever && this._def.unknownKeys === "strip")) {
-					for (const key in ctx.data) if (!shapeKeys.includes(key)) extraKeys.push(key);
-				}
-				const pairs = [];
-				for (const key of shapeKeys) {
-					const keyValidator = shape[key];
-					const value = ctx.data[key];
-					pairs.push({
-						key: {
-							status: "valid",
-							value: key
-						},
-						value: keyValidator._parse(new ParseInputLazyPath(ctx, value, ctx.path, key)),
-						alwaysSet: key in ctx.data
-					});
-				}
-				if (this._def.catchall instanceof ZodNever) {
-					const unknownKeys = this._def.unknownKeys;
-					if (unknownKeys === "passthrough") for (const key of extraKeys) pairs.push({
-						key: {
-							status: "valid",
-							value: key
-						},
-						value: {
-							status: "valid",
-							value: ctx.data[key]
-						}
-					});
-					else if (unknownKeys === "strict") {
-						if (extraKeys.length > 0) {
-							addIssueToContext(ctx, {
-								code: ZodIssueCode.unrecognized_keys,
-								keys: extraKeys
-							});
-							status.dirty();
-						}
-					} else if (unknownKeys === "strip");
-					else throw new Error(`Internal ZodObject error: invalid unknownKeys value.`);
-				} else {
-					const catchall = this._def.catchall;
-					for (const key of extraKeys) {
-						const value = ctx.data[key];
-						pairs.push({
-							key: {
-								status: "valid",
-								value: key
-							},
-							value: catchall._parse(new ParseInputLazyPath(ctx, value, ctx.path, key)),
-							alwaysSet: key in ctx.data
-						});
-					}
-				}
-				if (ctx.common.async) return Promise.resolve().then(async () => {
-					const syncPairs = [];
-					for (const pair of pairs) {
-						const key = await pair.key;
-						const value = await pair.value;
-						syncPairs.push({
-							key,
-							value,
-							alwaysSet: pair.alwaysSet
-						});
-					}
-					return syncPairs;
-				}).then((syncPairs) => {
-					return ParseStatus.mergeObjectSync(status, syncPairs);
-				});
-				else return ParseStatus.mergeObjectSync(status, pairs);
-			}
-			get shape() {
-				return this._def.shape();
-			}
-			strict(message) {
-				errorUtil.errToObj;
-				return new ZodObject({
-					...this._def,
-					unknownKeys: "strict",
-					...message !== void 0 ? { errorMap: (issue, ctx) => {
-						var _a, _b, _c, _d;
-						const defaultError = (_c = (_b = (_a = this._def).errorMap) === null || _b === void 0 ? void 0 : _b.call(_a, issue, ctx).message) !== null && _c !== void 0 ? _c : ctx.defaultError;
-						if (issue.code === "unrecognized_keys") return { message: (_d = errorUtil.errToObj(message).message) !== null && _d !== void 0 ? _d : defaultError };
-						return { message: defaultError };
-					} } : {}
-				});
-			}
-			strip() {
-				return new ZodObject({
-					...this._def,
-					unknownKeys: "strip"
-				});
-			}
-			passthrough() {
-				return new ZodObject({
-					...this._def,
-					unknownKeys: "passthrough"
-				});
-			}
-			extend(augmentation) {
-				return new ZodObject({
-					...this._def,
-					shape: () => ({
-						...this._def.shape(),
-						...augmentation
-					})
-				});
-			}
-			/**
-			* Prior to zod@1.0.12 there was a bug in the
-			* inferred type of merged objects. Please
-			* upgrade if you are experiencing issues.
-			*/
-			merge(merging) {
-				return new ZodObject({
-					unknownKeys: merging._def.unknownKeys,
-					catchall: merging._def.catchall,
-					shape: () => ({
-						...this._def.shape(),
-						...merging._def.shape()
-					}),
-					typeName: ZodFirstPartyTypeKind.ZodObject
-				});
-			}
-			setKey(key, schema) {
-				return this.augment({ [key]: schema });
-			}
-			catchall(index) {
-				return new ZodObject({
-					...this._def,
-					catchall: index
-				});
-			}
-			pick(mask) {
-				const shape = {};
-				util.objectKeys(mask).forEach((key) => {
-					if (mask[key] && this.shape[key]) shape[key] = this.shape[key];
-				});
-				return new ZodObject({
-					...this._def,
-					shape: () => shape
-				});
-			}
-			omit(mask) {
-				const shape = {};
-				util.objectKeys(this.shape).forEach((key) => {
-					if (!mask[key]) shape[key] = this.shape[key];
-				});
-				return new ZodObject({
-					...this._def,
-					shape: () => shape
-				});
-			}
-			/**
-			* @deprecated
-			*/
-			deepPartial() {
-				return deepPartialify(this);
-			}
-			partial(mask) {
-				const newShape = {};
-				util.objectKeys(this.shape).forEach((key) => {
-					const fieldSchema = this.shape[key];
-					if (mask && !mask[key]) newShape[key] = fieldSchema;
-					else newShape[key] = fieldSchema.optional();
-				});
-				return new ZodObject({
-					...this._def,
-					shape: () => newShape
-				});
-			}
-			required(mask) {
-				const newShape = {};
-				util.objectKeys(this.shape).forEach((key) => {
-					if (mask && !mask[key]) newShape[key] = this.shape[key];
-					else {
-						let newField = this.shape[key];
-						while (newField instanceof ZodOptional) newField = newField._def.innerType;
-						newShape[key] = newField;
-					}
-				});
-				return new ZodObject({
-					...this._def,
-					shape: () => newShape
-				});
-			}
-			keyof() {
-				return createZodEnum(util.objectKeys(this.shape));
-			}
-		};
-		ZodObject.create = (shape, params) => {
-			return new ZodObject({
-				shape: () => shape,
-				unknownKeys: "strip",
-				catchall: ZodNever.create(),
-				typeName: ZodFirstPartyTypeKind.ZodObject,
-				...processCreateParams(params)
-			});
-		};
-		ZodObject.strictCreate = (shape, params) => {
-			return new ZodObject({
-				shape: () => shape,
-				unknownKeys: "strict",
-				catchall: ZodNever.create(),
-				typeName: ZodFirstPartyTypeKind.ZodObject,
-				...processCreateParams(params)
-			});
-		};
-		ZodObject.lazycreate = (shape, params) => {
-			return new ZodObject({
-				shape,
-				unknownKeys: "strip",
-				catchall: ZodNever.create(),
-				typeName: ZodFirstPartyTypeKind.ZodObject,
-				...processCreateParams(params)
-			});
-		};
-		var ZodUnion = class extends ZodType {
-			_parse(input) {
-				const { ctx } = this._processInputParams(input);
-				const options = this._def.options;
-				function handleResults(results) {
-					for (const result of results) if (result.result.status === "valid") return result.result;
-					for (const result of results) if (result.result.status === "dirty") {
-						ctx.common.issues.push(...result.ctx.common.issues);
-						return result.result;
-					}
-					const unionErrors = results.map((result) => new ZodError(result.ctx.common.issues));
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_union,
-						unionErrors
-					});
-					return INVALID;
-				}
-				if (ctx.common.async) return Promise.all(options.map(async (option) => {
-					const childCtx = {
-						...ctx,
-						common: {
-							...ctx.common,
-							issues: []
-						},
-						parent: null
-					};
-					return {
-						result: await option._parseAsync({
-							data: ctx.data,
-							path: ctx.path,
-							parent: childCtx
-						}),
-						ctx: childCtx
-					};
-				})).then(handleResults);
-				else {
-					let dirty = void 0;
-					const issues = [];
-					for (const option of options) {
-						const childCtx = {
-							...ctx,
-							common: {
-								...ctx.common,
-								issues: []
-							},
-							parent: null
-						};
-						const result = option._parseSync({
-							data: ctx.data,
-							path: ctx.path,
-							parent: childCtx
-						});
-						if (result.status === "valid") return result;
-						else if (result.status === "dirty" && !dirty) dirty = {
-							result,
-							ctx: childCtx
-						};
-						if (childCtx.common.issues.length) issues.push(childCtx.common.issues);
-					}
-					if (dirty) {
-						ctx.common.issues.push(...dirty.ctx.common.issues);
-						return dirty.result;
-					}
-					const unionErrors = issues.map((issues) => new ZodError(issues));
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_union,
-						unionErrors
-					});
-					return INVALID;
-				}
-			}
-			get options() {
-				return this._def.options;
-			}
-		};
-		ZodUnion.create = (types, params) => {
-			return new ZodUnion({
-				options: types,
-				typeName: ZodFirstPartyTypeKind.ZodUnion,
-				...processCreateParams(params)
-			});
-		};
-		const getDiscriminator = (type) => {
-			if (type instanceof ZodLazy) return getDiscriminator(type.schema);
-			else if (type instanceof ZodEffects) return getDiscriminator(type.innerType());
-			else if (type instanceof ZodLiteral) return [type.value];
-			else if (type instanceof ZodEnum) return type.options;
-			else if (type instanceof ZodNativeEnum) return util.objectValues(type.enum);
-			else if (type instanceof ZodDefault) return getDiscriminator(type._def.innerType);
-			else if (type instanceof ZodUndefined) return [void 0];
-			else if (type instanceof ZodNull) return [null];
-			else if (type instanceof ZodOptional) return [void 0, ...getDiscriminator(type.unwrap())];
-			else if (type instanceof ZodNullable) return [null, ...getDiscriminator(type.unwrap())];
-			else if (type instanceof ZodBranded) return getDiscriminator(type.unwrap());
-			else if (type instanceof ZodReadonly) return getDiscriminator(type.unwrap());
-			else if (type instanceof ZodCatch) return getDiscriminator(type._def.innerType);
-			else return [];
-		};
-		var ZodDiscriminatedUnion = class ZodDiscriminatedUnion extends ZodType {
-			_parse(input) {
-				const { ctx } = this._processInputParams(input);
-				if (ctx.parsedType !== ZodParsedType.object) {
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.object,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				const discriminator = this.discriminator;
-				const discriminatorValue = ctx.data[discriminator];
-				const option = this.optionsMap.get(discriminatorValue);
-				if (!option) {
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_union_discriminator,
-						options: Array.from(this.optionsMap.keys()),
-						path: [discriminator]
-					});
-					return INVALID;
-				}
-				if (ctx.common.async) return option._parseAsync({
-					data: ctx.data,
-					path: ctx.path,
-					parent: ctx
-				});
-				else return option._parseSync({
-					data: ctx.data,
-					path: ctx.path,
-					parent: ctx
-				});
-			}
-			get discriminator() {
-				return this._def.discriminator;
-			}
-			get options() {
-				return this._def.options;
-			}
-			get optionsMap() {
-				return this._def.optionsMap;
-			}
-			/**
-			* The constructor of the discriminated union schema. Its behaviour is very similar to that of the normal z.union() constructor.
-			* However, it only allows a union of objects, all of which need to share a discriminator property. This property must
-			* have a different value for each object in the union.
-			* @param discriminator the name of the discriminator property
-			* @param types an array of object schemas
-			* @param params
-			*/
-			static create(discriminator, options, params) {
-				const optionsMap = /* @__PURE__ */ new Map();
-				for (const type of options) {
-					const discriminatorValues = getDiscriminator(type.shape[discriminator]);
-					if (!discriminatorValues.length) throw new Error(`A discriminator value for key \`${discriminator}\` could not be extracted from all schema options`);
-					for (const value of discriminatorValues) {
-						if (optionsMap.has(value)) throw new Error(`Discriminator property ${String(discriminator)} has duplicate value ${String(value)}`);
-						optionsMap.set(value, type);
-					}
-				}
-				return new ZodDiscriminatedUnion({
-					typeName: ZodFirstPartyTypeKind.ZodDiscriminatedUnion,
-					discriminator,
-					options,
-					optionsMap,
-					...processCreateParams(params)
-				});
-			}
-		};
-		function mergeValues(a, b) {
-			const aType = getParsedType(a);
-			const bType = getParsedType(b);
-			if (a === b) return {
-				valid: true,
-				data: a
-			};
-			else if (aType === ZodParsedType.object && bType === ZodParsedType.object) {
-				const bKeys = util.objectKeys(b);
-				const sharedKeys = util.objectKeys(a).filter((key) => bKeys.indexOf(key) !== -1);
-				const newObj = {
-					...a,
-					...b
-				};
-				for (const key of sharedKeys) {
-					const sharedValue = mergeValues(a[key], b[key]);
-					if (!sharedValue.valid) return { valid: false };
-					newObj[key] = sharedValue.data;
-				}
-				return {
-					valid: true,
-					data: newObj
-				};
-			} else if (aType === ZodParsedType.array && bType === ZodParsedType.array) {
-				if (a.length !== b.length) return { valid: false };
-				const newArray = [];
-				for (let index = 0; index < a.length; index++) {
-					const itemA = a[index];
-					const itemB = b[index];
-					const sharedValue = mergeValues(itemA, itemB);
-					if (!sharedValue.valid) return { valid: false };
-					newArray.push(sharedValue.data);
-				}
-				return {
-					valid: true,
-					data: newArray
-				};
-			} else if (aType === ZodParsedType.date && bType === ZodParsedType.date && +a === +b) return {
-				valid: true,
-				data: a
-			};
-			else return { valid: false };
-		}
-		var ZodIntersection = class extends ZodType {
-			_parse(input) {
-				const { status, ctx } = this._processInputParams(input);
-				const handleParsed = (parsedLeft, parsedRight) => {
-					if (isAborted(parsedLeft) || isAborted(parsedRight)) return INVALID;
-					const merged = mergeValues(parsedLeft.value, parsedRight.value);
-					if (!merged.valid) {
-						addIssueToContext(ctx, { code: ZodIssueCode.invalid_intersection_types });
-						return INVALID;
-					}
-					if (isDirty(parsedLeft) || isDirty(parsedRight)) status.dirty();
-					return {
-						status: status.value,
-						value: merged.data
-					};
-				};
-				if (ctx.common.async) return Promise.all([this._def.left._parseAsync({
-					data: ctx.data,
-					path: ctx.path,
-					parent: ctx
-				}), this._def.right._parseAsync({
-					data: ctx.data,
-					path: ctx.path,
-					parent: ctx
-				})]).then(([left, right]) => handleParsed(left, right));
-				else return handleParsed(this._def.left._parseSync({
-					data: ctx.data,
-					path: ctx.path,
-					parent: ctx
-				}), this._def.right._parseSync({
-					data: ctx.data,
-					path: ctx.path,
-					parent: ctx
-				}));
-			}
-		};
-		ZodIntersection.create = (left, right, params) => {
-			return new ZodIntersection({
-				left,
-				right,
-				typeName: ZodFirstPartyTypeKind.ZodIntersection,
-				...processCreateParams(params)
-			});
-		};
-		var ZodTuple = class ZodTuple extends ZodType {
-			_parse(input) {
-				const { status, ctx } = this._processInputParams(input);
-				if (ctx.parsedType !== ZodParsedType.array) {
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.array,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				if (ctx.data.length < this._def.items.length) {
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.too_small,
-						minimum: this._def.items.length,
-						inclusive: true,
-						exact: false,
-						type: "array"
-					});
-					return INVALID;
-				}
-				if (!this._def.rest && ctx.data.length > this._def.items.length) {
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.too_big,
-						maximum: this._def.items.length,
-						inclusive: true,
-						exact: false,
-						type: "array"
-					});
-					status.dirty();
-				}
-				const items = [...ctx.data].map((item, itemIndex) => {
-					const schema = this._def.items[itemIndex] || this._def.rest;
-					if (!schema) return null;
-					return schema._parse(new ParseInputLazyPath(ctx, item, ctx.path, itemIndex));
-				}).filter((x) => !!x);
-				if (ctx.common.async) return Promise.all(items).then((results) => {
-					return ParseStatus.mergeArray(status, results);
-				});
-				else return ParseStatus.mergeArray(status, items);
-			}
-			get items() {
-				return this._def.items;
-			}
-			rest(rest) {
-				return new ZodTuple({
-					...this._def,
-					rest
-				});
-			}
-		};
-		ZodTuple.create = (schemas, params) => {
-			if (!Array.isArray(schemas)) throw new Error("You must pass an array of schemas to z.tuple([ ... ])");
-			return new ZodTuple({
-				items: schemas,
-				typeName: ZodFirstPartyTypeKind.ZodTuple,
-				rest: null,
-				...processCreateParams(params)
-			});
-		};
-		var ZodRecord = class ZodRecord extends ZodType {
-			get keySchema() {
-				return this._def.keyType;
-			}
-			get valueSchema() {
-				return this._def.valueType;
-			}
-			_parse(input) {
-				const { status, ctx } = this._processInputParams(input);
-				if (ctx.parsedType !== ZodParsedType.object) {
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.object,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				const pairs = [];
-				const keyType = this._def.keyType;
-				const valueType = this._def.valueType;
-				for (const key in ctx.data) pairs.push({
-					key: keyType._parse(new ParseInputLazyPath(ctx, key, ctx.path, key)),
-					value: valueType._parse(new ParseInputLazyPath(ctx, ctx.data[key], ctx.path, key)),
-					alwaysSet: key in ctx.data
-				});
-				if (ctx.common.async) return ParseStatus.mergeObjectAsync(status, pairs);
-				else return ParseStatus.mergeObjectSync(status, pairs);
-			}
-			get element() {
-				return this._def.valueType;
-			}
-			static create(first, second, third) {
-				if (second instanceof ZodType) return new ZodRecord({
-					keyType: first,
-					valueType: second,
-					typeName: ZodFirstPartyTypeKind.ZodRecord,
-					...processCreateParams(third)
-				});
-				return new ZodRecord({
-					keyType: ZodString.create(),
-					valueType: first,
-					typeName: ZodFirstPartyTypeKind.ZodRecord,
-					...processCreateParams(second)
-				});
-			}
-		};
-		var ZodMap = class extends ZodType {
-			get keySchema() {
-				return this._def.keyType;
-			}
-			get valueSchema() {
-				return this._def.valueType;
-			}
-			_parse(input) {
-				const { status, ctx } = this._processInputParams(input);
-				if (ctx.parsedType !== ZodParsedType.map) {
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.map,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				const keyType = this._def.keyType;
-				const valueType = this._def.valueType;
-				const pairs = [...ctx.data.entries()].map(([key, value], index) => {
-					return {
-						key: keyType._parse(new ParseInputLazyPath(ctx, key, ctx.path, [index, "key"])),
-						value: valueType._parse(new ParseInputLazyPath(ctx, value, ctx.path, [index, "value"]))
-					};
-				});
-				if (ctx.common.async) {
-					const finalMap = /* @__PURE__ */ new Map();
-					return Promise.resolve().then(async () => {
-						for (const pair of pairs) {
-							const key = await pair.key;
-							const value = await pair.value;
-							if (key.status === "aborted" || value.status === "aborted") return INVALID;
-							if (key.status === "dirty" || value.status === "dirty") status.dirty();
-							finalMap.set(key.value, value.value);
-						}
-						return {
-							status: status.value,
-							value: finalMap
-						};
-					});
-				} else {
-					const finalMap = /* @__PURE__ */ new Map();
-					for (const pair of pairs) {
-						const key = pair.key;
-						const value = pair.value;
-						if (key.status === "aborted" || value.status === "aborted") return INVALID;
-						if (key.status === "dirty" || value.status === "dirty") status.dirty();
-						finalMap.set(key.value, value.value);
-					}
-					return {
-						status: status.value,
-						value: finalMap
-					};
-				}
-			}
-		};
-		ZodMap.create = (keyType, valueType, params) => {
-			return new ZodMap({
-				valueType,
-				keyType,
-				typeName: ZodFirstPartyTypeKind.ZodMap,
-				...processCreateParams(params)
-			});
-		};
-		var ZodSet = class ZodSet extends ZodType {
-			_parse(input) {
-				const { status, ctx } = this._processInputParams(input);
-				if (ctx.parsedType !== ZodParsedType.set) {
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.set,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				const def = this._def;
-				if (def.minSize !== null) {
-					if (ctx.data.size < def.minSize.value) {
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.too_small,
-							minimum: def.minSize.value,
-							type: "set",
-							inclusive: true,
-							exact: false,
-							message: def.minSize.message
-						});
-						status.dirty();
-					}
-				}
-				if (def.maxSize !== null) {
-					if (ctx.data.size > def.maxSize.value) {
-						addIssueToContext(ctx, {
-							code: ZodIssueCode.too_big,
-							maximum: def.maxSize.value,
-							type: "set",
-							inclusive: true,
-							exact: false,
-							message: def.maxSize.message
-						});
-						status.dirty();
-					}
-				}
-				const valueType = this._def.valueType;
-				function finalizeSet(elements) {
-					const parsedSet = /* @__PURE__ */ new Set();
-					for (const element of elements) {
-						if (element.status === "aborted") return INVALID;
-						if (element.status === "dirty") status.dirty();
-						parsedSet.add(element.value);
-					}
-					return {
-						status: status.value,
-						value: parsedSet
-					};
-				}
-				const elements = [...ctx.data.values()].map((item, i) => valueType._parse(new ParseInputLazyPath(ctx, item, ctx.path, i)));
-				if (ctx.common.async) return Promise.all(elements).then((elements) => finalizeSet(elements));
-				else return finalizeSet(elements);
-			}
-			min(minSize, message) {
-				return new ZodSet({
-					...this._def,
-					minSize: {
-						value: minSize,
-						message: errorUtil.toString(message)
-					}
-				});
-			}
-			max(maxSize, message) {
-				return new ZodSet({
-					...this._def,
-					maxSize: {
-						value: maxSize,
-						message: errorUtil.toString(message)
-					}
-				});
-			}
-			size(size, message) {
-				return this.min(size, message).max(size, message);
-			}
-			nonempty(message) {
-				return this.min(1, message);
-			}
-		};
-		ZodSet.create = (valueType, params) => {
-			return new ZodSet({
-				valueType,
-				minSize: null,
-				maxSize: null,
-				typeName: ZodFirstPartyTypeKind.ZodSet,
-				...processCreateParams(params)
-			});
-		};
-		var ZodFunction = class ZodFunction extends ZodType {
-			constructor() {
-				super(...arguments);
-				this.validate = this.implement;
-			}
-			_parse(input) {
-				const { ctx } = this._processInputParams(input);
-				if (ctx.parsedType !== ZodParsedType.function) {
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.function,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				function makeArgsIssue(args, error) {
-					return makeIssue({
-						data: args,
-						path: ctx.path,
-						errorMaps: [
-							ctx.common.contextualErrorMap,
-							ctx.schemaErrorMap,
-							getErrorMap(),
-							errorMap
-						].filter((x) => !!x),
-						issueData: {
-							code: ZodIssueCode.invalid_arguments,
-							argumentsError: error
-						}
-					});
-				}
-				function makeReturnsIssue(returns, error) {
-					return makeIssue({
-						data: returns,
-						path: ctx.path,
-						errorMaps: [
-							ctx.common.contextualErrorMap,
-							ctx.schemaErrorMap,
-							getErrorMap(),
-							errorMap
-						].filter((x) => !!x),
-						issueData: {
-							code: ZodIssueCode.invalid_return_type,
-							returnTypeError: error
-						}
-					});
-				}
-				const params = { errorMap: ctx.common.contextualErrorMap };
-				const fn = ctx.data;
-				if (this._def.returns instanceof ZodPromise) {
-					const me = this;
-					return OK(async function(...args) {
-						const error = new ZodError([]);
-						const parsedArgs = await me._def.args.parseAsync(args, params).catch((e) => {
-							error.addIssue(makeArgsIssue(args, e));
-							throw error;
-						});
-						const result = await Reflect.apply(fn, this, parsedArgs);
-						return await me._def.returns._def.type.parseAsync(result, params).catch((e) => {
-							error.addIssue(makeReturnsIssue(result, e));
-							throw error;
-						});
-					});
-				} else {
-					const me = this;
-					return OK(function(...args) {
-						const parsedArgs = me._def.args.safeParse(args, params);
-						if (!parsedArgs.success) throw new ZodError([makeArgsIssue(args, parsedArgs.error)]);
-						const result = Reflect.apply(fn, this, parsedArgs.data);
-						const parsedReturns = me._def.returns.safeParse(result, params);
-						if (!parsedReturns.success) throw new ZodError([makeReturnsIssue(result, parsedReturns.error)]);
-						return parsedReturns.data;
-					});
-				}
-			}
-			parameters() {
-				return this._def.args;
-			}
-			returnType() {
-				return this._def.returns;
-			}
-			args(...items) {
-				return new ZodFunction({
-					...this._def,
-					args: ZodTuple.create(items).rest(ZodUnknown.create())
-				});
-			}
-			returns(returnType) {
-				return new ZodFunction({
-					...this._def,
-					returns: returnType
-				});
-			}
-			implement(func) {
-				return this.parse(func);
-			}
-			strictImplement(func) {
-				return this.parse(func);
-			}
-			static create(args, returns, params) {
-				return new ZodFunction({
-					args: args ? args : ZodTuple.create([]).rest(ZodUnknown.create()),
-					returns: returns || ZodUnknown.create(),
-					typeName: ZodFirstPartyTypeKind.ZodFunction,
-					...processCreateParams(params)
-				});
-			}
-		};
-		var ZodLazy = class extends ZodType {
-			get schema() {
-				return this._def.getter();
-			}
-			_parse(input) {
-				const { ctx } = this._processInputParams(input);
-				return this._def.getter()._parse({
-					data: ctx.data,
-					path: ctx.path,
-					parent: ctx
-				});
-			}
-		};
-		ZodLazy.create = (getter, params) => {
-			return new ZodLazy({
-				getter,
-				typeName: ZodFirstPartyTypeKind.ZodLazy,
-				...processCreateParams(params)
-			});
-		};
-		var ZodLiteral = class extends ZodType {
-			_parse(input) {
-				if (input.data !== this._def.value) {
-					const ctx = this._getOrReturnCtx(input);
-					addIssueToContext(ctx, {
-						received: ctx.data,
-						code: ZodIssueCode.invalid_literal,
-						expected: this._def.value
-					});
-					return INVALID;
-				}
-				return {
-					status: "valid",
-					value: input.data
-				};
-			}
-			get value() {
-				return this._def.value;
-			}
-		};
-		ZodLiteral.create = (value, params) => {
-			return new ZodLiteral({
-				value,
-				typeName: ZodFirstPartyTypeKind.ZodLiteral,
-				...processCreateParams(params)
-			});
-		};
-		function createZodEnum(values, params) {
-			return new ZodEnum({
-				values,
-				typeName: ZodFirstPartyTypeKind.ZodEnum,
-				...processCreateParams(params)
-			});
-		}
-		var ZodEnum = class ZodEnum extends ZodType {
-			constructor() {
-				super(...arguments);
-				_ZodEnum_cache.set(this, void 0);
-			}
-			_parse(input) {
-				if (typeof input.data !== "string") {
-					const ctx = this._getOrReturnCtx(input);
-					const expectedValues = this._def.values;
-					addIssueToContext(ctx, {
-						expected: util.joinValues(expectedValues),
-						received: ctx.parsedType,
-						code: ZodIssueCode.invalid_type
-					});
-					return INVALID;
-				}
-				if (!__classPrivateFieldGet(this, _ZodEnum_cache, "f")) __classPrivateFieldSet(this, _ZodEnum_cache, new Set(this._def.values), "f");
-				if (!__classPrivateFieldGet(this, _ZodEnum_cache, "f").has(input.data)) {
-					const ctx = this._getOrReturnCtx(input);
-					const expectedValues = this._def.values;
-					addIssueToContext(ctx, {
-						received: ctx.data,
-						code: ZodIssueCode.invalid_enum_value,
-						options: expectedValues
-					});
-					return INVALID;
-				}
-				return OK(input.data);
-			}
-			get options() {
-				return this._def.values;
-			}
-			get enum() {
-				const enumValues = {};
-				for (const val of this._def.values) enumValues[val] = val;
-				return enumValues;
-			}
-			get Values() {
-				const enumValues = {};
-				for (const val of this._def.values) enumValues[val] = val;
-				return enumValues;
-			}
-			get Enum() {
-				const enumValues = {};
-				for (const val of this._def.values) enumValues[val] = val;
-				return enumValues;
-			}
-			extract(values, newDef = this._def) {
-				return ZodEnum.create(values, {
-					...this._def,
-					...newDef
-				});
-			}
-			exclude(values, newDef = this._def) {
-				return ZodEnum.create(this.options.filter((opt) => !values.includes(opt)), {
-					...this._def,
-					...newDef
-				});
-			}
-		};
-		_ZodEnum_cache = /* @__PURE__ */ new WeakMap();
-		ZodEnum.create = createZodEnum;
-		var ZodNativeEnum = class extends ZodType {
-			constructor() {
-				super(...arguments);
-				_ZodNativeEnum_cache.set(this, void 0);
-			}
-			_parse(input) {
-				const nativeEnumValues = util.getValidEnumValues(this._def.values);
-				const ctx = this._getOrReturnCtx(input);
-				if (ctx.parsedType !== ZodParsedType.string && ctx.parsedType !== ZodParsedType.number) {
-					const expectedValues = util.objectValues(nativeEnumValues);
-					addIssueToContext(ctx, {
-						expected: util.joinValues(expectedValues),
-						received: ctx.parsedType,
-						code: ZodIssueCode.invalid_type
-					});
-					return INVALID;
-				}
-				if (!__classPrivateFieldGet(this, _ZodNativeEnum_cache, "f")) __classPrivateFieldSet(this, _ZodNativeEnum_cache, new Set(util.getValidEnumValues(this._def.values)), "f");
-				if (!__classPrivateFieldGet(this, _ZodNativeEnum_cache, "f").has(input.data)) {
-					const expectedValues = util.objectValues(nativeEnumValues);
-					addIssueToContext(ctx, {
-						received: ctx.data,
-						code: ZodIssueCode.invalid_enum_value,
-						options: expectedValues
-					});
-					return INVALID;
-				}
-				return OK(input.data);
-			}
-			get enum() {
-				return this._def.values;
-			}
-		};
-		_ZodNativeEnum_cache = /* @__PURE__ */ new WeakMap();
-		ZodNativeEnum.create = (values, params) => {
-			return new ZodNativeEnum({
-				values,
-				typeName: ZodFirstPartyTypeKind.ZodNativeEnum,
-				...processCreateParams(params)
-			});
-		};
-		var ZodPromise = class extends ZodType {
-			unwrap() {
-				return this._def.type;
-			}
-			_parse(input) {
-				const { ctx } = this._processInputParams(input);
-				if (ctx.parsedType !== ZodParsedType.promise && ctx.common.async === false) {
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.promise,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				const promisified = ctx.parsedType === ZodParsedType.promise ? ctx.data : Promise.resolve(ctx.data);
-				return OK(promisified.then((data) => {
-					return this._def.type.parseAsync(data, {
-						path: ctx.path,
-						errorMap: ctx.common.contextualErrorMap
-					});
-				}));
-			}
-		};
-		ZodPromise.create = (schema, params) => {
-			return new ZodPromise({
-				type: schema,
-				typeName: ZodFirstPartyTypeKind.ZodPromise,
-				...processCreateParams(params)
-			});
-		};
-		var ZodEffects = class extends ZodType {
-			innerType() {
-				return this._def.schema;
-			}
-			sourceType() {
-				return this._def.schema._def.typeName === ZodFirstPartyTypeKind.ZodEffects ? this._def.schema.sourceType() : this._def.schema;
-			}
-			_parse(input) {
-				const { status, ctx } = this._processInputParams(input);
-				const effect = this._def.effect || null;
-				const checkCtx = {
-					addIssue: (arg) => {
-						addIssueToContext(ctx, arg);
-						if (arg.fatal) status.abort();
-						else status.dirty();
-					},
-					get path() {
-						return ctx.path;
-					}
-				};
-				checkCtx.addIssue = checkCtx.addIssue.bind(checkCtx);
-				if (effect.type === "preprocess") {
-					const processed = effect.transform(ctx.data, checkCtx);
-					if (ctx.common.async) return Promise.resolve(processed).then(async (processed) => {
-						if (status.value === "aborted") return INVALID;
-						const result = await this._def.schema._parseAsync({
-							data: processed,
-							path: ctx.path,
-							parent: ctx
-						});
-						if (result.status === "aborted") return INVALID;
-						if (result.status === "dirty") return DIRTY(result.value);
-						if (status.value === "dirty") return DIRTY(result.value);
-						return result;
-					});
-					else {
-						if (status.value === "aborted") return INVALID;
-						const result = this._def.schema._parseSync({
-							data: processed,
-							path: ctx.path,
-							parent: ctx
-						});
-						if (result.status === "aborted") return INVALID;
-						if (result.status === "dirty") return DIRTY(result.value);
-						if (status.value === "dirty") return DIRTY(result.value);
-						return result;
-					}
-				}
-				if (effect.type === "refinement") {
-					const executeRefinement = (acc) => {
-						const result = effect.refinement(acc, checkCtx);
-						if (ctx.common.async) return Promise.resolve(result);
-						if (result instanceof Promise) throw new Error("Async refinement encountered during synchronous parse operation. Use .parseAsync instead.");
-						return acc;
-					};
-					if (ctx.common.async === false) {
-						const inner = this._def.schema._parseSync({
-							data: ctx.data,
-							path: ctx.path,
-							parent: ctx
-						});
-						if (inner.status === "aborted") return INVALID;
-						if (inner.status === "dirty") status.dirty();
-						executeRefinement(inner.value);
-						return {
-							status: status.value,
-							value: inner.value
-						};
-					} else return this._def.schema._parseAsync({
-						data: ctx.data,
-						path: ctx.path,
-						parent: ctx
-					}).then((inner) => {
-						if (inner.status === "aborted") return INVALID;
-						if (inner.status === "dirty") status.dirty();
-						return executeRefinement(inner.value).then(() => {
-							return {
-								status: status.value,
-								value: inner.value
-							};
-						});
-					});
-				}
-				if (effect.type === "transform") {
-					if (ctx.common.async === false) {
-						const base = this._def.schema._parseSync({
-							data: ctx.data,
-							path: ctx.path,
-							parent: ctx
-						});
-						if (!isValid(base)) return base;
-						const result = effect.transform(base.value, checkCtx);
-						if (result instanceof Promise) throw new Error(`Asynchronous transform encountered during synchronous parse operation. Use .parseAsync instead.`);
-						return {
-							status: status.value,
-							value: result
-						};
-					} else return this._def.schema._parseAsync({
-						data: ctx.data,
-						path: ctx.path,
-						parent: ctx
-					}).then((base) => {
-						if (!isValid(base)) return base;
-						return Promise.resolve(effect.transform(base.value, checkCtx)).then((result) => ({
-							status: status.value,
-							value: result
-						}));
-					});
-				}
-				util.assertNever(effect);
-			}
-		};
-		ZodEffects.create = (schema, effect, params) => {
-			return new ZodEffects({
-				schema,
-				typeName: ZodFirstPartyTypeKind.ZodEffects,
-				effect,
-				...processCreateParams(params)
-			});
-		};
-		ZodEffects.createWithPreprocess = (preprocess, schema, params) => {
-			return new ZodEffects({
-				schema,
-				effect: {
-					type: "preprocess",
-					transform: preprocess
-				},
-				typeName: ZodFirstPartyTypeKind.ZodEffects,
-				...processCreateParams(params)
-			});
-		};
-		var ZodOptional = class extends ZodType {
-			_parse(input) {
-				if (this._getType(input) === ZodParsedType.undefined) return OK(void 0);
-				return this._def.innerType._parse(input);
-			}
-			unwrap() {
-				return this._def.innerType;
-			}
-		};
-		ZodOptional.create = (type, params) => {
-			return new ZodOptional({
-				innerType: type,
-				typeName: ZodFirstPartyTypeKind.ZodOptional,
-				...processCreateParams(params)
-			});
-		};
-		var ZodNullable = class extends ZodType {
-			_parse(input) {
-				if (this._getType(input) === ZodParsedType.null) return OK(null);
-				return this._def.innerType._parse(input);
-			}
-			unwrap() {
-				return this._def.innerType;
-			}
-		};
-		ZodNullable.create = (type, params) => {
-			return new ZodNullable({
-				innerType: type,
-				typeName: ZodFirstPartyTypeKind.ZodNullable,
-				...processCreateParams(params)
-			});
-		};
-		var ZodDefault = class extends ZodType {
-			_parse(input) {
-				const { ctx } = this._processInputParams(input);
-				let data = ctx.data;
-				if (ctx.parsedType === ZodParsedType.undefined) data = this._def.defaultValue();
-				return this._def.innerType._parse({
-					data,
-					path: ctx.path,
-					parent: ctx
-				});
-			}
-			removeDefault() {
-				return this._def.innerType;
-			}
-		};
-		ZodDefault.create = (type, params) => {
-			return new ZodDefault({
-				innerType: type,
-				typeName: ZodFirstPartyTypeKind.ZodDefault,
-				defaultValue: typeof params.default === "function" ? params.default : () => params.default,
-				...processCreateParams(params)
-			});
-		};
-		var ZodCatch = class extends ZodType {
-			_parse(input) {
-				const { ctx } = this._processInputParams(input);
-				const newCtx = {
-					...ctx,
-					common: {
-						...ctx.common,
-						issues: []
-					}
-				};
-				const result = this._def.innerType._parse({
-					data: newCtx.data,
-					path: newCtx.path,
-					parent: { ...newCtx }
-				});
-				if (isAsync(result)) return result.then((result) => {
-					return {
-						status: "valid",
-						value: result.status === "valid" ? result.value : this._def.catchValue({
-							get error() {
-								return new ZodError(newCtx.common.issues);
-							},
-							input: newCtx.data
-						})
-					};
-				});
-				else return {
-					status: "valid",
-					value: result.status === "valid" ? result.value : this._def.catchValue({
-						get error() {
-							return new ZodError(newCtx.common.issues);
-						},
-						input: newCtx.data
-					})
-				};
-			}
-			removeCatch() {
-				return this._def.innerType;
-			}
-		};
-		ZodCatch.create = (type, params) => {
-			return new ZodCatch({
-				innerType: type,
-				typeName: ZodFirstPartyTypeKind.ZodCatch,
-				catchValue: typeof params.catch === "function" ? params.catch : () => params.catch,
-				...processCreateParams(params)
-			});
-		};
-		var ZodNaN = class extends ZodType {
-			_parse(input) {
-				if (this._getType(input) !== ZodParsedType.nan) {
-					const ctx = this._getOrReturnCtx(input);
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.nan,
-						received: ctx.parsedType
-					});
-					return INVALID;
-				}
-				return {
-					status: "valid",
-					value: input.data
-				};
-			}
-		};
-		ZodNaN.create = (params) => {
-			return new ZodNaN({
-				typeName: ZodFirstPartyTypeKind.ZodNaN,
-				...processCreateParams(params)
-			});
-		};
-		const BRAND = Symbol("zod_brand");
-		var ZodBranded = class extends ZodType {
-			_parse(input) {
-				const { ctx } = this._processInputParams(input);
-				const data = ctx.data;
-				return this._def.type._parse({
-					data,
-					path: ctx.path,
-					parent: ctx
-				});
-			}
-			unwrap() {
-				return this._def.type;
-			}
-		};
-		var ZodPipeline = class ZodPipeline extends ZodType {
-			_parse(input) {
-				const { status, ctx } = this._processInputParams(input);
-				if (ctx.common.async) {
-					const handleAsync = async () => {
-						const inResult = await this._def.in._parseAsync({
-							data: ctx.data,
-							path: ctx.path,
-							parent: ctx
-						});
-						if (inResult.status === "aborted") return INVALID;
-						if (inResult.status === "dirty") {
-							status.dirty();
-							return DIRTY(inResult.value);
-						} else return this._def.out._parseAsync({
-							data: inResult.value,
-							path: ctx.path,
-							parent: ctx
-						});
-					};
-					return handleAsync();
-				} else {
-					const inResult = this._def.in._parseSync({
-						data: ctx.data,
-						path: ctx.path,
-						parent: ctx
-					});
-					if (inResult.status === "aborted") return INVALID;
-					if (inResult.status === "dirty") {
-						status.dirty();
-						return {
-							status: "dirty",
-							value: inResult.value
-						};
-					} else return this._def.out._parseSync({
-						data: inResult.value,
-						path: ctx.path,
-						parent: ctx
-					});
-				}
-			}
-			static create(a, b) {
-				return new ZodPipeline({
-					in: a,
-					out: b,
-					typeName: ZodFirstPartyTypeKind.ZodPipeline
-				});
-			}
-		};
-		var ZodReadonly = class extends ZodType {
-			_parse(input) {
-				const result = this._def.innerType._parse(input);
-				const freeze = (data) => {
-					if (isValid(data)) data.value = Object.freeze(data.value);
-					return data;
-				};
-				return isAsync(result) ? result.then((data) => freeze(data)) : freeze(result);
-			}
-			unwrap() {
-				return this._def.innerType;
-			}
-		};
-		ZodReadonly.create = (type, params) => {
-			return new ZodReadonly({
-				innerType: type,
-				typeName: ZodFirstPartyTypeKind.ZodReadonly,
-				...processCreateParams(params)
-			});
-		};
-		function custom(check, params = {}, fatal) {
-			if (check) return ZodAny.create().superRefine((data, ctx) => {
-				var _a, _b;
-				if (!check(data)) {
-					const p = typeof params === "function" ? params(data) : typeof params === "string" ? { message: params } : params;
-					const _fatal = (_b = (_a = p.fatal) !== null && _a !== void 0 ? _a : fatal) !== null && _b !== void 0 ? _b : true;
-					const p2 = typeof p === "string" ? { message: p } : p;
-					ctx.addIssue({
-						code: "custom",
-						...p2,
-						fatal: _fatal
-					});
-				}
-			});
-			return ZodAny.create();
-		}
-		const late = { object: ZodObject.lazycreate };
-		var ZodFirstPartyTypeKind;
-		(function(ZodFirstPartyTypeKind) {
-			ZodFirstPartyTypeKind["ZodString"] = "ZodString";
-			ZodFirstPartyTypeKind["ZodNumber"] = "ZodNumber";
-			ZodFirstPartyTypeKind["ZodNaN"] = "ZodNaN";
-			ZodFirstPartyTypeKind["ZodBigInt"] = "ZodBigInt";
-			ZodFirstPartyTypeKind["ZodBoolean"] = "ZodBoolean";
-			ZodFirstPartyTypeKind["ZodDate"] = "ZodDate";
-			ZodFirstPartyTypeKind["ZodSymbol"] = "ZodSymbol";
-			ZodFirstPartyTypeKind["ZodUndefined"] = "ZodUndefined";
-			ZodFirstPartyTypeKind["ZodNull"] = "ZodNull";
-			ZodFirstPartyTypeKind["ZodAny"] = "ZodAny";
-			ZodFirstPartyTypeKind["ZodUnknown"] = "ZodUnknown";
-			ZodFirstPartyTypeKind["ZodNever"] = "ZodNever";
-			ZodFirstPartyTypeKind["ZodVoid"] = "ZodVoid";
-			ZodFirstPartyTypeKind["ZodArray"] = "ZodArray";
-			ZodFirstPartyTypeKind["ZodObject"] = "ZodObject";
-			ZodFirstPartyTypeKind["ZodUnion"] = "ZodUnion";
-			ZodFirstPartyTypeKind["ZodDiscriminatedUnion"] = "ZodDiscriminatedUnion";
-			ZodFirstPartyTypeKind["ZodIntersection"] = "ZodIntersection";
-			ZodFirstPartyTypeKind["ZodTuple"] = "ZodTuple";
-			ZodFirstPartyTypeKind["ZodRecord"] = "ZodRecord";
-			ZodFirstPartyTypeKind["ZodMap"] = "ZodMap";
-			ZodFirstPartyTypeKind["ZodSet"] = "ZodSet";
-			ZodFirstPartyTypeKind["ZodFunction"] = "ZodFunction";
-			ZodFirstPartyTypeKind["ZodLazy"] = "ZodLazy";
-			ZodFirstPartyTypeKind["ZodLiteral"] = "ZodLiteral";
-			ZodFirstPartyTypeKind["ZodEnum"] = "ZodEnum";
-			ZodFirstPartyTypeKind["ZodEffects"] = "ZodEffects";
-			ZodFirstPartyTypeKind["ZodNativeEnum"] = "ZodNativeEnum";
-			ZodFirstPartyTypeKind["ZodOptional"] = "ZodOptional";
-			ZodFirstPartyTypeKind["ZodNullable"] = "ZodNullable";
-			ZodFirstPartyTypeKind["ZodDefault"] = "ZodDefault";
-			ZodFirstPartyTypeKind["ZodCatch"] = "ZodCatch";
-			ZodFirstPartyTypeKind["ZodPromise"] = "ZodPromise";
-			ZodFirstPartyTypeKind["ZodBranded"] = "ZodBranded";
-			ZodFirstPartyTypeKind["ZodPipeline"] = "ZodPipeline";
-			ZodFirstPartyTypeKind["ZodReadonly"] = "ZodReadonly";
-		})(ZodFirstPartyTypeKind || (ZodFirstPartyTypeKind = {}));
-		const instanceOfType = (cls, params = { message: `Input not instance of ${cls.name}` }) => custom((data) => data instanceof cls, params);
-		const stringType = ZodString.create;
-		const numberType = ZodNumber.create;
-		const nanType = ZodNaN.create;
-		const bigIntType = ZodBigInt.create;
-		const booleanType = ZodBoolean.create;
-		const dateType = ZodDate.create;
-		const symbolType = ZodSymbol.create;
-		const undefinedType = ZodUndefined.create;
-		const nullType = ZodNull.create;
-		const anyType = ZodAny.create;
-		const unknownType = ZodUnknown.create;
-		const neverType = ZodNever.create;
-		const voidType = ZodVoid.create;
-		const arrayType = ZodArray.create;
-		const objectType = ZodObject.create;
-		const strictObjectType = ZodObject.strictCreate;
-		const unionType = ZodUnion.create;
-		const discriminatedUnionType = ZodDiscriminatedUnion.create;
-		const intersectionType = ZodIntersection.create;
-		const tupleType = ZodTuple.create;
-		const recordType = ZodRecord.create;
-		const mapType = ZodMap.create;
-		const setType = ZodSet.create;
-		const functionType = ZodFunction.create;
-		const lazyType = ZodLazy.create;
-		const literalType = ZodLiteral.create;
-		const enumType = ZodEnum.create;
-		const nativeEnumType = ZodNativeEnum.create;
-		const promiseType = ZodPromise.create;
-		const effectsType = ZodEffects.create;
-		const optionalType = ZodOptional.create;
-		const nullableType = ZodNullable.create;
-		const preprocessType = ZodEffects.createWithPreprocess;
-		const pipelineType = ZodPipeline.create;
-		const ostring = () => stringType().optional();
-		const onumber = () => numberType().optional();
-		const oboolean = () => booleanType().optional();
-		var z = /*#__PURE__*/ Object.freeze({
-			__proto__: null,
-			defaultErrorMap: errorMap,
-			setErrorMap,
-			getErrorMap,
-			makeIssue,
-			EMPTY_PATH,
-			addIssueToContext,
-			ParseStatus,
-			INVALID,
-			DIRTY,
-			OK,
-			isAborted,
-			isDirty,
-			isValid,
-			isAsync,
-			get util() {
-				return util;
-			},
-			get objectUtil() {
-				return objectUtil;
-			},
-			ZodParsedType,
-			getParsedType,
-			ZodType,
-			datetimeRegex,
-			ZodString,
-			ZodNumber,
-			ZodBigInt,
-			ZodBoolean,
-			ZodDate,
-			ZodSymbol,
-			ZodUndefined,
-			ZodNull,
-			ZodAny,
-			ZodUnknown,
-			ZodNever,
-			ZodVoid,
-			ZodArray,
-			ZodObject,
-			ZodUnion,
-			ZodDiscriminatedUnion,
-			ZodIntersection,
-			ZodTuple,
-			ZodRecord,
-			ZodMap,
-			ZodSet,
-			ZodFunction,
-			ZodLazy,
-			ZodLiteral,
-			ZodEnum,
-			ZodNativeEnum,
-			ZodPromise,
-			ZodEffects,
-			ZodTransformer: ZodEffects,
-			ZodOptional,
-			ZodNullable,
-			ZodDefault,
-			ZodCatch,
-			ZodNaN,
-			BRAND,
-			ZodBranded,
-			ZodPipeline,
-			ZodReadonly,
-			custom,
-			Schema: ZodType,
-			ZodSchema: ZodType,
-			late,
-			get ZodFirstPartyTypeKind() {
-				return ZodFirstPartyTypeKind;
-			},
-			coerce: {
-				string: ((arg) => ZodString.create({
-					...arg,
-					coerce: true
-				})),
-				number: ((arg) => ZodNumber.create({
-					...arg,
-					coerce: true
-				})),
-				boolean: ((arg) => ZodBoolean.create({
-					...arg,
-					coerce: true
-				})),
-				bigint: ((arg) => ZodBigInt.create({
-					...arg,
-					coerce: true
-				})),
-				date: ((arg) => ZodDate.create({
-					...arg,
-					coerce: true
-				}))
-			},
-			any: anyType,
-			array: arrayType,
-			bigint: bigIntType,
-			boolean: booleanType,
-			date: dateType,
-			discriminatedUnion: discriminatedUnionType,
-			effect: effectsType,
-			"enum": enumType,
-			"function": functionType,
-			"instanceof": instanceOfType,
-			intersection: intersectionType,
-			lazy: lazyType,
-			literal: literalType,
-			map: mapType,
-			nan: nanType,
-			nativeEnum: nativeEnumType,
-			never: neverType,
-			"null": nullType,
-			nullable: nullableType,
-			number: numberType,
-			object: objectType,
-			oboolean,
-			onumber,
-			optional: optionalType,
-			ostring,
-			pipeline: pipelineType,
-			preprocess: preprocessType,
-			promise: promiseType,
-			record: recordType,
-			set: setType,
-			strictObject: strictObjectType,
-			string: stringType,
-			symbol: symbolType,
-			transformer: effectsType,
-			tuple: tupleType,
-			"undefined": undefinedType,
-			union: unionType,
-			unknown: unknownType,
-			"void": voidType,
-			NEVER: INVALID,
-			ZodIssueCode,
-			quotelessJson,
-			ZodError
-		});
-		//#endregion
-		//#region ../engine/src/schema.ts
-		const transitionSchema = z.enum(["none", "fade"]).default("none");
-		const easingSchema = z.enum([
-			"linear",
-			"in",
-			"out",
-			"inOut",
-			"bounce",
-			"elastic"
-		]);
-		const keyframeSchema = z.object({
-			t: z.number().min(0),
-			v: z.number(),
-			e: easingSchema.optional()
-		});
-		const animationsSchema = z.object({
-			x: z.array(keyframeSchema).optional(),
-			y: z.array(keyframeSchema).optional(),
-			scale: z.array(keyframeSchema).optional(),
-			opacity: z.array(keyframeSchema).optional(),
-			rotation: z.array(keyframeSchema).optional(),
-			volume: z.array(keyframeSchema).optional()
-		});
-		const filterSchema = z.object({
-			brightness: z.number().min(0).max(3).optional(),
-			contrast: z.number().min(0).max(3).optional(),
-			saturate: z.number().min(0).max(3).optional(),
-			blur: z.number().min(0).max(20).optional(),
-			grayscale: z.number().min(0).max(1).optional(),
-			sepia: z.number().min(0).max(1).optional(),
-			hueRotate: z.number().min(0).max(360).optional()
-		});
-		const clipSchema = z.object({
-			id: z.string(),
-			type: z.enum(["video", "image"]),
-			src: z.string(),
-			inPoint: z.number().min(0),
-			clipDuration: z.number().positive(),
-			transition: transitionSchema,
-			volume: z.number().min(0).max(1).default(1),
-			atSeconds: z.number().min(0).optional(),
-			box: z.object({
-				x: z.number().min(0).max(1),
-				y: z.number().min(0).max(1),
-				w: z.number().min(.01).max(1),
-				h: z.number().min(.01).max(1)
-			}).optional(),
-			speed: z.number().min(.1).max(10).default(1),
-			filter: filterSchema.optional(),
-			animations: animationsSchema.optional()
-		});
-		const videoTrackSchema = z.object({
-			id: z.string(),
-			name: z.string().optional(),
-			clips: z.array(clipSchema).default([])
-		});
-		const audioClipSchema = z.object({
-			id: z.string(),
-			src: z.string(),
-			inPoint: z.number().min(0).default(0),
-			duration: z.number().positive(),
-			volume: z.number().min(0).max(1).default(1),
-			atSeconds: z.number().min(0).default(0),
-			speed: z.number().min(.1).max(10).default(1),
-			animations: animationsSchema.optional()
-		});
-		const audioTrackV2Schema = z.object({
-			id: z.string(),
-			name: z.string().optional(),
-			volume: z.number().min(0).max(1).default(1),
-			muted: z.boolean().default(false),
-			clips: z.array(audioClipSchema).default([])
-		});
-		const legacyAudioSchema = z.object({
-			src: z.string(),
-			volume: z.number().min(0).max(1).default(1),
-			startAtSeconds: z.number().min(0).default(0)
-		});
-		const overlaySchema = z.object({
-			text: z.string(),
-			startSeconds: z.number().min(0),
-			endSeconds: z.number().min(0),
-			position: z.enum([
-				"top",
-				"center",
-				"bottom"
-			]).default("bottom"),
-			fontSize: z.number().positive().default(64),
-			color: z.string().default("#ffffff"),
-			fontFamily: z.string().optional(),
-			fontWeight: z.number().int().min(100).max(900).optional(),
-			animations: animationsSchema.optional()
-		});
-		const metaSchema = z.object({
-			fps: z.number().positive(),
-			width: z.number().int().positive(),
-			height: z.number().int().positive()
-		});
-		z.object({
-			meta: metaSchema,
-			videoTracks: z.array(videoTrackSchema).optional(),
-			audioTracks: z.array(audioTrackV2Schema).optional(),
-			clips: z.array(clipSchema).optional(),
-			audio: legacyAudioSchema.nullable().optional(),
-			overlays: z.array(overlaySchema).default([])
-		});
-		z.object({
-			meta: metaSchema,
-			version: z.literal(2).default(2),
-			videoTracks: z.array(videoTrackSchema).min(1),
-			audioTracks: z.array(audioTrackV2Schema),
-			overlays: z.array(overlaySchema)
-		});
-		const SEC$1 = (fps, s) => Math.round(s * fps);
-		const DEFAULT_BOX = {
-			x: .66,
-			y: .66,
-			w: .3,
-			h: .3
-		};
-		const clipBox = (c) => c.box ?? DEFAULT_BOX;
-		const timelineDurationInFrames = (t) => {
-			const fps = t.meta.fps;
-			let frames = t.videoTracks[0]?.clips.reduce((acc, c) => acc + SEC$1(fps, c.clipDuration), 0) ?? 0;
-			for (const tr of t.videoTracks.slice(1)) for (const c of tr.clips) frames = Math.max(frames, SEC$1(fps, (c.atSeconds ?? 0) + c.clipDuration));
-			for (const tr of t.audioTracks) {
-				if (tr.muted) continue;
-				for (const c of tr.clips) frames = Math.max(frames, SEC$1(fps, c.atSeconds + c.duration));
-			}
-			for (const ov of t.overlays) frames = Math.max(frames, SEC$1(fps, ov.endSeconds));
-			return Math.max(1, frames);
-		};
-		//#endregion
 		//#region ../engine/src/presets.ts
 		const kf = (t, v, e) => ({
 			t,
@@ -20084,158 +21588,50 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			const f = fontById(id);
 			return f ? `"${f.family}", ${FALLBACK_STACK}` : FALLBACK_STACK;
 		};
-		let styleInjected = false;
+		let injectedBase;
+		let fontStyle;
 		const injectFontFaceStyle = (base) => {
-			if (styleInjected || typeof document === "undefined") return;
-			styleInjected = true;
-			const style = document.createElement("style");
-			style.textContent = fontFaceCss(base);
-			document.head.appendChild(style);
+			if (typeof document === "undefined") return;
+			const resolved = fontsBaseUrl(base);
+			if (injectedBase === resolved) return;
+			injectedBase = resolved;
+			fontStyle ?? (fontStyle = document.createElement("style"));
+			fontStyle.textContent = fontFaceCss(resolved);
+			if (!fontStyle.isConnected) document.head.appendChild(fontStyle);
 		};
 		//#endregion
-		//#region src/client/api.ts
-		const DEFAULT_PORT = 5180;
-		const PORT_CACHE_KEY = "djian.enginePort";
-		const hostBase = () => typeof window !== "undefined" && window.location ? `${window.location.protocol}//${window.location.hostname}` : "http://127.0.0.1";
-		let API_BASE = `${hostBase()}:${DEFAULT_PORT}`;
-		let exportDownloadUrl = `${API_BASE}/api/export/download`;
-		const applyBase = (port) => {
-			API_BASE = `${hostBase()}:${port}`;
-			exportDownloadUrl = `${API_BASE}/api/export/download`;
-		};
-		async function isEngine(base) {
-			try {
-				const r = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(1500) });
-				if (!r.ok) return false;
-				return (await r.json().catch(() => null))?.service === "djian-engine";
-			} catch {
-				return false;
-			}
-		}
-		function fragmentPort() {
-			try {
-				const m = /(?:^|[#&])djian-engine=(\d+)/.exec(window.location.hash || "");
-				const p = m ? Number(m[1]) : 0;
-				return p > 0 && p < 65536 ? p : 0;
-			} catch {
-				return 0;
-			}
-		}
-		let discovery = null;
-		let generation = 0;
-		function ensureEngineBase() {
-			if (typeof window === "undefined") return Promise.resolve();
-			discovery ?? (discovery = (async (gen) => {
-				const candidates = [];
-				const frag = fragmentPort();
-				if (frag > 0) candidates.push(frag);
-				let cached = 0;
-				try {
-					cached = Number(window.localStorage.getItem(PORT_CACHE_KEY));
-				} catch {}
-				if (cached > 0) candidates.push(cached);
-				for (let p = DEFAULT_PORT; p <= 5190; p++) if (!candidates.includes(p)) candidates.push(p);
-				for (const p of candidates) if (await isEngine(`${hostBase()}:${p}`)) {
-					if (gen !== generation) return;
-					try {
-						window.localStorage.setItem(PORT_CACHE_KEY, String(p));
-					} catch {}
-					applyBase(p);
-					return;
-				}
-			})(generation));
-			return discovery;
-		}
-		let lastHealAt = 0;
-		async function apiFetch(path, init) {
-			try {
-				return await fetch(`${API_BASE}${path}`, init);
-			} catch (e) {
-				if (!(e instanceof TypeError)) throw e;
-				if (Date.now() - lastHealAt < 1e4) throw e;
-				lastHealAt = Date.now();
-				discovery = null;
-				generation++;
-				try {
-					window.localStorage.removeItem(PORT_CACHE_KEY);
-				} catch {}
-				await ensureEngineBase();
-				return fetch(`${API_BASE}${path}`, init);
-			}
-		}
-		ensureEngineBase();
-		const assetUrl = (src) => /^(?:[a-z]+:)?\/\//i.test(src) ? src : `${API_BASE}/${src.replace(/^\/+/, "")}`;
-		async function getTimeline(sessionId, peek = false) {
-			const r = await apiFetch(`/api/internal/timeline${sessionId ? `?session=${encodeURIComponent(sessionId)}${peek ? "&peek=1" : ""}` : ""}`);
-			if (!r.ok) throw new Error(`HTTP ${r.status}`);
-			return r.json();
-		}
-		async function putTimeline(t, sessionId) {
-			const r = await apiFetch(`/api/internal/timeline`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(sessionId ? {
-					timeline: t,
-					sessionId
-				} : t)
-			});
-			if (!r.ok) throw new Error(`HTTP ${r.status}`);
-		}
-		async function getExportStatus() {
-			return (await apiFetch(`/api/export/status`)).json();
-		}
-		async function startExportWith(timeline, opts) {
-			const r = await apiFetch(`/api/export`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					timeline,
-					scale: opts.scale ?? 1,
-					quality: opts.quality ?? "standard"
-				})
-			});
-			if (r.status !== 202) {
-				const d = await r.json().catch(() => ({}));
-				throw new Error(d.error ?? `HTTP ${r.status}`);
-			}
-		}
-		async function sessionProject(sessionId) {
-			const r = await apiFetch(`/api/session-project`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ sessionId })
-			});
-			if (!r.ok) throw new Error(`HTTP ${r.status}`);
-			return (await r.json()).project ?? null;
-		}
-		async function listFonts() {
-			const r = await apiFetch(`/api/fonts`);
-			if (!r.ok) throw new Error(`HTTP ${r.status}`);
-			return (await r.json()).fonts ?? [];
-		}
-		async function listAssets() {
-			const r = await apiFetch(`/api/assets`);
-			if (!r.ok) throw new Error(`HTTP ${r.status}`);
-			return (await r.json()).assets ?? [];
-		}
-		async function uploadAsset(file) {
-			const r = await apiFetch(`/api/assets?name=${encodeURIComponent(file.name)}`, {
-				method: "POST",
-				headers: { "Content-Type": "application/octet-stream" },
-				body: file
-			});
-			const d = await r.json().catch(() => ({}));
-			if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
-			return d;
-		}
-		async function deleteAsset(name) {
-			const r = await apiFetch(`/api/assets/${encodeURIComponent(name)}`, { method: "DELETE" });
-			if (!r.ok) throw new Error(`HTTP ${r.status}`);
-		}
-		const assetThumbUrl = (name) => `${API_BASE}/api/assets/${encodeURIComponent(name)}/thumb`;
-		//#endregion
-		//#region src/client/PreviewVideo.tsx
+		//#region ../engine/src/TimelineVideo.tsx
 		const SEC = (fps, s) => Math.round(s * fps);
+		const AssetResolver = react.default.createContext(staticFile);
+		const directAsset = (src) => src;
+		const filterCss = (f) => {
+			if (!f) return void 0;
+			const parts = [];
+			if (f.brightness !== void 0) parts.push(`brightness(${f.brightness})`);
+			if (f.contrast !== void 0) parts.push(`contrast(${f.contrast})`);
+			if (f.saturate !== void 0) parts.push(`saturate(${f.saturate})`);
+			if (f.blur !== void 0) parts.push(`blur(${f.blur}px)`);
+			if (f.grayscale !== void 0) parts.push(`grayscale(${f.grayscale})`);
+			if (f.sepia !== void 0) parts.push(`sepia(${f.sepia})`);
+			if (f.hueRotate !== void 0) parts.push(`hue-rotate(${f.hueRotate}deg)`);
+			return parts.length ? parts.join(" ") : void 0;
+		};
+		const animStyle = (a, sec) => {
+			if (!a) return {};
+			const x = evalKeyframes(a.x, sec);
+			const y = evalKeyframes(a.y, sec);
+			const scale = evalKeyframes(a.scale, sec);
+			const rot = evalKeyframes(a.rotation, sec);
+			const opacity = evalKeyframes(a.opacity, sec);
+			const tf = [];
+			if (x !== void 0 || y !== void 0) tf.push(`translate(${(x ?? 0) * 100}%, ${(y ?? 0) * 100}%)`);
+			if (scale !== void 0 && scale !== 1) tf.push(`scale(${scale})`);
+			if (rot !== void 0 && rot !== 0) tf.push(`rotate(${rot}deg)`);
+			return {
+				...tf.length ? { transform: tf.join(" ") } : {},
+				...opacity !== void 0 ? { opacity } : {}
+			};
+		};
 		const positionStyle = {
 			top: { top: 60 },
 			center: {
@@ -20253,23 +21649,33 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			});
 		};
 		const ClipSegment = ({ clip }) => {
+			const resolveAsset = react.default.useContext(AssetResolver);
 			const { fps } = useVideoConfig();
 			const fade = clip.transition === "fade";
+			const speed = clip.speed ?? 1;
+			const local = useCurrentFrame() / fps;
+			const anim = animStyle(clip.animations, local);
 			const inner = clip.type === "image" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Img, {
-				src: clip.src,
+				src: resolveAsset(clip.src),
 				style: {
 					width: "100%",
 					height: "100%",
-					objectFit: "cover"
+					objectFit: "cover",
+					filter: filterCss(clip.filter),
+					...anim
 				}
-			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(OffthreadVideo, {
-				src: clip.src,
+			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Video, {
+				src: resolveAsset(clip.src),
 				startFrom: SEC(fps, clip.inPoint),
-				volume: clip.volume,
+				endAt: SEC(fps, clip.inPoint + clip.clipDuration * speed),
+				playbackRate: speed,
+				volume: clip.volume * (evalKeyframes(clip.animations?.volume, local) ?? 1),
 				style: {
 					width: "100%",
 					height: "100%",
-					objectFit: "cover"
+					objectFit: "cover",
+					filter: filterCss(clip.filter),
+					...anim
 				}
 			});
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(FadeIn, {
@@ -20294,73 +21700,122 @@ Check that all your Remotion packages are on the same version. If your dependenc
 						boxShadow: "0 4px 18px rgba(0,0,0,0.45)",
 						borderRadius: 6
 					},
-					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ClipSegment, { clip })
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ClipSegment, {
+						clip,
+						pip: true
+					})
 				})
 			});
 		};
 		const AudioSegment = ({ clip, trackVolume, muted }) => {
 			const { fps } = useVideoConfig();
+			const resolveAsset = react.default.useContext(AssetResolver);
 			if (muted) return null;
+			const speed = clip.speed ?? 1;
+			const env = clip.animations?.volume;
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Sequence, {
 				from: SEC(fps, clip.atSeconds),
 				durationInFrames: SEC(fps, clip.duration),
-				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Audio, {
-					src: clip.src,
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AudioVolumeEnv, {
+					src: resolveAsset(clip.src),
 					startFrom: SEC(fps, clip.inPoint),
-					volume: trackVolume * clip.volume
+					endAt: SEC(fps, clip.inPoint + clip.duration * speed),
+					playbackRate: speed,
+					baseVolume: trackVolume * clip.volume,
+					env,
+					fps
 				})
 			});
 		};
-		const PreviewVideo = ({ timeline }) => {
+		const AudioVolumeEnv = ({ src, startFrom, endAt, playbackRate, baseVolume, env, fps }) => {
+			const local = useCurrentFrame() / fps;
+			const envV = evalKeyframes(env, local);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Audio, {
+				src,
+				startFrom,
+				endAt,
+				playbackRate,
+				volume: baseVolume * (envV ?? 1)
+			});
+		};
+		const FontGate = ({ timeline, fontsBase }) => {
+			react.default.useEffect(() => {
+				injectFontFaceStyle(fontsBase);
+				const used = [...new Set(timeline.overlays.map((ov) => ov.fontFamily).filter((v) => Boolean(v)))].map((id) => fontById(id)).filter((f) => Boolean(f));
+				if (used.length === 0 || !document.fonts) return;
+				const handle = delayRender(`djian-fonts:${used.map((f) => f.id).join(",")}`);
+				const loads = used.map((f) => document.fonts.load(`400 48px "${f.family}"`).catch(() => {}));
+				Promise.all(loads).then(() => continueRender(handle));
+			}, [timeline, fontsBase]);
+			return null;
+		};
+		const OverlayView = ({ ov }) => {
+			const { fps } = useVideoConfig();
+			const sec = useCurrentFrame() / fps;
+			const anim = animStyle(ov.animations, sec);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				style: {
+					position: "absolute",
+					...positionStyle[ov.position],
+					width: "100%",
+					textAlign: "center"
+				},
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					style: {
+						display: "inline-block",
+						fontSize: ov.fontSize,
+						color: ov.color,
+						fontFamily: overlayFontFamily(ov.fontFamily),
+						...ov.fontWeight ? { fontWeight: ov.fontWeight } : {},
+						textShadow: "0 2px 8px rgba(0,0,0,0.85)",
+						...anim
+					},
+					children: ov.text
+				})
+			});
+		};
+		const TimelineVideo = ({ timeline, directSources = false, fontsBase }) => {
 			const { fps } = useVideoConfig();
 			const [mainTrack, ...overlayTracks] = timeline.videoTracks;
-			react.default.useEffect(() => {
-				injectFontFaceStyle(`${API_BASE}/fonts`);
-			}, []);
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(AbsoluteFill, {
-				style: { backgroundColor: "#000" },
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Series, { children: mainTrack.clips.map((clip) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Series.Sequence, {
-						durationInFrames: SEC(fps, clip.clipDuration),
-						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ClipSegment, { clip })
-					}, clip.id)) }),
-					overlayTracks.map((tr) => tr.clips.map((clip) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PipSegment, { clip }, clip.id))),
-					timeline.audioTracks.map((tr) => tr.clips.map((clip) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AudioSegment, {
-						clip,
-						trackVolume: tr.volume,
-						muted: tr.muted
-					}, clip.id))),
-					timeline.overlays.map((ov, i) => {
-						const from = SEC(fps, ov.startSeconds);
-						const duration = Math.max(1, SEC(fps, ov.endSeconds - ov.startSeconds));
-						return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Sequence, {
-							from,
-							durationInFrames: duration,
-							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AbsoluteFill, { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								style: {
-									position: "absolute",
-									...positionStyle[ov.position],
-									width: "100%",
-									textAlign: "center",
-									fontSize: ov.fontSize,
-									color: ov.color,
-									fontFamily: overlayFontFamily(ov.fontFamily),
-									...ov.fontWeight ? { fontWeight: ov.fontWeight } : {},
-									textShadow: "0 2px 8px rgba(0,0,0,0.85)"
-								},
-								children: ov.text
-							}) })
-						}, i);
-					})
-				]
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AssetResolver.Provider, {
+				value: directSources ? directAsset : staticFile,
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(AbsoluteFill, {
+					style: { backgroundColor: "#000" },
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(FontGate, {
+							timeline,
+							fontsBase
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Series, { children: mainTrack.clips.map((clip) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Series.Sequence, {
+							durationInFrames: SEC(fps, clip.clipDuration),
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ClipSegment, { clip })
+						}, clip.id)) }),
+						overlayTracks.map((tr) => tr.clips.map((clip) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PipSegment, { clip }, clip.id))),
+						timeline.audioTracks.map((tr) => tr.clips.map((clip) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AudioSegment, {
+							clip,
+							trackVolume: tr.volume,
+							muted: tr.muted
+						}, clip.id))),
+						timeline.overlays.map((ov, i) => {
+							const from = SEC(fps, ov.startSeconds);
+							const duration = Math.max(1, SEC(fps, ov.endSeconds - ov.startSeconds));
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Sequence, {
+								from,
+								durationInFrames: duration,
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AbsoluteFill, { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(OverlayView, { ov }) })
+							}, i);
+						})
+					]
+				})
 			});
 		};
 		//#endregion
-		//#region src/client/bus.ts
-		const playerBus = { ref: null };
-		const seekToSeconds = (seconds, fps) => {
-			playerBus.ref?.seekTo(Math.round(seconds * fps));
-		};
+		//#region src/client/PreviewVideo.tsx
+		const PreviewVideo = ({ timeline }) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TimelineVideo, {
+			timeline,
+			directSources: true,
+			fontsBase: API_BASE + "/fonts"
+		});
 		//#endregion
 		//#region src/client/useHistory.ts
 		function useHistory(timeline, mutate) {
@@ -20407,8 +21862,141 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			};
 		}
 		//#endregion
+		//#region src/client/useTimelineSync.ts
+		function useTimelineSync(sessionId, rootRef) {
+			const draftKey = `djian.unsaved.${sessionId ?? "default"}`;
+			const [timeline, setTimeline] = (0, react.useState)(null);
+			const [saveState, setSaveState] = (0, react.useState)("saved");
+			const [syncError, setSyncError] = (0, react.useState)("");
+			const current = (0, react.useRef)(null);
+			const pending = (0, react.useRef)(null);
+			const revision = (0, react.useRef)(0);
+			const savedJson = (0, react.useRef)("");
+			const dirty = (0, react.useRef)(false);
+			const alive = (0, react.useRef)(true);
+			const saving = (0, react.useRef)(null);
+			const debounce = (0, react.useRef)(null);
+			const flush = (0, react.useCallback)(() => {
+				if (saving.current) return saving.current;
+				if (!pending.current) return Promise.resolve();
+				const task = (async () => {
+					while (pending.current) {
+						const next = pending.current;
+						pending.current = null;
+						if (alive.current) setSaveState("saving");
+						try {
+							await putTimeline(next, sessionId);
+							savedJson.current = JSON.stringify(next);
+							try {
+								if (localStorage.getItem(draftKey) === savedJson.current) localStorage.removeItem(draftKey);
+							} catch {}
+						} catch (error) {
+							pending.current ?? (pending.current = next);
+							if (alive.current) {
+								setSaveState("error");
+								setSyncError(error instanceof Error ? `保存失败：${error.message}` : "保存失败，请检查连接后重试");
+							}
+							return;
+						}
+					}
+					dirty.current = false;
+					if (alive.current) {
+						setSaveState("saved");
+						setSyncError("");
+					}
+				})();
+				saving.current = task;
+				task.finally(() => {
+					saving.current = null;
+				});
+				return task;
+			}, [sessionId, draftKey]);
+			const reload = (0, react.useCallback)(async () => {
+				if (dirty.current) return;
+				const atRevision = revision.current;
+				const el = rootRef?.current;
+				const hidden = document.hidden || Boolean(el && el.getClientRects().length === 0);
+				try {
+					const next = await getTimeline(sessionId, hidden);
+					if (!alive.current || dirty.current || revision.current !== atRevision) return;
+					const json = JSON.stringify(next);
+					if (json !== savedJson.current) {
+						savedJson.current = json;
+						current.current = next;
+						setTimeline(next);
+					}
+					setSyncError("");
+				} catch {
+					if (alive.current) setSyncError("无法连接剪辑引擎，正在尝试重新连接");
+				}
+			}, [sessionId, rootRef]);
+			(0, react.useEffect)(() => {
+				alive.current = true;
+				if (!current.current) try {
+					const draft = localStorage.getItem(draftKey);
+					if (draft) {
+						const restored = parseTimeline(JSON.parse(draft));
+						current.current = pending.current = restored;
+						dirty.current = true;
+						revision.current++;
+						setTimeline(restored);
+						setSaveState("error");
+						setSyncError("已恢复上次未保存的修改，请重试保存。");
+					}
+				} catch {}
+				let stopped = false;
+				let timer;
+				const tick = async () => {
+					await reload();
+					if (!stopped) timer = setTimeout(tick, 2e3);
+				};
+				tick();
+				const beforeUnload = (event) => {
+					if (dirty.current) {
+						event.preventDefault();
+						event.returnValue = "";
+					}
+				};
+				window.addEventListener("beforeunload", beforeUnload);
+				return () => {
+					stopped = true;
+					alive.current = false;
+					clearTimeout(timer);
+					if (debounce.current) clearTimeout(debounce.current);
+					window.removeEventListener("beforeunload", beforeUnload);
+					flush();
+				};
+			}, [
+				reload,
+				flush,
+				draftKey
+			]);
+			return {
+				timeline,
+				mutate: (0, react.useCallback)((fn) => {
+					if (!current.current) return;
+					const next = fn(current.current);
+					current.current = next;
+					revision.current++;
+					dirty.current = true;
+					pending.current = next;
+					try {
+						localStorage.setItem(draftKey, JSON.stringify(next));
+					} catch {}
+					setTimeline(next);
+					setSaveState("pending");
+					if (debounce.current) clearTimeout(debounce.current);
+					debounce.current = setTimeout(() => void flush(), 600);
+				}, [flush, draftKey]),
+				reload,
+				saveState,
+				syncError,
+				retrySave: flush
+			};
+		}
+		//#endregion
 		//#region src/client/ProjectBar.tsx
-		const ProjectBar = ({ sessionId }) => {
+		const ProjectBar = ({ sessionId, meta }) => {
 			const [project, setProject] = (0, react.useState)(null);
 			(0, react.useEffect)(() => {
 				if (!sessionId) return;
@@ -20421,27 +22009,28 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				};
 			}, [sessionId]);
 			if (!project) return null;
+			const canvas = meta ?? project.meta;
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "djp-projbar",
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "djp-proj-icon",
 						"aria-hidden": true,
-						children: "▣"
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "film" })
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "djp-proj-name",
 						title: project.id,
 						children: project.name
 					}),
-					project.meta && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+					canvas && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 						className: "djp-proj-badge",
 						children: [
-							project.meta.width,
+							canvas.width,
 							"×",
-							project.meta.height,
+							canvas.height,
 							" · ",
-							project.meta.fps,
+							canvas.fps,
 							"fps"
 						]
 					}),
@@ -20502,6 +22091,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			}
 		];
 		const CanvasDialog = ({ t, onApply, onClose }) => {
+			const dialogRef = useDialog(onClose);
 			const [width, setWidth] = (0, react.useState)(t.meta.width);
 			const [height, setHeight] = (0, react.useState)(t.meta.height);
 			const [fps, setFps] = (0, react.useState)(t.meta.fps);
@@ -20518,6 +22108,11 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				onClick: onClose,
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "djp-dialog",
+					ref: dialogRef,
+					role: "dialog",
+					"aria-modal": "true",
+					"aria-label": "画布设置",
+					tabIndex: -1,
 					onClick: (e) => e.stopPropagation(),
 					children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -20726,7 +22321,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 										title: "删除素材",
 										onClick: () => void onDelete(a.name),
-										children: "✕"
+										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "close" })
 									})]
 								})
 							]
@@ -20903,6 +22498,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		//#endregion
 		//#region src/client/HistoryDialog.tsx
 		const HistoryDialog = ({ onClose, onRestored }) => {
+			const dialogRef = useDialog(onClose);
 			const [snaps, setSnaps] = (0, react.useState)([]);
 			const [busy, setBusy] = (0, react.useState)(null);
 			const [err, setErr] = (0, react.useState)("");
@@ -20929,6 +22525,11 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				onClick: onClose,
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "djp-dialog",
+					ref: dialogRef,
+					role: "dialog",
+					"aria-modal": "true",
+					"aria-label": "版本历史",
+					tabIndex: -1,
 					onClick: (e) => e.stopPropagation(),
 					children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -20984,74 +22585,6 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		//#endregion
 		//#region src/client/Panel.tsx
 		const fmtSec = (s) => `${s.toFixed(1)}s`;
-		function useTimelineSync(sessionId, rootRef) {
-			const [timeline, setTimeline] = (0, react.useState)(null);
-			const serverJson = (0, react.useRef)("");
-			const dirty = (0, react.useRef)(false);
-			const pushTimer = (0, react.useRef)(null);
-			const pendingPush = (0, react.useRef)(null);
-			(0, react.useEffect)(() => {
-				let stop = false;
-				let timer = 0;
-				const isVisible = () => {
-					if (typeof document !== "undefined" && document.hidden) return false;
-					const el = rootRef?.current;
-					if (el && el.offsetParent === null && el.getClientRects().length === 0) return false;
-					return true;
-				};
-				const tick = async () => {
-					if (!dirty.current) try {
-						const t = await getTimeline(sessionId, !isVisible());
-						const j = JSON.stringify(t);
-						if (!stop && j !== serverJson.current) {
-							serverJson.current = j;
-							setTimeline(t);
-						}
-					} catch {}
-					if (!stop) timer = window.setTimeout(tick, 2e3);
-				};
-				tick();
-				const onVis = () => {
-					if (!document.hidden) tick();
-				};
-				document.addEventListener("visibilitychange", onVis);
-				return () => {
-					stop = true;
-					window.clearTimeout(timer);
-					document.removeEventListener("visibilitychange", onVis);
-				};
-			}, [sessionId]);
-			return {
-				timeline,
-				mutate: (0, react.useCallback)((fn) => {
-					setTimeline((cur) => {
-						if (!cur) return cur;
-						const next = fn(cur);
-						dirty.current = true;
-						pendingPush.current = next;
-						if (pushTimer.current) window.clearTimeout(pushTimer.current);
-						pushTimer.current = window.setTimeout(() => {
-							const t = pendingPush.current;
-							if (!t) return;
-							putTimeline(t, sessionId).then(() => {
-								serverJson.current = JSON.stringify(t);
-							}).catch(() => {}).finally(() => {
-								dirty.current = false;
-							});
-						}, 600);
-						return next;
-					});
-				}, [sessionId]),
-				reload: (0, react.useCallback)(async () => {
-					try {
-						const t = await getTimeline(sessionId);
-						serverJson.current = JSON.stringify(t);
-						dirty.current = false;
-						setTimeline(t);
-					} catch {}
-				}, [sessionId])
-			};
-		}
 		const clipId = () => "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 		const ops = (mutate) => ({
 			addClip: () => mutate((t) => ({
@@ -21065,7 +22598,8 @@ Check that all your Remotion packages are on the same version. If your dependenc
 						inPoint: 0,
 						clipDuration: 3,
 						transition: "none",
-						volume: 1
+						volume: 1,
+						speed: 1
 					}]
 				} : tr)
 			})),
@@ -21079,6 +22613,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					clipDuration: 3,
 					transition: "none",
 					volume: 1,
+					speed: 1,
 					atSeconds: 0
 				};
 				if (t.videoTracks[1]) return {
@@ -21104,6 +22639,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					inPoint: 0,
 					duration,
 					volume: 1,
+					speed: 1,
 					atSeconds: 0
 				};
 				if (t.audioTracks[0]) return {
@@ -21183,8 +22719,9 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					const right = {
 						...clip,
 						id: clipId(),
-						inPoint: clip.inPoint + off,
-						clipDuration: clip.clipDuration - off
+						inPoint: clip.inPoint + off * (clip.speed ?? 1),
+						clipDuration: clip.clipDuration - off,
+						animations: shiftAnimations(clip.animations, off)
 					};
 					if (clip.atSeconds !== void 0) right.atSeconds = clip.atSeconds + off;
 					const clips = [...tr.clips];
@@ -21211,9 +22748,10 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					const right = {
 						...clip,
 						id: clipId(),
-						inPoint: clip.inPoint + off,
+						inPoint: clip.inPoint + off * (clip.speed ?? 1),
 						duration: clip.duration - off,
-						atSeconds: clip.atSeconds + off
+						atSeconds: clip.atSeconds + off,
+						animations: shiftAnimations(clip.animations, off)
 					};
 					const clips = [...tr.clips];
 					clips.splice(idx, 1, left, right);
@@ -21342,11 +22880,11 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			children: [
 				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
 					value: "",
-					children: "✨ 动画…"
+					children: "动画预设"
 				}),
 				anims && Object.keys(anims).length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
 					value: "__clear",
-					children: "✕ 清除动画"
+					children: "清除动画"
 				}),
 				ANIM_GROUPS.map((g) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("optgroup", {
 					label: g,
@@ -21378,384 +22916,10 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				children: p.label
 			}, p.label))]
 		});
-		const playheadEls = /* @__PURE__ */ new Set();
-		const Playhead = () => {
-			const ref = (0, react.useRef)(null);
-			(0, react.useEffect)(() => {
-				const el = ref.current;
-				if (!el) return;
-				playheadEls.add(el);
-				return () => {
-					playheadEls.delete(el);
-				};
-			}, []);
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				ref,
-				className: "djp-playhead",
-				style: { left: "0%" }
-			});
-		};
-		const rulerTicks = (total) => {
-			const step = total > 30 ? 5 : total > 12 ? 2 : 1;
-			const out = [];
-			for (let s = 0; s <= total; s += step) out.push(Math.round(s * 100) / 100);
-			return out;
-		};
-		const TrackStrip = ({ t, o, playheadRef, onSeekClip }) => {
-			const total = Math.max(.1, timelineDurationInFrames(t) / t.meta.fps);
-			const dragRef = (0, react.useRef)(null);
-			const justDragged = (0, react.useRef)(false);
-			const [, forceRender] = (0, react.useState)(0);
-			const ctxRef = (0, react.useRef)({
-				t,
-				o,
-				total
-			});
-			ctxRef.current = {
-				t,
-				o,
-				total
-			};
-			(0, react.useEffect)(() => {
-				let raf = 0;
-				const tick = () => {
-					const p = playerBus.ref;
-					if (p) {
-						const sec = p.getCurrentFrame() / ctxRef.current.t.meta.fps;
-						playheadRef.current = sec;
-						const tt = ctxRef.current.total;
-						const left = `${Math.min(sec, tt) / tt * 100}%`;
-						for (const el of playheadEls) el.style.left = left;
-					}
-					raf = requestAnimationFrame(tick);
-				};
-				raf = requestAnimationFrame(tick);
-				return () => cancelAnimationFrame(raf);
-			}, [playheadRef]);
-			(0, react.useEffect)(() => {
-				const snapV = (cur, v) => {
-					const SNAP = .12;
-					const tt = ctxRef.current.t;
-					const pts = [0, playheadRef.current];
-					if (cur.lane === "main") {
-						let a = 0;
-						for (const c of tt.videoTracks[0]?.clips ?? []) {
-							if (c.id !== cur.id) pts.push(a, a + c.clipDuration);
-							a += c.clipDuration;
-						}
-					} else if (cur.lane === "pip") {
-						for (const tr of tt.videoTracks.slice(1)) for (const c of tr.clips) if (c.id !== cur.id) pts.push(c.atSeconds ?? 0, (c.atSeconds ?? 0) + c.clipDuration);
-					} else for (const tr of tt.audioTracks) for (const c of tr.clips) if (c.id !== cur.id) pts.push(c.atSeconds, c.atSeconds + c.duration);
-					let best = v;
-					let bd = SNAP;
-					for (const p of pts) {
-						const dd = Math.abs(p - v);
-						if (dd < bd) {
-							bd = dd;
-							best = p;
-						}
-					}
-					return Math.round(best * 100) / 100;
-				};
-				const onMove = (e) => {
-					const cur = dragRef.current;
-					if (!cur) return;
-					const dsec = (e.clientX - cur.startX) * cur.secPerPx;
-					if (cur.kind === "move") cur.previewAt = Math.max(0, snapV(cur, cur.origAt + dsec));
-					else if (cur.kind === "trimL") {
-						let at = snapV(cur, cur.origAt + dsec);
-						at = Math.min(Math.max(0, at), cur.origAt + cur.origDur - .1);
-						cur.previewAt = at;
-						cur.previewDur = cur.origDur - (at - cur.origAt);
-					} else cur.previewDur = Math.max(cur.origAt + .1, snapV(cur, cur.origAt + cur.origDur + dsec)) - cur.origAt;
-					forceRender((x) => x + 1);
-				};
-				const onUp = () => {
-					const cur = dragRef.current;
-					dragRef.current = null;
-					if (cur) {
-						if (Math.abs(cur.previewAt - cur.origAt) > .001 || Math.abs(cur.previewDur - cur.origDur) > .001) {
-							justDragged.current = true;
-							window.setTimeout(() => {
-								justDragged.current = false;
-							}, 0);
-						}
-						const { o: oo } = ctxRef.current;
-						const at = cur.previewAt;
-						const dur = Math.max(.1, cur.previewDur);
-						if (cur.kind === "move") {
-							if (cur.lane === "pip") oo.updateClip(cur.id, { atSeconds: at });
-							else oo.updateAudioClip(cur.id, { atSeconds: at });
-						} else if (cur.lane === "main") {
-							const patch = { clipDuration: dur };
-							if (cur.kind === "trimL" && cur.origIn !== void 0) patch.inPoint = Math.max(0, cur.origIn + (at - cur.origAt));
-							oo.updateClip(cur.id, patch);
-						} else if (cur.lane === "pip") {
-							const patch = { clipDuration: dur };
-							if (cur.kind === "trimL") {
-								patch.atSeconds = at;
-								if (cur.origIn !== void 0) patch.inPoint = Math.max(0, cur.origIn + (at - cur.origAt));
-							}
-							oo.updateClip(cur.id, patch);
-						} else {
-							const patch = { duration: dur };
-							if (cur.kind === "trimL") {
-								patch.atSeconds = at;
-								if (cur.origIn !== void 0) patch.inPoint = Math.max(0, cur.origIn + (at - cur.origAt));
-							}
-							oo.updateAudioClip(cur.id, patch);
-						}
-					}
-					forceRender((x) => x + 1);
-				};
-				window.addEventListener("pointermove", onMove);
-				window.addEventListener("pointerup", onUp);
-				window.addEventListener("pointercancel", onUp);
-				return () => {
-					window.removeEventListener("pointermove", onMove);
-					window.removeEventListener("pointerup", onUp);
-					window.removeEventListener("pointercancel", onUp);
-				};
-			}, [playheadRef]);
-			const beginDrag = (e, init) => {
-				e.stopPropagation();
-				e.preventDefault();
-				const laneEl = e.currentTarget.closest(".djp-trow-lane");
-				if (!laneEl) return;
-				const rect = laneEl.getBoundingClientRect();
-				dragRef.current = {
-					...init,
-					startX: e.clientX,
-					secPerPx: total / Math.max(1, rect.width),
-					previewAt: init.origAt,
-					previewDur: init.origDur
-				};
-				forceRender((x) => x + 1);
-			};
-			const onSeek = (e) => {
-				const rect = e.currentTarget.getBoundingClientRect();
-				const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-				seekToSeconds(frac * total, t.meta.fps);
-			};
-			const drag = dragRef.current;
-			const pct = (v) => `${Math.max(0, v) / total * 100}%`;
-			const main = t.videoTracks[0];
-			const overlays = t.videoTracks.slice(1);
-			const Row = ({ name, children }) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "djp-trow",
-				onClick: onSeek,
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-					className: "djp-trow-name",
-					children: name
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "djp-track djp-trow-lane",
-					children: [children, /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Playhead, {})]
-				})]
-			});
-			let acc = 0;
-			const mainBlocks = (main?.clips ?? []).map((c) => {
-				const isD = drag?.lane === "main" && drag.id === c.id;
-				const dur = drag && isD ? Math.max(.1, drag.previewDur) : c.clipDuration;
-				const start = acc;
-				acc += dur;
-				return {
-					clip: c,
-					start,
-					dur,
-					isD
-				};
-			});
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "djp-tstrip",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "djp-trow",
-						onClick: onSeek,
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "djp-trow-name" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "djp-ruler",
-							children: [rulerTicks(total).map((s) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "djp-tick",
-								style: { left: pct(s) },
-								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: fmtSec(s) })
-							}, s)), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Playhead, {})]
-						})]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(Row, {
-						name: "视频",
-						children: [mainBlocks.map(({ clip, start, dur, isD }) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: `djp-track-block ${clip.transition === "fade" ? "djp-fade" : ""} ${isD ? "djp-dragging" : ""}`,
-							style: drag && isD ? {
-								position: "absolute",
-								left: pct(start),
-								width: pct(dur)
-							} : { width: pct(dur) },
-							title: `${clip.src} · ${fmtSec(start)}–${fmtSec(start + dur)}`,
-							onClick: (e) => {
-								e.stopPropagation();
-								if (justDragged.current) return;
-								onSeekClip(start, "main");
-							},
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "djp-track-label",
-									children: clip.src
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									className: "djp-handle djp-hl",
-									title: "裁剪头部",
-									onPointerDown: (e) => beginDrag(e, {
-										kind: "trimL",
-										lane: "main",
-										id: clip.id,
-										origAt: start,
-										origDur: clip.clipDuration,
-										origIn: clip.inPoint
-									})
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									className: "djp-handle djp-hr",
-									title: "裁剪尾部",
-									onPointerDown: (e) => beginDrag(e, {
-										kind: "trimR",
-										lane: "main",
-										id: clip.id,
-										origAt: start,
-										origDur: clip.clipDuration,
-										origIn: clip.inPoint
-									})
-								})
-							]
-						}, clip.id)), (main?.clips.length ?? 0) === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "djp-trow-empty",
-							children: "空"
-						})]
-					}),
-					overlays.map((tr) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Row, {
-						name: tr.name ?? "画中画",
-						children: tr.clips.map((c) => {
-							const isD = drag?.lane === "pip" && drag.id === c.id;
-							const at = drag && isD ? drag.previewAt : c.atSeconds ?? 0;
-							const dur = drag && isD ? drag.previewDur : c.clipDuration;
-							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: `djp-track-block djp-pip-block ${isD ? "djp-dragging" : ""}`,
-								style: {
-									position: "absolute",
-									left: pct(at),
-									width: pct(dur)
-								},
-								title: `${c.src} · ${fmtSec(at)}–${fmtSec(at + dur)}`,
-								onPointerDown: (e) => beginDrag(e, {
-									kind: "move",
-									lane: "pip",
-									id: c.id,
-									origAt: c.atSeconds ?? 0,
-									origDur: c.clipDuration,
-									origIn: c.inPoint
-								}),
-								onClick: (e) => {
-									e.stopPropagation();
-									if (justDragged.current) return;
-									onSeekClip(c.atSeconds ?? 0, "pip");
-								},
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "djp-track-label",
-										children: c.src
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										className: "djp-handle djp-hl",
-										title: "裁剪头部",
-										onPointerDown: (e) => beginDrag(e, {
-											kind: "trimL",
-											lane: "pip",
-											id: c.id,
-											origAt: c.atSeconds ?? 0,
-											origDur: c.clipDuration,
-											origIn: c.inPoint
-										})
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										className: "djp-handle djp-hr",
-										title: "裁剪尾部",
-										onPointerDown: (e) => beginDrag(e, {
-											kind: "trimR",
-											lane: "pip",
-											id: c.id,
-											origAt: c.atSeconds ?? 0,
-											origDur: c.clipDuration,
-											origIn: c.inPoint
-										})
-									})
-								]
-							}, c.id);
-						})
-					}, tr.id)),
-					t.audioTracks.map((tr) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Row, {
-						name: `♪ ${tr.name ?? "音频"}`,
-						children: tr.clips.map((c) => {
-							const isD = drag?.lane === "audio" && drag.id === c.id;
-							const at = drag && isD ? drag.previewAt : c.atSeconds;
-							const dur = drag && isD ? drag.previewDur : c.duration;
-							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: `djp-track-block djp-audio-block ${isD ? "djp-dragging" : ""}`,
-								style: {
-									position: "absolute",
-									left: pct(at),
-									width: pct(dur)
-								},
-								title: `${c.src} · ${fmtSec(at)}–${fmtSec(at + dur)}`,
-								onPointerDown: (e) => beginDrag(e, {
-									kind: "move",
-									lane: "audio",
-									id: c.id,
-									origAt: c.atSeconds,
-									origDur: c.duration,
-									origIn: c.inPoint
-								}),
-								onClick: (e) => {
-									e.stopPropagation();
-									if (justDragged.current) return;
-									onSeekClip(c.atSeconds, "audio");
-								},
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-										className: "djp-track-label",
-										children: ["♪ ", c.src]
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										className: "djp-handle djp-hl",
-										title: "裁剪头部",
-										onPointerDown: (e) => beginDrag(e, {
-											kind: "trimL",
-											lane: "audio",
-											id: c.id,
-											origAt: c.atSeconds,
-											origDur: c.duration,
-											origIn: c.inPoint
-										})
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										className: "djp-handle djp-hr",
-										title: "裁剪尾部",
-										onPointerDown: (e) => beginDrag(e, {
-											kind: "trimR",
-											lane: "audio",
-											id: c.id,
-											origAt: c.atSeconds,
-											origDur: c.duration,
-											origIn: c.inPoint
-										})
-									})
-								]
-							}, c.id);
-						})
-					}, tr.id))
-				]
-			});
-		};
-		const Panel = ({ sessionId }) => {
+		const Panel = ({ sessionId }) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(EditorPanel, { sessionId }, sessionId ?? "default");
+		const EditorPanel = ({ sessionId }) => {
 			const rootRef = (0, react.useRef)(null);
-			const { timeline, mutate, reload } = useTimelineSync(sessionId, rootRef);
+			const { timeline, mutate, reload, saveState, syncError, retrySave } = useTimelineSync(sessionId, rootRef);
 			const hist = useHistory(timeline, mutate);
 			const prevSession = (0, react.useRef)(sessionId);
 			(0, react.useEffect)(() => {
@@ -21768,7 +22932,18 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			const o = ops(hist.commit);
 			const [canvasOpen, setCanvasOpen] = (0, react.useState)(false);
 			const [histOpen, setHistOpen] = (0, react.useState)(false);
+			const [selected, setSelected] = (0, react.useState)(null);
+			const toggleItem = (id) => setSelected((current) => current === id ? null : id);
 			const [tab, setTab] = (0, react.useState)("clips");
+			const [libraryOpen, setLibraryOpen] = (0, react.useState)(false);
+			const [trackMode, setTrackMode] = (0, react.useState)("main");
+			const switchTrackMode = (mode) => {
+				setTrackMode(mode);
+				setTab(mode === "main" ? "clips" : mode);
+				setSelected(null);
+				setLibraryOpen(false);
+			};
+			const [uploadError, setUploadError] = (0, react.useState)("");
 			const [fonts, setFonts] = (0, react.useState)([]);
 			const audioFileRef = (0, react.useRef)(null);
 			const playheadRef = (0, react.useRef)(0);
@@ -21785,6 +22960,8 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			(0, react.useEffect)(() => {
 				const onKey = (e) => {
 					const el = e.target;
+					if (!el || !rootRef.current?.contains(el) || canvasOpen || histOpen) return;
+					if (el.closest("button, a, [role=\"dialog\"]")) return;
 					if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
 					if (e.ctrlKey || e.metaKey) {
 						const k = e.key.toLowerCase();
@@ -21806,7 +22983,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					} else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
 						e.preventDefault();
 						const dir = e.key === "ArrowLeft" ? -1 : 1;
-						seekToSeconds(Math.max(0, playheadRef.current + dir * (e.shiftKey ? .1 : 1)), timeline?.meta.fps ?? 30);
+						seekToSeconds(Math.max(0, playheadRef.current + dir * (e.shiftKey ? 1 : 1 / (timeline?.meta.fps ?? 30))), timeline?.meta.fps ?? 30);
 					}
 				};
 				window.addEventListener("keydown", onKey);
@@ -21814,14 +22991,21 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			}, [
 				hist.undo,
 				hist.redo,
-				timeline?.meta.fps
+				timeline?.meta.fps,
+				canvasOpen,
+				histOpen
 			]);
 			if (!timeline) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "djp-root",
 				ref: rootRef,
-				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "djp-empty",
-					children: "连接剪辑引擎中…（5180）"
+					role: "status",
+					children: [syncError || "正在连接剪辑引擎…", syncError && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "djp-btn",
+						onClick: () => void reload(),
+						children: "重新连接"
+					}) })]
 				})
 			});
 			const t = timeline;
@@ -21830,7 +23014,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			const mainClips = t.videoTracks[0]?.clips ?? [];
 			const pipClips = t.videoTracks.slice(1).flatMap((tr) => tr.clips);
 			const audioClips = t.audioTracks.flatMap((tr) => tr.clips);
-			const hasContent = mainClips.length + pipClips.length + audioClips.length > 0;
+			const hasContent = mainClips.length + pipClips.length + audioClips.length + t.overlays.length > 0;
 			const BOX_PRESETS = [
 				{
 					label: "右下",
@@ -21901,7 +23085,9 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					}
 				}
 			};
-			splitRef.current = splitMainAtPlayhead;
+			splitRef.current = () => {
+				if (trackMode === "main") splitMainAtPlayhead();
+			};
 			const previewTimeline = {
 				...t,
 				videoTracks: t.videoTracks.map((tr) => ({
@@ -21930,7 +23116,8 @@ Check that all your Remotion packages are on the same version. If your dependenc
 						inPoint: 0,
 						clipDuration: a.type === "image" ? 3 : a.duration ?? 3,
 						transition: "none",
-						volume: 1
+						volume: 1,
+						speed: 1
 					}]
 				} : tr)
 			}));
@@ -21941,6 +23128,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					inPoint: 0,
 					duration: 10,
 					volume: 1,
+					speed: 1,
 					atSeconds: 0
 				};
 				if (cur.audioTracks[0]) return {
@@ -21971,7 +23159,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				const from = Number(e.dataTransfer.getData("text/clip-index"));
 				if (!Number.isInteger(from)) return;
 				e.preventDefault();
-				const target = e.target.closest(".djp-card");
+				const target = e.target.closest(".djp-item");
 				const to = target ? Number(target.dataset.index) : (t.videoTracks[0]?.clips.length ?? 1) - 1;
 				if (!Number.isInteger(to) || from === to) return;
 				const order = (t.videoTracks[0]?.clips ?? []).map((c) => c.id);
@@ -21982,67 +23170,57 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "djp-root",
 				ref: rootRef,
+				tabIndex: 0,
+				"aria-label": "视频剪辑工作台",
 				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectBar, { sessionId }),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "djp-head",
 						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "djp-title",
-								children: "剪辑"
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectBar, {
+								sessionId,
+								meta: t.meta
 							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								className: "djp-iconbtn",
-								title: "撤销（Ctrl+Z）",
-								disabled: !hist.canUndo,
-								onClick: hist.undo,
-								children: "↺"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								className: "djp-iconbtn",
-								title: "重做（Ctrl+Shift+Z）",
-								disabled: !hist.canRedo,
-								onClick: hist.redo,
-								children: "↻"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								className: "djp-meta",
-								children: [
-									t.meta.width,
-									"×",
-									t.meta.height,
-									" · ",
-									t.meta.fps,
-									"fps · ",
-									totalSec.toFixed(1),
-									"s · ",
-									mainClips.length,
-									" 段",
-									pipClips.length ? ` · 画中画×${pipClips.length}` : "",
-									audioClips.length ? ` · 音频×${audioClips.length}` : "",
-									" · ",
-									t.overlays.length,
-									" 字幕"
-								]
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(MoreTools, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								className: "djp-btn",
-								title: "版本历史（AI 修改自动存档，可恢复）",
+								disabled: saveState !== "saved",
 								onClick: () => setHistOpen(true),
-								children: "历史"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								children: "版本历史"
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								className: "djp-btn",
+								onClick: () => setLibraryOpen(true),
+								children: "片段列表"
+							})] }),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+								className: "djp-resolution",
 								title: "画布设置",
 								onClick: () => setCanvasOpen(true),
-								children: "画布"
+								children: [
+									Math.min(t.meta.width, t.meta.height),
+									"P ",
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "⌄" })
+								]
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ExportControl, { t })
 						]
 					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "djp-save-status",
+						role: "status",
+						"aria-live": "polite",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: saveState === "saving" ? "正在保存…" : saveState === "pending" ? "有待保存的修改" : saveState === "error" ? "保存失败，修改已保留" : "已保存" }), saveState === "error" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: "djp-btn",
+							onClick: () => void retrySave(),
+							children: "重试保存"
+						})]
+					}),
+					syncError && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "djp-notice",
+						role: "alert",
+						children: syncError
+					}),
 					!hasContent ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "djp-empty",
-						children: "还没有片段——让 AI 加素材，从素材库加，或点下方「片段 +」"
+						children: "从下方「素材」添加画面，开始剪辑"
 					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "djp-stage",
 						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Player, {
@@ -22055,130 +23233,220 @@ Check that all your Remotion packages are on the same version. If your dependenc
 							fps: t.meta.fps,
 							compositionWidth: t.meta.width,
 							compositionHeight: t.meta.height,
-							controls: true,
+							controls: false,
 							acknowledgeRemotionLicense: true,
 							style: {
 								width: "100%",
-								aspectRatio: `${t.meta.width} / ${t.meta.height}`
+								height: "100%"
 							}
 						}, `${t.meta.fps}-${t.meta.width}-${t.meta.height}`)
 					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "djp-tabs",
-						children: [
-							["assets", "素材"],
-							["clips", `片段${mainClips.length ? ` ${mainClips.length}` : ""}`],
-							["pip", `画中画${pipClips.length ? ` ${pipClips.length}` : ""}`],
-							["audio", `音频${audioClips.length ? ` ${audioClips.length}` : ""}`],
-							["subs", `字幕${t.overlays.length ? ` ${t.overlays.length}` : ""}`]
-						].map(([key, label]) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							className: `djp-tab ${tab === key ? "djp-on" : ""}`,
-							onClick: () => setTab(key),
-							children: label
-						}, key))
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(TransportBar, {
+						fps: t.meta.fps,
+						duration: totalSec,
+						undo: hist.undo,
+						redo: hist.redo,
+						canUndo: hist.canUndo,
+						canRedo: hist.canRedo
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "djp-tabwrap",
-						children: [
-							tab === "assets" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AssetsSection, {
-								onAddClip: addAssetClip,
-								onSetBgm: setBgm
-							}),
-							tab === "clips" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "djp-section",
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "djp-section-head",
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "片段（主轨道）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-											style: {
-												display: "flex",
-												gap: 6
-											},
-											children: [
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-													className: "djp-btn",
-													title: "在播放头处分割主轨片段",
-													onClick: splitMainAtPlayhead,
-													children: "✂ 分割"
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-													className: "djp-btn",
-													title: "加画中画叠加轨",
-													onClick: o.addPip,
-													children: "画中画"
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-													className: "djp-add",
-													title: "添加片段",
-													onClick: o.addClip,
-													children: "+"
-												})
-											]
-										})]
-									}),
-									mainClips.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										className: "djp-hint",
-										children: "主轨道空"
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										onDragOver,
-										onDrop,
-										style: {
-											display: "flex",
-											flexDirection: "column",
-											gap: 6
-										},
-										children: mainClips.map((c, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-											className: "djp-card",
-											"data-index": i,
-											draggable: true,
-											onDragStart: (e) => {
-												e.dataTransfer.setData("text/clip-index", String(i));
-												e.dataTransfer.effectAllowed = "move";
-											},
-											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-												className: "djp-card-head",
+						className: "djp-collection",
+						hidden: !libraryOpen,
+						role: "region",
+						"aria-label": "编辑工具",
+						onKeyDown: (e) => {
+							if (e.key === "Escape") {
+								e.stopPropagation();
+								setLibraryOpen(false);
+								rootRef.current?.querySelector(".djp-tool-active")?.focus();
+							}
+						},
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "djp-collection-head",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: {
+								assets: "素材库",
+								clips: "剪辑",
+								pip: "画中画",
+								audio: "音频",
+								subs: "文本"
+							}[tab] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "djp-iconbtn",
+								"aria-label": "收起编辑工具",
+								onClick: () => setLibraryOpen(false),
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "close" })
+							})]
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "djp-tabwrap",
+							children: [
+								tab === "assets" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AssetsSection, {
+									onAddClip: addAssetClip,
+									onSetBgm: setBgm
+								}),
+								tab === "clips" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "djp-section",
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "djp-section-head",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "片段（主轨道）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+												style: {
+													display: "flex",
+													gap: 6
+												},
 												children: [
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-														className: "djp-drag",
-														title: "拖拽排序",
-														children: "⋮⋮"
-													}),
-													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-														className: "djp-card-title",
-														children: [
-															"#",
-															i + 1,
-															" ",
-															c.src
-														]
-													}),
-													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
-														className: "djp-select",
-														value: c.transition,
-														onChange: (e) => o.updateClip(c.id, { transition: e.target.value }),
-														children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-															value: "none",
-															children: "无转场"
-														}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-															value: "fade",
-															children: "淡入"
-														})]
+													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+														className: "djp-btn",
+														title: "在播放头处分割主轨片段",
+														onClick: splitMainAtPlayhead,
+														children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "split" }), "分割"]
 													}),
 													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-														className: "djp-del",
-														title: "删除片段",
-														onClick: () => o.removeClip(c.id),
-														children: "✕"
+														className: "djp-btn",
+														title: "加画中画叠加轨",
+														onClick: o.addPip,
+														children: "画中画"
+													}),
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+														className: "djp-add",
+														title: "添加片段",
+														onClick: o.addClip,
+														children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" })
 													})
 												]
-											}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											})]
+										}),
+										mainClips.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "djp-hint",
+											children: "主轨道空"
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											onDragOver,
+											onDrop,
+											className: "djp-item-list",
+											children: mainClips.map((c, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(InspectorRow, {
+												title: c.src,
+												summary: fmtSec(c.clipDuration) + ((c.speed ?? 1) !== 1 ? " · " + c.speed + "×" : ""),
+												index: i,
+												open: selected === c.id,
+												onToggle: () => toggleItem(c.id),
+												onDragStart: (e) => {
+													e.dataTransfer.setData("text/clip-index", String(i));
+													e.dataTransfer.effectAllowed = "move";
+												},
+												children: [
+													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+														className: "djp-inspector-head",
+														children: [
+															/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "片段设置" }),
+															/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+																className: "djp-select",
+																value: c.transition,
+																onChange: (e) => o.updateClip(c.id, { transition: e.target.value }),
+																children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+																	value: "none",
+																	children: "无转场"
+																}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+																	value: "fade",
+																	children: "淡入"
+																})]
+															}),
+															/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+																className: "djp-del",
+																title: "删除片段",
+																onClick: () => o.removeClip(c.id),
+																children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "close" })
+															})
+														]
+													}),
+													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+														className: "djp-fields",
+														children: [
+															/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+																label: "起点",
+																value: c.inPoint,
+																onCommit: (v) => o.updateClip(c.id, { inPoint: v })
+															}),
+															/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+																label: "时长",
+																value: c.clipDuration,
+																min: .1,
+																onCommit: (v) => o.updateClip(c.id, { clipDuration: v })
+															}),
+															/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+																label: "音量",
+																value: c.volume,
+																step: .1,
+																onCommit: (v) => o.updateClip(c.id, { volume: Math.min(1, v) })
+															}),
+															/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+																label: "速度",
+																value: c.speed ?? 1,
+																step: .25,
+																min: .1,
+																onCommit: (v) => o.updateClip(c.id, { speed: Math.min(10, Math.max(.1, v)) })
+															})
+														]
+													}),
+													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(AdvancedSettings, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(FilterSelect, {
+														value: c.filter,
+														onCommit: (f) => o.updateClip(c.id, { filter: f })
+													}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnimSelect, {
+														duration: c.clipDuration,
+														anims: c.animations,
+														onCommit: (anims) => o.updateClip(c.id, { animations: anims })
+													})] })
+												]
+											}, c.id))
+										})
+									]
+								}),
+								tab === "pip" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "djp-section",
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "djp-section-head",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "画中画" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												className: "djp-add",
+												title: "添加画中画",
+												onClick: o.addPip,
+												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" })
+											})]
+										}),
+										pipClips.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "djp-hint",
+											children: "无叠加片段——「片段」区点「画中画」或让 AI 加"
+										}),
+										pipClips.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(InspectorRow, {
+											title: c.src,
+											summary: fmtSec(c.clipDuration),
+											open: selected === c.id,
+											onToggle: () => toggleItem(c.id),
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 												className: "djp-fields",
 												children: [
+													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+														className: "djp-select",
+														value: c.box ? JSON.stringify(c.box) : "",
+														onChange: (e) => {
+															const v = e.target.value;
+															if (!v) {
+																o.updateClip(c.id, { box: void 0 });
+																return;
+															}
+															const p = BOX_PRESETS.find((x) => JSON.stringify(x.box) === v);
+															if (p) o.updateClip(c.id, { box: p.box });
+														},
+														children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+															value: "",
+															children: "默认（右下 30%）"
+														}), BOX_PRESETS.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+															value: JSON.stringify(p.box),
+															children: p.label
+														}, p.label))]
+													}),
 													/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
-														label: "起点",
-														value: c.inPoint,
-														onCommit: (v) => o.updateClip(c.id, { inPoint: v })
+														label: "从",
+														value: c.atSeconds ?? 0,
+														onCommit: (v) => o.updateClip(c.id, { atSeconds: Math.max(0, v) })
 													}),
 													/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
 														label: "时长",
@@ -22187,379 +23455,374 @@ Check that all your Remotion packages are on the same version. If your dependenc
 														onCommit: (v) => o.updateClip(c.id, { clipDuration: v })
 													}),
 													/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
-														label: "音量",
-														value: c.volume,
-														step: .1,
-														onCommit: (v) => o.updateClip(c.id, { volume: Math.min(1, v) })
-													}),
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
 														label: "速度",
 														value: c.speed ?? 1,
 														step: .25,
 														min: .1,
 														onCommit: (v) => o.updateClip(c.id, { speed: Math.min(10, Math.max(.1, v)) })
 													}),
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)(FilterSelect, {
-														value: c.filter,
-														onCommit: (f) => o.updateClip(c.id, { filter: f })
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+														className: "djp-btn",
+														title: "在播放头处分割",
+														onClick: () => o.splitClip(c.id, Math.round(playheadRef.current * 100) / 100),
+														children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "split" })
 													}),
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnimSelect, {
-														duration: c.clipDuration,
-														anims: c.animations,
-														onCommit: (anims) => o.updateClip(c.id, { animations: anims })
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+														className: "djp-del",
+														title: "删除画中画",
+														onClick: () => o.removeClip(c.id),
+														children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "close" })
 													})
 												]
-											})]
-										}, c.id))
-									})
-								]
-							}),
-							tab === "pip" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "djp-section",
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										className: "djp-section-head",
-										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "画中画" })
-									}),
-									pipClips.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										className: "djp-hint",
-										children: "无叠加片段——「片段」区点「画中画」或让 AI 加"
-									}),
-									pipClips.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "djp-card djp-overlay-row",
-										children: [
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-												className: "djp-card-title",
-												style: { maxWidth: 90 },
-												children: c.src
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
-												className: "djp-select",
-												value: c.box ? JSON.stringify(c.box) : "",
-												onChange: (e) => {
-													const v = e.target.value;
-													if (!v) {
-														o.updateClip(c.id, { box: void 0 });
-														return;
-													}
-													const p = BOX_PRESETS.find((x) => JSON.stringify(x.box) === v);
-													if (p) o.updateClip(c.id, { box: p.box });
-												},
-												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-													value: "",
-													children: "默认（右下 30%）"
-												}), BOX_PRESETS.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-													value: JSON.stringify(p.box),
-													children: p.label
-												}, p.label))]
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
-												label: "从",
-												value: c.atSeconds ?? 0,
-												onCommit: (v) => o.updateClip(c.id, { atSeconds: Math.max(0, v) })
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
-												label: "时长",
-												value: c.clipDuration,
-												min: .1,
-												onCommit: (v) => o.updateClip(c.id, { clipDuration: v })
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
-												label: "速度",
-												value: c.speed ?? 1,
-												step: .25,
-												min: .1,
-												onCommit: (v) => o.updateClip(c.id, { speed: Math.min(10, Math.max(.1, v)) })
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(FilterSelect, {
+											}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(AdvancedSettings, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(FilterSelect, {
 												value: c.filter,
 												onCommit: (f) => o.updateClip(c.id, { filter: f })
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnimSelect, {
+											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnimSelect, {
 												duration: c.clipDuration,
 												anims: c.animations,
 												onCommit: (anims) => o.updateClip(c.id, { animations: anims })
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-												className: "djp-btn",
-												title: "在播放头处分割",
-												onClick: () => o.splitClip(c.id, Math.round(playheadRef.current * 100) / 100),
-												children: "✂"
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-												className: "djp-del",
-												title: "删除画中画",
-												onClick: () => o.removeClip(c.id),
-												children: "✕"
-											})
-										]
-									}, c.id))
-								]
-							}),
-							tab === "audio" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "djp-section",
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "djp-section-head",
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "音频" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-											style: {
-												display: "flex",
-												gap: 6,
-												alignItems: "center"
-											},
-											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-												ref: audioFileRef,
-												type: "file",
-												accept: "audio/*,video/*",
-												style: { display: "none" },
-												onChange: async (e) => {
-													const f = e.target.files?.[0];
-													if (!f) return;
-													try {
-														const up = await uploadAsset(f);
-														o.addAudio(up.name, up.duration ?? 10);
-													} catch {}
-													if (audioFileRef.current) audioFileRef.current.value = "";
-												}
-											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-												className: "djp-btn",
-												title: "上传音频并加入音频轨",
-												onClick: () => audioFileRef.current?.click(),
-												children: "上传"
-											})]
-										})]
-									}),
-									t.audioTracks.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										className: "djp-hint",
-										children: "无音频轨——素材库「♪配乐」、上方「上传」或让 AI 加"
-									}),
-									t.audioTracks.map((tr) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "djp-card",
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-											className: "djp-card-head",
-											children: [
-												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-													className: "djp-card-title",
-													children: ["♪ ", tr.name ?? "音频"]
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-													className: `djp-btn ${tr.muted ? "djp-error" : ""}`,
-													title: tr.muted ? "取消静音" : "静音",
-													onClick: () => o.updateAudioTrack(tr.id, { muted: !tr.muted }),
-													children: tr.muted ? "🔇" : "🔊"
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
-													className: "djp-field",
-													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "轨音量" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-														type: "range",
-														min: 0,
-														max: 1,
-														step: .05,
-														value: tr.volume,
-														onChange: (e) => o.updateAudioTrack(tr.id, { volume: Number(e.target.value) }),
-														style: { width: 70 }
-													})]
-												})
-											]
-										}), tr.clips.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-											className: "djp-fields",
-											style: { alignItems: "center" },
-											children: [
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-													className: "djp-card-title",
-													style: { maxWidth: 80 },
-													children: c.src
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
-													label: "从",
-													value: c.atSeconds,
-													onCommit: (v) => o.updateAudioClip(c.id, { atSeconds: Math.max(0, v) })
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
-													label: "时长",
-													value: c.duration,
-													min: .1,
-													onCommit: (v) => o.updateAudioClip(c.id, { duration: v })
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
-													label: "音量",
-													value: c.volume,
-													step: .1,
-													onCommit: (v) => o.updateAudioClip(c.id, { volume: Math.min(1, Math.max(0, v)) })
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
-													label: "速度",
-													value: c.speed ?? 1,
-													step: .25,
-													min: .1,
-													onCommit: (v) => o.updateAudioClip(c.id, { speed: Math.min(10, Math.max(.1, v)) })
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-													className: "djp-btn",
-													title: "在播放头处分割",
-													onClick: () => o.splitClip(c.id, Math.round(playheadRef.current * 100) / 100),
-													children: "✂"
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-													className: "djp-del",
-													title: "删除音频片段",
-													onClick: () => o.removeAudioClip(c.id),
-													children: "✕"
-												})
-											]
-										}, c.id))]
-									}, tr.id))
-								]
-							}),
-							tab === "subs" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "djp-section",
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "djp-section-head",
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "字幕" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-											className: "djp-add",
-											title: "添加字幕",
-											onClick: o.addOverlay,
-											children: "+"
-										})]
-									}),
-									t.overlays.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										className: "djp-hint",
-										children: "无字幕——「+」加一条，或让 AI 配字幕"
-									}),
-									t.overlays.map((ov, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "djp-card djp-sub-card",
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-											className: "djp-card-head",
-											children: [
-												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-													className: "djp-idx",
-													children: ["#", i + 1]
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-													className: "djp-sub-text",
-													type: "text",
-													defaultValue: ov.text,
-													onBlur: (e) => {
-														if (e.target.value !== ov.text) o.updateOverlay(i, { text: e.target.value });
-													},
-													onKeyDown: (e) => {
-														if (e.key === "Enter") e.target.blur();
+											})] })]
+										}, c.id))
+									]
+								}),
+								tab === "audio" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "djp-section",
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "djp-section-head",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "音频" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+												style: {
+													display: "flex",
+													gap: 6,
+													alignItems: "center"
+												},
+												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+													ref: audioFileRef,
+													type: "file",
+													accept: "audio/*,video/*",
+													style: { display: "none" },
+													onChange: async (e) => {
+														const f = e.target.files?.[0];
+														if (!f) return;
+														try {
+															const up = await uploadAsset(f);
+															o.addAudio(up.name, up.duration ?? 10);
+															setUploadError("");
+														} catch (error) {
+															setUploadError(error instanceof Error ? error.message : "上传失败，请重试");
+														}
+														if (audioFileRef.current) audioFileRef.current.value = "";
 													}
-												}, ov.text + i),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-													className: "djp-del",
-													title: "删除字幕",
-													onClick: () => o.removeOverlay(i),
-													children: "✕"
-												})
-											]
-										}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-											className: "djp-fields",
-											children: [
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
-													label: "从",
-													value: ov.startSeconds,
-													onCommit: (v) => o.updateOverlay(i, { startSeconds: v })
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
-													label: "到",
-													value: ov.endSeconds,
-													min: .1,
-													onCommit: (v) => o.updateOverlay(i, { endSeconds: v })
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
-													label: "字号",
-													value: ov.fontSize,
-													min: 8,
-													onCommit: (v) => o.updateOverlay(i, { fontSize: v })
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
-													className: "djp-select",
-													value: ov.position,
-													onChange: (e) => o.updateOverlay(i, { position: e.target.value }),
-													title: "位置",
+												}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+													className: "djp-btn",
+													title: "上传音频并加入音频轨",
+													onClick: () => audioFileRef.current?.click(),
+													children: "上传"
+												})]
+											})]
+										}),
+										uploadError && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "djp-notice",
+											role: "alert",
+											children: uploadError
+										}),
+										t.audioTracks.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "djp-hint",
+											children: "无音频轨——素材库「♪配乐」、上方「上传」或让 AI 加"
+										}),
+										t.audioTracks.map((tr) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "djp-audio-group",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												className: "djp-card-head",
+												children: [
+													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+														className: "djp-card-title",
+														children: ["♪ ", tr.name ?? "音频"]
+													}),
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+														className: `djp-btn ${tr.muted ? "djp-error" : ""}`,
+														title: tr.muted ? "取消静音" : "静音",
+														onClick: () => o.updateAudioTrack(tr.id, { muted: !tr.muted }),
+														children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: tr.muted ? "muted" : "volume" })
+													}),
+													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
+														className: "djp-track-settings",
+														children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "轨道音量" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+															className: "djp-field",
+															children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "轨音量" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+																type: "range",
+																min: 0,
+																max: 1,
+																step: .05,
+																value: tr.volume,
+																onChange: (e) => o.updateAudioTrack(tr.id, { volume: Number(e.target.value) }),
+																style: { width: 70 }
+															})]
+														})]
+													})
+												]
+											}), tr.clips.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(InspectorRow, {
+												title: c.src,
+												summary: fmtSec(c.duration),
+												open: selected === c.id,
+												onToggle: () => toggleItem(c.id),
+												children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+													className: "djp-fields",
 													children: [
-														/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-															value: "top",
-															children: "顶部"
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+															label: "从",
+															value: c.atSeconds,
+															onCommit: (v) => o.updateAudioClip(c.id, { atSeconds: Math.max(0, v) })
 														}),
-														/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-															value: "center",
-															children: "居中"
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+															label: "时长",
+															value: c.duration,
+															min: .1,
+															onCommit: (v) => o.updateAudioClip(c.id, { duration: v })
 														}),
-														/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-															value: "bottom",
-															children: "底部"
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+															label: "音量",
+															value: c.volume,
+															step: .1,
+															onCommit: (v) => o.updateAudioClip(c.id, { volume: Math.min(1, Math.max(0, v)) })
+														}),
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+															label: "速度",
+															value: c.speed ?? 1,
+															step: .25,
+															min: .1,
+															onCommit: (v) => o.updateAudioClip(c.id, { speed: Math.min(10, Math.max(.1, v)) })
+														}),
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+															className: "djp-btn",
+															title: "在播放头处分割",
+															onClick: () => o.splitClip(c.id, Math.round(playheadRef.current * 100) / 100),
+															children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "split" })
+														}),
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+															className: "djp-del",
+															title: "删除音频片段",
+															onClick: () => o.removeAudioClip(c.id),
+															children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "close" })
 														})
 													]
+												})
+											}, c.id))]
+										}, tr.id))
+									]
+								}),
+								tab === "subs" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "djp-section",
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "djp-section-head",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "字幕" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												className: "djp-add",
+												title: "添加字幕",
+												onClick: o.addOverlay,
+												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" })
+											})]
+										}),
+										t.overlays.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "djp-hint",
+											children: "无字幕——「+」加一条，或让 AI 配字幕"
+										}),
+										t.overlays.map((ov, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(InspectorRow, {
+											index: i,
+											title: ov.text || "未填写字幕",
+											summary: fmtSec(ov.startSeconds) + "–" + fmtSec(ov.endSeconds),
+											open: selected === "sub-" + i,
+											onToggle: () => toggleItem("sub-" + i),
+											children: [
+												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+													className: "djp-card-head",
+													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+														className: "djp-sub-text",
+														type: "text",
+														defaultValue: ov.text,
+														onBlur: (e) => {
+															if (e.target.value !== ov.text) o.updateOverlay(i, { text: e.target.value });
+														},
+														onKeyDown: (e) => {
+															if (e.key === "Enter") e.target.blur();
+														}
+													}, ov.text + i), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+														className: "djp-del",
+														title: "删除字幕",
+														onClick: () => o.removeOverlay(i),
+														children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "close" })
+													})]
 												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
-													className: "djp-select djp-fontsel",
-													value: ov.fontFamily ?? "",
-													onChange: (e) => o.updateOverlay(i, { fontFamily: e.target.value || void 0 }),
-													title: "字体（清除 = 系统默认）",
-													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-														value: "",
-														children: "系统字体"
-													}), fonts.map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-														value: f.id,
-														children: f.label
-													}, f.id))]
+												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+													className: "djp-fields",
+													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+														label: "从",
+														value: ov.startSeconds,
+														onCommit: (v) => o.updateOverlay(i, { startSeconds: v })
+													}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+														label: "到",
+														value: ov.endSeconds,
+														min: .1,
+														onCommit: (v) => o.updateOverlay(i, { endSeconds: v })
+													})]
 												}),
-												fonts.find((f) => f.id === (ov.fontFamily ?? ""))?.variable && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
-													className: "djp-select",
-													value: ov.fontWeight ?? 400,
-													onChange: (e) => o.updateOverlay(i, { fontWeight: Number(e.target.value) }),
-													title: "字重",
+												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(AdvancedSettings, {
+													label: "文字样式与动画",
 													children: [
-														300,
-														400,
-														500,
-														700,
-														900
-													].map((w) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-														value: w,
-														children: w
-													}, w))
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", {
-													className: "djp-color",
-													title: "颜色",
-													children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-														type: "color",
-														value: /^#[0-9a-fA-F]{6}$/.test(ov.color) ? ov.color : "#ffffff",
-														onChange: (e) => o.updateOverlay(i, { color: e.target.value })
-													})
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnimSelect, {
-													duration: Math.max(.1, ov.endSeconds - ov.startSeconds),
-													anims: ov.animations,
-													onCommit: (anims) => o.updateOverlay(i, { animations: anims })
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+															label: "字号",
+															value: ov.fontSize,
+															min: 8,
+															onCommit: (v) => o.updateOverlay(i, { fontSize: v })
+														}),
+														/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+															className: "djp-select",
+															value: ov.position,
+															onChange: (e) => o.updateOverlay(i, { position: e.target.value }),
+															title: "位置",
+															children: [
+																/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+																	value: "top",
+																	children: "顶部"
+																}),
+																/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+																	value: "center",
+																	children: "居中"
+																}),
+																/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+																	value: "bottom",
+																	children: "底部"
+																})
+															]
+														}),
+														/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+															className: "djp-select djp-fontsel",
+															value: ov.fontFamily ?? "",
+															onChange: (e) => o.updateOverlay(i, { fontFamily: e.target.value || void 0 }),
+															title: "字体（清除 = 系统默认）",
+															children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+																value: "",
+																children: "系统字体"
+															}), fonts.map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+																value: f.id,
+																children: f.label
+															}, f.id))]
+														}),
+														fonts.find((f) => f.id === (ov.fontFamily ?? ""))?.variable && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
+															className: "djp-select",
+															value: ov.fontWeight ?? 400,
+															onChange: (e) => o.updateOverlay(i, { fontWeight: Number(e.target.value) }),
+															title: "字重",
+															children: [
+																300,
+																400,
+																500,
+																700,
+																900
+															].map((w) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+																value: w,
+																children: w
+															}, w))
+														}),
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", {
+															className: "djp-color",
+															title: "颜色",
+															children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+																type: "color",
+																value: /^#[0-9a-fA-F]{6}$/.test(ov.color) ? ov.color : "#ffffff",
+																onChange: (e) => o.updateOverlay(i, { color: e.target.value })
+															})
+														}),
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnimSelect, {
+															duration: Math.max(.1, ov.endSeconds - ov.startSeconds),
+															anims: ov.animations,
+															onCommit: (anims) => o.updateOverlay(i, { animations: anims })
+														})
+													]
 												})
 											]
-										})]
-									}, i))
-								]
-							})
-						]
+										}, i))
+									]
+								})
+							]
+						})]
 					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "djp-tdock",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackStrip, {
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackStrip, {
 							t,
 							o,
 							playheadRef,
-							onSeekClip: (start, lane) => {
+							mode: trackMode,
+							onModeChange: switchTrackMode,
+							onAudio: () => {
+								setTrackMode("audio");
+								setTab("audio");
+								setLibraryOpen(true);
+							},
+							onAdd: () => {
+								setTab(trackMode === "main" ? "assets" : trackMode);
+								setLibraryOpen(true);
+							},
+							onSeekClip: (start, lane, id) => {
+								if (id) setSelected(id);
+								setLibraryOpen(false);
+								if (lane) setTrackMode(lane);
 								seekToSeconds(start, t.meta.fps);
 								if (lane === "main") setTab("clips");
 								else if (lane === "pip") setTab("pip");
 								else if (lane === "audio") setTab("audio");
+								else if (lane === "subs") setTab("subs");
 							}
-						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							className: "djp-hint",
-							children: "AI 在对话里剪辑（MCP 工具落 5180 事实源）后，这里 2 秒内自动同步。"
-						})]
+						})
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("nav", {
+						className: "djp-tool-dock",
+						"aria-label": "编辑工具栏",
+						children: [
+							[
+								"clips",
+								"剪辑",
+								"scissors"
+							],
+							[
+								"audio",
+								"音频",
+								"music"
+							],
+							[
+								"subs",
+								"文本",
+								"text"
+							],
+							[
+								"pip",
+								"画中画",
+								"layers"
+							],
+							[
+								"assets",
+								"素材",
+								"library"
+							]
+						].map(([key, label, icon]) => {
+							const mode = key === "clips" ? "main" : key;
+							const active = key === "assets" ? tab === key && libraryOpen : trackMode === mode;
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+								className: active ? "djp-tool-active" : "",
+								"aria-pressed": active,
+								"aria-expanded": tab === key && libraryOpen,
+								title: key === "assets" ? "打开素材库" : `${label}模式 · 再次点击打开工具`,
+								onClick: () => {
+									if (mode !== "assets" && trackMode !== mode) switchTrackMode(mode);
+									else {
+										setTab(key);
+										setLibraryOpen(tab === key ? !libraryOpen : true);
+									}
+								},
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: icon }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: label })]
+							}, key);
+						})
 					}),
 					canvasOpen && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(CanvasDialog, {
 						t,
@@ -22594,6 +23857,10 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			document.head.appendChild(el);
 		}
 		const CSS = `
+.djp-root *, .djp-root *::before, .djp-root *::after { box-sizing: border-box; }
+.djp-root button, .djp-root input, .djp-root select { font-family: inherit; }
+.djp-root :focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+.djp-root:focus { outline: none; }
 /* ---- 骨架 ---- */
 .djp-root { display: flex; flex-direction: column; gap: 0; padding: 0; height: 100%; overflow: hidden; box-sizing: border-box; color: var(--dsw-alias-label-primary); font-size: 13px; }
 
@@ -22605,92 +23872,65 @@ Check that all your Remotion packages are on the same version. If your dependenc
 .djp-proj-tag { margin-left: auto; flex: 0 0 auto; font-size: 10px; color: var(--dsw-alias-label-quaternary); }
 
 /* ---- 工具栏 ---- */
-.djp-head { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; padding: 6px 12px; }
+.djp-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 0 0 auto; padding: 6px 12px; }
 .djp-title { font-weight: 600; font-size: 14px; margin-right: 2px; }
 .djp-meta { color: var(--dsw-alias-label-tertiary); font-size: 11.5px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.djp-iconbtn { border: none; background: none; color: var(--dsw-alias-label-tertiary); cursor: pointer; font-size: 15px; padding: 3px 5px; border-radius: 7px; line-height: 1; transition: background .12s, color .12s; }
+.djp-iconbtn { display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;width:28px;height:28px;padding:0;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;transition:background .16s,color .16s; }
 .djp-iconbtn:hover:not(:disabled) { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); }
 .djp-iconbtn:disabled { opacity: 0.35; cursor: default; }
-.djp-btn { border: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; transition: background .12s, border-color .12s; height: 26px; box-sizing: border-box; }
+.djp-btn { display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-shrink:0;border:1px solid var(--djp-line);background:var(--djp-surface);color:var(--dsw-alias-label-secondary);border-radius:9px;padding:0 11px;font-size:12px;font-weight:500;cursor:pointer;height:32px;box-shadow:inset 0 1px 0 var(--djp-highlight),0 1px 2px rgb(0 0 0 / 4%);transition:background .16s,border-color .16s,box-shadow .16s,transform .12s; }
 .djp-btn:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
 .djp-btn:disabled { opacity: 0.5; cursor: default; }
 .djp-btn.djp-error { color: var(--dsw-alias-state-error-primary); }
-.djp-export { border: none; border-radius: 8px; padding: 5px 14px; font-size: 12px; cursor: pointer; background: var(--dsw-alias-button-info-fill); color: #fff; text-decoration: none; display: inline-flex; align-items: center; height: 26px; box-sizing: border-box; }
+.djp-export { display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-shrink:0;height:32px;padding:0 15px;border:1px solid rgb(255 255 255 / 12%);border-radius:9px;background:linear-gradient(180deg,color-mix(in srgb,var(--dsw-alias-button-info-fill) 90%,white),var(--dsw-alias-button-info-fill));color:#fff;font-size:12px;font-weight:600;text-decoration:none;cursor:pointer;box-shadow:inset 0 1px 0 rgb(255 255 255 / 16%),0 2px 6px rgb(0 0 0 / 12%);transition:filter .16s,box-shadow .16s,transform .12s; }
 .djp-export:disabled { opacity: 0.5; cursor: default; }
 .djp-export.djp-error { background: var(--dsw-alias-state-error-primary); }
-.djp-add { border: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-radius: 8px; width: 26px; height: 26px; cursor: pointer; font-size: 14px; line-height: 1; }
+.djp-add { display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;width:32px;height:32px;padding:0;border:1px solid var(--djp-line);border-radius:9px;background:var(--djp-surface);color:var(--dsw-alias-label-secondary);cursor:pointer;box-shadow:inset 0 1px 0 var(--djp-highlight);transition:background .16s,border-color .16s,transform .12s; }
 .djp-add:hover { background: var(--dsw-alias-interactive-bg-hover); }
 
 /* ---- 舞台与空态 ---- */
-.djp-stage { background: #000; overflow: hidden; flex: 0 0 auto; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
+.djp-stage { background: #090b10; overflow: hidden; flex: 0 0 auto; height: clamp(140px, 30vh, 300px); border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
 .djp-empty { padding: 36px 12px; text-align: center; color: var(--dsw-alias-label-tertiary); background: var(--dsw-alias-bg-layer-2); flex: 0 0 auto; }
 
 /* ---- 分段式 tab ---- */
-.djp-tabs { display: flex; gap: 2px; flex: 0 0 auto; padding: 4px 10px; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
-.djp-tab { border: none; background: none; color: var(--dsw-alias-label-tertiary); font-size: 12px; padding: 5px 11px; cursor: pointer; border-radius: 999px; transition: background .12s, color .12s; }
+.djp-tabs { display:flex;overflow-x:auto;gap:3px;flex:0 0 auto;margin:10px 12px 0;padding:4px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--djp-line);border-radius:11px;scrollbar-width:none; }
+.djp-tab { white-space:nowrap;flex:1 0 auto;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-tertiary);font-size:12px;padding:6px 8px;cursor:pointer;border-radius:7px;transition:background .16s,color .16s,box-shadow .16s; }
 .djp-tab:hover { color: var(--dsw-alias-label-primary); }
-.djp-tab.djp-on { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); font-weight: 600; }
-.djp-tabwrap { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; }
+.djp-tab.djp-on { color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1);border-color:var(--djp-line);box-shadow:0 1px 3px rgb(0 0 0 / 7%);font-weight:600; }
+.djp-tabwrap { flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:12px;padding:14px 12px; }
 
 /* ---- 内容卡 ---- */
-.djp-section { display: flex; flex-direction: column; gap: 8px; }
+.djp-section { display:flex;flex-direction:column;gap:12px; }
 .djp-section-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 12.5px; color: var(--dsw-alias-label-secondary); }
-.djp-card { background: var(--dsw-alias-bg-layer-2); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 12px; padding: 9px 11px; display: flex; flex-direction: column; gap: 7px; transition: border-color .12s; }
+.djp-card { position:relative;display:flex;flex-direction:column;gap:12px;padding:14px;background:linear-gradient(145deg,var(--djp-surface),var(--dsw-alias-bg-layer-2));border:1px solid var(--djp-line);border-radius:14px;box-shadow:inset 0 1px 0 var(--djp-highlight),0 3px 10px rgb(0 0 0 / 4%);transition:border-color .18s,box-shadow .18s; }
 .djp-card:hover { border-color: var(--dsw-alias-border-l4); }
-.djp-card-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.djp-idx { flex: 0 0 auto; font-size: 10px; color: var(--dsw-alias-label-tertiary); background: var(--dsw-alias-bg-layer-3); border-radius: 999px; padding: 2px 7px; font-variant-numeric: tabular-nums; }
-.djp-drag { cursor: grab; color: var(--dsw-alias-label-quaternary); letter-spacing: -2px; user-select: none; }
-.djp-card-title { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.djp-del { border: none; background: none; color: var(--dsw-alias-label-tertiary); cursor: pointer; font-size: 13px; padding: 2px 6px; border-radius: 6px; }
+.djp-card-head { display:flex;align-items:center;gap:7px;min-width:0; }
+.djp-idx { display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;min-width:26px;height:24px;padding:0 5px;border-radius:7px;background:color-mix(in srgb,var(--dsw-alias-brand-primary) 9%,var(--dsw-alias-bg-layer-1));color:var(--dsw-alias-label-secondary);font-size:10px;font-weight:600;font-variant-numeric:tabular-nums; }
+.djp-drag { display:inline-flex;align-items:center;cursor:grab;color:var(--dsw-alias-label-quaternary);user-select:none;margin-left:-4px; }
+.djp-card-title { flex:1;min-width:0;font-size:12px;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.djp-del { display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;width:28px;height:28px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;transition:background .16s,color .16s; }
 .djp-del:hover { color: var(--dsw-alias-state-error-primary); }
 
 /* ---- 表单件 ---- */
-.djp-fields { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
+.djp-fields { display:flex;gap:9px 10px;flex-wrap:wrap;align-items:center; }
 .djp-field { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--dsw-alias-label-tertiary); }
-.djp-field input { width: 56px; height: 26px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 12px; padding: 0 7px; box-sizing: border-box; }
+.djp-field input { width:66px;height:30px;border:1px solid var(--djp-input-line);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:12px;font-variant-numeric:tabular-nums;padding:0 9px;box-sizing:border-box;transition:border-color .16s,box-shadow .16s; }
 .djp-field input:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
-.djp-select { border: 0.5px solid var(--dsw-alias-border-l4); background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); border-radius: 8px; font-size: 11.5px; height: 26px; padding: 0 6px; cursor: pointer; }
+.djp-select { appearance:none;border:1px solid var(--djp-input-line);background-color:var(--dsw-alias-bg-layer-1);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%238892a3' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center;color:var(--dsw-alias-label-secondary);border-radius:8px;font-size:11.5px;height:30px;padding:0 27px 0 9px;cursor:pointer;max-width:100%;transition:border-color .16s,box-shadow .16s; }
 .djp-select:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
 .djp-color { display: inline-flex; }
-.djp-color input { width: 26px; height: 26px; padding: 0; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 7px; background: var(--dsw-alias-bg-layer-1); cursor: pointer; }
+.djp-color input { width: 26px; height: 30px; padding: 0; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 7px; background: var(--dsw-alias-bg-layer-1); cursor: pointer; }
 .djp-hint { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
 
 /* ---- 字幕卡（堆叠式：文本行 + 参数行）---- */
 .djp-sub-card { gap: 6px; }
 .djp-sub-text { flex: 1; min-width: 0; height: 28px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 13px; padding: 0 9px; box-sizing: border-box; }
 .djp-sub-text:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
-.djp-overlay-row { display: flex; align-items: center; gap: 6px; }
-.djp-overlay-row input[type='text'] { flex: 1; min-width: 0; height: 26px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 12px; padding: 0 8px; box-sizing: border-box; }
-
-/* ---- 多轨轨道条（底部坞）---- */
-.djp-tdock { flex: 0 0 auto; border-top: 0.5px solid var(--dsw-alias-border-l3); padding: 8px 10px 5px; display: flex; flex-direction: column; gap: 4px; max-height: 38%; overflow-y: auto; background: var(--dsw-alias-bg-layer-1); }
-.djp-tstrip { display: flex; flex-direction: column; gap: 3px; }
-.djp-trow { display: flex; align-items: center; gap: 5px; }
-.djp-trow-name { flex: 0 0 44px; font-size: 10px; color: var(--dsw-alias-label-tertiary); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.djp-trow-lane { flex: 1; }
-.djp-trow-empty { font-size: 11px; color: var(--dsw-alias-label-tertiary); padding: 0 8px; }
-.djp-track { position: relative; display: flex; height: 30px; border-radius: 6px; overflow: hidden; background: var(--dsw-alias-bg-layer-2); border: 0.5px solid var(--dsw-alias-border-l3); cursor: pointer; }
-.djp-track-block { position: relative; min-width: 24px; border-right: 1px solid var(--dsw-alias-bg-layer-1); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 16%, var(--dsw-alias-bg-layer-3)); box-shadow: inset 2px 0 0 var(--dsw-alias-brand-primary); display: flex; align-items: center; padding: 0 4px 0 7px; overflow: hidden; }
-.djp-track-block.djp-fade { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 7%, var(--dsw-alias-bg-layer-3)); }
-.djp-track-label { font-size: 10.5px; color: var(--dsw-alias-label-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.djp-pip-block { background: color-mix(in srgb, var(--dsw-static-neutral-bluish-400, #7c8cf8) 22%, var(--dsw-alias-bg-layer-3)); border: 0.5px dashed var(--dsw-alias-border-l4); box-shadow: inset 2px 0 0 var(--dsw-static-neutral-bluish-400, #7c8cf8); }
-.djp-audio-block { background: color-mix(in srgb, #34c77b 26%, var(--dsw-alias-bg-layer-3)); opacity: 1; box-shadow: inset 2px 0 0 #34c77b; }
-.djp-ruler { position: relative; flex: 1; height: 16px; cursor: pointer; background: var(--dsw-alias-bg-layer-2); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 4px; overflow: hidden; }
-.djp-tick { position: absolute; top: 0; bottom: 0; border-left: 0.5px solid var(--dsw-alias-border-l3); padding-left: 3px; font-size: 9px; color: var(--dsw-alias-label-tertiary); line-height: 16px; pointer-events: none; white-space: nowrap; }
-.djp-playhead { position: absolute; top: 0; bottom: 0; width: 1.5px; background: var(--dsw-alias-state-error-primary); pointer-events: none; z-index: 3; }
-.djp-playhead::before { content: ''; position: absolute; top: 0; left: -3.5px; border: 4.5px solid transparent; border-top-color: var(--dsw-alias-state-error-primary); }
-
-/* ---- 轨道交互 ---- */
-.djp-handle, .djp-pip-block, .djp-audio-block { touch-action: none; }
-.djp-handle { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 2; }
-.djp-handle.djp-hl { left: 0; border-radius: 4px 0 0 4px; }
-.djp-handle.djp-hr { right: 0; border-radius: 0 4px 4px 0; }
-.djp-handle:hover { background: rgba(255, 255, 255, 0.35); }
-.djp-pip-block, .djp-audio-block { cursor: grab; }
-.djp-dragging { opacity: 0.85; outline: 1.5px solid var(--dsw-alias-brand-primary); cursor: grabbing !important; z-index: 2; }
+.djp-overlay-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.djp-overlay-row input[type='text'] { flex: 1; min-width: 0; height: 30px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-size: 12px; padding: 0 8px; box-sizing: border-box; }
 
 /* ---- 弹层（导出参数等）---- */
-.djp-pop { position: absolute; top: 32px; right: 0; z-index: 30; display: flex; flex-direction: column; gap: 8px; background: var(--dsw-alias-bg-layer-1); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 12px; padding: 11px; box-shadow: 0 8px 24px rgba(0,0,0,0.18); min-width: 220px; }
+.djp-pop { position:absolute;top:38px;right:0;z-index:30;display:flex;flex-direction:column;gap:12px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--djp-line);border-radius:14px;padding:16px;box-shadow:0 12px 36px rgb(0 0 0 / 18%),inset 0 1px 0 var(--djp-highlight);min-width:230px; }
 .djp-expwrap { position: relative; }
 .djp-exppop { top: 32px; }
 .djp-error { color: var(--dsw-alias-state-error-primary); font-size: 12px; margin-top: 6px; }
@@ -22708,22 +23948,199 @@ Check that all your Remotion packages are on the same version. If your dependenc
 .djp-dialog-title { font-weight: 600; font-size: 13px; }
 .djp-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .djp-preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.djp-preset { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; border: 0.5px solid var(--dsw-alias-border-l3); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); border-radius: 9px; padding: 7px 9px; font-size: 12px; cursor: pointer; }
+.djp-preset { display:flex;flex-direction:column;gap:5px;align-items:flex-start;border:1px solid var(--djp-line);background:var(--djp-surface);color:var(--dsw-alias-label-primary);border-radius:11px;padding:11px 12px;font-size:12px;cursor:pointer;transition:border-color .16s,background .16s; }
 .djp-preset span { font-size: 10px; color: var(--dsw-alias-label-tertiary); }
 .djp-preset.djp-on { border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-overlay); }
 
 /* ---- 素材库 ---- */
-.djp-assets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.djp-asset { position: relative; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 9px; overflow: hidden; background: var(--dsw-alias-bg-layer-2); }
+.djp-assets { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
+.djp-asset { position:relative;border:1px solid var(--djp-line);border-radius:12px;overflow:hidden;background:var(--djp-surface);box-shadow:0 2px 6px rgb(0 0 0 / 4%);transition:border-color .16s,box-shadow .16s; }
 .djp-asset-thumb { width: 100%; aspect-ratio: 16/10; object-fit: cover; display: block; background: #000; }
 .djp-asset-audio { display: flex; align-items: center; justify-content: center; font-size: 22px; color: var(--dsw-alias-label-tertiary); }
-.djp-asset-name { font-size: 10px; color: var(--dsw-alias-label-tertiary); padding: 4px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.djp-asset-acts { position: absolute; top: 4px; right: 4px; display: none; gap: 4px; }
-.djp-asset:hover .djp-asset-acts { display: flex; }
-.djp-asset-acts button { border: none; border-radius: 6px; padding: 3px 7px; font-size: 11px; cursor: pointer; background: rgba(0,0,0,0.62); color: #fff; }
+.djp-asset-name { font-size:11px;color:var(--dsw-alias-label-secondary);padding:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+.djp-asset-acts { position: absolute; top: 4px; right: 4px; display: flex; gap: 4px; }
+.djp-asset:hover .djp-asset-acts, .djp-asset:focus-within .djp-asset-acts { display: flex; }
+.djp-asset-acts button { display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:26px;border:1px solid rgb(255 255 255 / 14%);border-radius:7px;padding:3px 7px;font-size:11px;cursor:pointer;background:rgb(12 17 25 / 82%);backdrop-filter:blur(8px);color:#fff; }
 
 /* ---- 音量滑杆 ---- */
-.djp-card-head label.djp-field input[type='range'] { accent-color: var(--dsw-alias-brand-primary); width: 70; }
+.djp-card-head label.djp-field input[type='range'] { accent-color: var(--dsw-alias-brand-primary); width: 70px; }
+
+.djp-save-status { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 12px 8px; font-size: 11px; color: var(--dsw-alias-label-tertiary); flex: none; }
+.djp-notice { padding: 8px 12px; color: var(--dsw-alias-state-error-primary); font-size: 12px; flex: none; overflow-wrap: anywhere; }
+.djp-dialog { max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow: auto; }
+
+.djp-root { --djp-line:color-mix(in srgb,var(--dsw-alias-border-l3) 65%,transparent);--djp-input-line:color-mix(in srgb,var(--dsw-alias-border-l3) 85%,transparent);--djp-surface:color-mix(in srgb,var(--dsw-alias-bg-layer-2) 94%,var(--dsw-alias-label-primary));--djp-highlight:color-mix(in srgb,var(--dsw-alias-label-primary) 5%,transparent);container-type:inline-size;-webkit-font-smoothing:antialiased; }
+.djp-icon { display:block;flex-shrink:0; }
+.djp-btn:hover:not(:disabled),.djp-add:hover { border-color:var(--dsw-alias-border-l4);color:var(--dsw-alias-label-primary);box-shadow:inset 0 1px 0 var(--djp-highlight),0 2px 5px rgb(0 0 0 / 7%); }
+.djp-export:hover:not(:disabled) { filter:brightness(1.08);box-shadow:inset 0 1px 0 rgb(255 255 255 / 16%),0 3px 10px rgb(0 0 0 / 16%); }
+.djp-btn:active:not(:disabled),.djp-export:active:not(:disabled),.djp-add:active { transform:translateY(1px); }
+.djp-del:hover { background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent); }
+.djp-card:hover,.djp-asset:hover { border-color:var(--dsw-alias-border-l4); }
+.djp-card:focus-within { border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 50%,var(--djp-line));box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-brand-primary) 7%,transparent); }
+.djp-field input:focus-visible,.djp-select:focus-visible { outline:none;border-color:var(--dsw-alias-brand-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-brand-primary) 13%,transparent); }
+.djp-projbar { padding-top:12px;gap:8px; }
+.djp-proj-icon { display:inline-flex; }
+.djp-head { padding-top:10px;padding-bottom:8px; }
+.djp-stage { margin:0 12px;border:1px solid var(--djp-line);border-radius:12px; }
+.djp-save-status { padding-bottom:10px; }
+.djp-save-status > span::before { content:'';display:inline-block;width:5px;height:5px;margin-right:6px;border-radius:50%;background:currentColor;opacity:.6;vertical-align:middle; }
+
+.djp-dialog { padding:20px;border-radius:18px;border:1px solid var(--djp-line);box-shadow:0 24px 64px rgb(0 0 0 / 24%); }
+.djp-dialog-title { font-size:15px;margin-bottom:6px; }
+.djp-mask { backdrop-filter:blur(4px); }
+.djp-exppop { top:38px; }
+.djp-root * { scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l4) transparent; }
+@container (max-width:360px) { .djp-proj-tag { display:none; } .djp-card { padding:11px; } .djp-tabs { gap:1px; } .djp-tab { padding-inline:6px; } }
+
+
+/* Flat lists and a single contextual inspector. */
+.djp-item-list { display:flex;flex-direction:column;gap:0; }
+.djp-item { border-bottom:1px solid var(--djp-line);min-width:0; }
+.djp-item-trigger { display:flex;align-items:center;gap:8px;width:100%;min-height:46px;padding:10px 4px;border:0;border-radius:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;text-align:left;font-size:12px; }
+.djp-item-trigger:hover { background:color-mix(in srgb,var(--dsw-alias-label-primary) 3%,transparent); }
+.djp-item-number { color:var(--dsw-alias-label-quaternary);font-variant-numeric:tabular-nums;font-size:10px;flex-shrink:0; }
+.djp-item-name { flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500; }
+.djp-item-summary { flex-shrink:0;font-size:11px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-tertiary); }
+.djp-chevron { flex-shrink:0;transition:transform .16s;color:var(--dsw-alias-label-tertiary); }
+.djp-item-open > .djp-item-trigger { color:var(--dsw-alias-brand-primary); }
+.djp-item-open > .djp-item-trigger .djp-chevron { transform:rotate(90deg); }
+.djp-inspector { display:flex;flex-direction:column;gap:14px;padding:4px 4px 16px; }
+.djp-inspector-head { display:flex;align-items:center;gap:8px;font-size:11px;color:var(--dsw-alias-label-tertiary); }
+.djp-inspector-head > span { flex:1; }
+.djp-advanced { border-top:1px solid var(--djp-line);padding-top:10px; }
+.djp-advanced > summary,.djp-track-settings > summary { cursor:pointer;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:24px; }
+.djp-advanced[open] > summary { margin-bottom:10px; }
+.djp-audio-group { display:flex;flex-direction:column;gap:0; }
+.djp-audio-group > .djp-card-head { padding:6px 4px; }
+.djp-section { gap:0; }
+.djp-section-head { padding-bottom:10px; }
+.djp-btn,.djp-add { background:transparent;box-shadow:none;border-color:var(--djp-line);border-radius:6px; }
+.djp-btn:hover:not(:disabled),.djp-add:hover { box-shadow:none;background:var(--dsw-alias-interactive-bg-hover); }
+.djp-export { background:var(--dsw-alias-button-info-fill);box-shadow:none;border-color:transparent;border-radius:7px; }
+.djp-export:hover:not(:disabled) { box-shadow:none; }
+.djp-tabs { background:transparent;border:0;border-bottom:1px solid var(--djp-line);border-radius:0;margin-top:6px;padding:0;gap:8px; }
+.djp-tab { border:0;border-bottom:2px solid transparent;border-radius:0;padding:10px 6px; }
+.djp-tab.djp-on { background:transparent;box-shadow:none;border-bottom-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-primary); }
+
+.djp-root { position:relative; }
+.djp-drawer-mask { position:absolute;inset:0;z-index:45;background:rgb(0 0 0 / 22%);display:flex;align-items:flex-end; }
+.djp-property-drawer { display:flex;flex-direction:column;width:100%;max-height:72%;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);border-top:1px solid var(--djp-line);border-radius:14px 14px 0 0;box-shadow:0 -12px 32px rgb(0 0 0 / 14%);outline:none; }
+.djp-drawer-head { display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:18px 16px 14px;border-bottom:1px solid var(--djp-line);flex:none; }
+.djp-drawer-head > div { min-width:0;display:flex;flex-direction:column;gap:5px; }
+.djp-drawer-label { font-size:10px;color:var(--dsw-alias-label-tertiary); }
+.djp-drawer-head strong { font-size:13px;font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis; }
+.djp-drawer-body { padding:16px;overflow-y:auto;min-height:0; }
+.djp-drawer-footer { display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px;border-top:1px solid var(--djp-line);flex:none;font-size:11px;color:var(--dsw-alias-label-tertiary); }
+.djp-item-open > .djp-item-trigger .djp-chevron { transform:none; }
+.djp-more { position:relative;flex:none; }
+.djp-more > summary { list-style:none; }
+.djp-more > summary::-webkit-details-marker { display:none; }
+.djp-more-content { position:absolute;right:0;top:34px;z-index:40;min-width:150px;padding:5px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--djp-line);border-radius:8px;box-shadow:0 6px 20px rgb(0 0 0 / 12%);display:flex;flex-direction:column;gap:2px; }
+.djp-more-content > .djp-btn { border:0;width:100%;justify-content:flex-start; }
+.djp-shortcuts { font-size:10px;color:var(--dsw-alias-label-tertiary); }
+.djp-shortcuts > summary { cursor:pointer;line-height:18px; }
+/* Focused editing surface, inspired by the supplied mobile editor references. */
+.djp-root { color-scheme:dark;background:#131313;color:#ededed;--dsw-alias-label-primary:#ededed;--dsw-alias-label-secondary:#c4c4c4;--dsw-alias-label-tertiary:#909090;--dsw-alias-label-quaternary:#737373;--dsw-alias-bg-layer-1:#191919;--dsw-alias-bg-layer-2:#242424;--dsw-alias-bg-layer-3:#303030;--dsw-alias-border-l3:#353535;--dsw-alias-border-l4:#525252;--dsw-alias-brand-primary:#f0f0f0;--dsw-alias-button-info-fill:#fa2858;--dsw-alias-interactive-bg-hover:#323232;--djp-line:#303030;--djp-surface:#242424;--djp-input-line:#404040; }
+.djp-head { flex:none;display:flex;flex-wrap:nowrap;gap:10px;padding:16px 16px 6px;min-height:58px; }
+.djp-head .djp-projbar { flex:1;min-width:0;padding:0;min-height:0; }
+.djp-proj-name { font-size:12px;font-weight:500;color:#c5c5c5; }
+.djp-proj-icon,.djp-proj-badge,.djp-proj-tag { display:none; }
+.djp-resolution { display:flex;align-items:center;gap:9px;height:34px;padding:0 12px;border:0;border-radius:7px;background:#292929;color:#efefef;font-size:12px;font-weight:600;cursor:pointer; }
+.djp-resolution span { font-size:14px; }
+.djp-export { height:34px;padding:0 19px;background:#fa2858;border-radius:7px;font-size:13px; }
+.djp-save-status { min-height:22px;padding:0 17px 8px;font-size:9px;color:#717171; }
+.djp-save-status > span::before { width:3px;height:3px; }
+.djp-stage { flex:1.15 1 0;min-height:140px;max-height:none;height:auto;margin:0;border:0;border-radius:0;background:#101010; }
+.djp-empty { flex:1.15 1 0;display:flex;align-items:center;justify-content:center;min-height:140px;background:#101010; }
+.djp-transport { display:flex;align-items:center;position:relative;flex:none;height:50px;padding:0 14px;background:#131313; }
+.djp-transport-time { font:11px ui-sans-serif,system-ui,sans-serif;font-variant-numeric:tabular-nums;white-space:nowrap; }
+.djp-transport-time span { color:#777; }
+.djp-play-toggle { position:absolute;left:50%;transform:translateX(-50%);display:grid;place-items:center;width:40px;height:40px;padding:0;border:0;background:transparent;color:#eee;cursor:pointer; }
+.djp-play-toggle .djp-icon { width:24px;height:24px; }
+.djp-transport-actions { margin-left:auto;display:flex;gap:6px; }
+.djp-transport-actions .djp-iconbtn { width:28px;height:32px; }
+.djp-transport-actions .djp-icon { width:19px;height:19px; }
+.djp-tdock { display:flex;flex-direction:column;flex:1 1 0;min-height:180px;max-height:none;padding:0;border:0;background:#1d1d1d;overflow:hidden; }
+.djp-editor-timeline { position:relative;display:flex;flex-direction:column;flex:1;min-height:0; }
+.djp-timeline-tools { position:absolute;right:8px;bottom:4px;z-index:9;display:flex;align-items:center;gap:6px;height:28px;padding:0 4px;background:#1d1d1deb;border-radius:4px; }
+.djp-timeline-tools .djp-iconbtn { width:24px;height:24px;color:#8a8a8a; }
+.djp-timeline-tools .djp-icon { width:13px;height:13px; }
+.djp-snap[aria-pressed=true] { color:#dadada; }
+.djp-zoom { display:flex;align-items:center;gap:6px;font-size:12px;color:#777; }
+.djp-zoom input { width:52px;height:12px;accent-color:#adadad; }
+.djp-timeline-viewport { position:relative;flex:1;min-height:0;overflow:hidden; }
+.djp-timeline-scroll { width:100%;height:100%;overflow:auto;overscroll-behavior:contain;touch-action:pan-y;scrollbar-width:none; }
+.djp-timeline-scroll::-webkit-scrollbar { display:none; }
+.djp-tstrip { position:relative;box-sizing:border-box;display:flex;flex-direction:column;gap:0;min-height:100%;padding-bottom:48px; }
+.djp-trow { position:relative;display:flex;align-items:stretch;flex:none; }
+.djp-trow-name { display:none; }
+.djp-trow-lane { flex:1;min-width:0; }
+.djp-track { position:relative;height:56px;overflow:visible;border:0;border-radius:0;background:transparent; }
+.djp-lane-main { margin-top:0; }
+.djp-lane-main .djp-track { height:68px; }
+.djp-lane-audio .djp-track { height:56px; }
+.djp-lane-subs .djp-track { height:44px; }
+.djp-track-overview { display:flex;flex-direction:column;flex:none;margin-top:16px; }
+.djp-track-summary { position:relative;width:100%;height:10px;padding:0;border:0;background:transparent;cursor:pointer;flex:none; }
+.djp-track-summary > span { position:absolute;top:3px;height:3px;border-radius:2px;pointer-events:none;background:var(--djp-summary-color);opacity:.7; }
+.djp-track-summary:hover > span,.djp-track-summary:focus-visible > span { opacity:1;height:4px; }
+.djp-summary-main { --djp-summary-color:#a4a4a4; }
+.djp-summary-audio { --djp-summary-color:#15989e; }
+.djp-summary-pip { --djp-summary-color:#a693d2; }
+.djp-summary-subs { --djp-summary-color:#d56b50; }
+.djp-active-tracks { margin-top:12px;display:flex;flex-direction:column;gap:3px; }
+.djp-lane-muted .djp-track { opacity:.35; }
+.djp-ruler-row { position:sticky;top:0;z-index:5;margin-inline:0; }
+.djp-ruler { position:relative;flex:1;height:32px;overflow:visible;cursor:ew-resize;touch-action:none;background:#1d1d1d; }
+.djp-tick { position:absolute;top:0;bottom:0;padding-left:0;font:10px/30px ui-sans-serif,system-ui,sans-serif;color:#808080;white-space:nowrap;pointer-events:none;transform:translateX(-50%); }
+.djp-tick::after { content:'·';position:absolute;left:calc(var(--djp-grid-step) / 2);top:0;color:#676767; }
+.djp-center-playhead { position:absolute;left:50%;top:38px;bottom:34px;width:2px;border-radius:2px;background:#f6f6f6;box-shadow:0 0 3px #0004;pointer-events:none;z-index:7; }
+.djp-timeline-add { position:absolute;right:12px;top:calc(76px + var(--djp-summary-count) * 10px);z-index:8;display:grid;place-items:center;width:34px;height:34px;padding:0;border:0;border-radius:6px;background:#f3f3f3;color:#292929;box-shadow:0 1px 5px #0005;cursor:pointer; }
+.djp-timeline-add .djp-icon { width:23px;height:23px; }
+.djp-track-block { position:absolute;top:4px;bottom:4px;display:flex;flex-direction:column;min-width:0;overflow:hidden;border:1px solid #242424;border-radius:2px;background:#323232;cursor:grab;touch-action:none;user-select:none; }
+.djp-main-block { border-radius:0; }
+.djp-filmstrip { display:flex;flex:1;min-height:0;overflow:hidden;pointer-events:none; }
+.djp-filmstrip > span { flex:1;min-width:0;background-size:auto 100%;background-repeat:repeat-x;background-position:center; }
+.djp-clip-caption { display:flex;align-items:center;gap:6px;min-width:0;padding:5px 9px;font-size:11px;line-height:16px;pointer-events:none; }
+.djp-clip-caption > span:nth-child(2) { overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.djp-clip-caption .djp-icon { width:12px;height:12px; }
+.djp-clip-caption small { margin-left:auto;font-size:9px; }
+.djp-main-block .djp-clip-caption,.djp-pip-block .djp-clip-caption { position:absolute;inset:0 0 auto;z-index:1;background:linear-gradient(#0009,transparent);font-size:9px;color:#fff;opacity:0; }
+.djp-main-block:hover .djp-clip-caption,.djp-pip-block:hover .djp-clip-caption,.djp-clip-selected .djp-clip-caption { opacity:1; }
+.djp-audio-block { background:#143436;border:0;border-radius:2px;justify-content:flex-end; }
+.djp-audio-block .djp-clip-caption { position:absolute;left:0;top:0;padding:1px 6px;font-size:8px;color:#8ab7ba;opacity:0; }
+.djp-audio-block:hover .djp-clip-caption,.djp-audio-block.djp-clip-selected .djp-clip-caption { opacity:1; }
+.djp-waveform { width:100%;height:100%;color:#15989e;pointer-events:none; }
+.djp-wave-baseline { height:1px;background:#15989e;pointer-events:none; }
+.djp-subs-block { background:#d56b50;border:0;border-radius:3px;justify-content:center;color:#fff4ec; }
+.djp-subs-block .djp-clip-caption > span:first-child { display:grid;place-items:center;width:16px;height:16px;border:1px solid #f9dfcd8c;border-radius:2px;font-size:10px;flex:none; }
+.djp-track-block.djp-clip-selected,.djp-track-block.djp-dragging { border-color:#fff;box-shadow:inset 0 0 0 1px #fff;z-index:2; }
+.djp-dragging { opacity:.85;cursor:grabbing!important; }
+.djp-handle { position:absolute;top:0;bottom:0;width:8px;z-index:3;cursor:ew-resize;touch-action:none; }
+.djp-hl { left:0; }.djp-hr { right:0; }
+.djp-clip-selected .djp-handle,.djp-handle:hover { background:#f8f8f8; }
+.djp-handle::after { content:'';position:absolute;left:3px;top:calc(50% - 6px);width:2px;height:12px;background:#272727;border-radius:2px;opacity:0; }
+.djp-clip-selected .djp-handle::after,.djp-handle:hover::after { opacity:1; }
+.djp-transition-mark { position:absolute;left:0;bottom:0;width:16px;height:25px;background:linear-gradient(135deg,#ffffff88,transparent 55%);pointer-events:none; }
+.djp-trow-empty { display:inline-block;padding:12px 8px;font-size:10px;color:#626262;white-space:nowrap; }
+.djp-empty-audio { display:flex;align-items:center;gap:6px;margin:12px 8px;padding:0;border:0;background:transparent;color:#777;font-size:10px;cursor:pointer;white-space:nowrap; }
+.djp-empty-audio .djp-icon { width:12px;height:12px; }
+.djp-tool-dock { flex:none;display:flex;justify-content:space-around;gap:4px;padding:17px 8px 20px;background:#202020; }
+.djp-tool-dock > button { flex:1;display:flex;align-items:center;flex-direction:column;gap:9px;padding:3px 0;border:0;background:transparent;color:#bebebe;font-size:11px;cursor:pointer; }
+.djp-tool-dock .djp-icon { width:25px;height:25px;stroke-width:1.4; }
+.djp-tool-dock > button:hover,.djp-tool-dock > .djp-tool-active { color:#fff; }
+.djp-tool-active::after { content:'';height:2px;width:14px;background:#fb416a;border-radius:1px;margin-top:-5px; }
+.djp-collection { position:absolute;inset:auto 0 88px;z-index:30;display:flex;flex-direction:column;max-height:48%;background:#232323;border-top:1px solid #383838;border-radius:12px 12px 0 0;box-shadow:0 -16px 32px #0003; }
+.djp-collection[hidden] { display:none; }
+.djp-collection-head { display:flex;align-items:center;justify-content:space-between;flex:none;padding:10px 16px 6px; }
+.djp-collection-head strong { font-size:12px;font-weight:500; }
+.djp-tabwrap { flex:1;min-height:0;overflow:auto;padding:8px 16px 16px; }
+.djp-section-head { font-size:11px;color:#969696; }
+.djp-property-drawer { background:#232323;border-color:#3a3a3a; }
+.djp-drawer-mask { z-index:45; }
+@container (max-width:360px) { .djp-head { gap:6px;padding-inline:12px; }.djp-resolution { padding-inline:9px; }.djp-export { padding-inline:13px; }.djp-proj-name { font-size:10px; }.djp-transport-actions { gap:2px; }.djp-tool-dock { padding-block:13px; }.djp-collection { bottom:80px; } }
+
+@media (prefers-reduced-motion: reduce) { .djp-root * { transition: none !important; } }
 `;
 		//#endregion
 		//#region src/client/index.tsx

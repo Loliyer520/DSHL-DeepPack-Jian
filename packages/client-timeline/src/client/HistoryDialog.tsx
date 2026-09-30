@@ -1,3 +1,4 @@
+import { useDialog } from './useDialog';
 import React, { useEffect, useState } from 'react';
 import { apiFetch } from './api';
 
@@ -9,6 +10,7 @@ interface SnapInfo {
 
 // 版本历史弹层：AI 修改自动存档 + 手动恢复（恢复前服务端自动保底快照，可来回切）
 export const HistoryDialog: React.FC<{ onClose: () => void; onRestored: () => void }> = ({ onClose, onRestored }) => {
+  const dialogRef = useDialog(onClose);
   const [snaps, setSnaps] = useState<SnapInfo[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState('');
@@ -38,7 +40,7 @@ export const HistoryDialog: React.FC<{ onClose: () => void; onRestored: () => vo
 
   return (
     <div className="djp-mask" onClick={onClose}>
-      <div className="djp-dialog" onClick={(e) => e.stopPropagation()}>
+      <div className="djp-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-label="版本历史" tabIndex={-1} onClick={(e) => e.stopPropagation()}>
         <div className="djp-dialog-title">版本历史</div>
         {err && <div className="djp-error">{err}</div>}
         <div className="djp-hist-list">
