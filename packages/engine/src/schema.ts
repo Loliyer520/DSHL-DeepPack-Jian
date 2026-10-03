@@ -1,289 +1,358 @@
 import { z } from "zod";
+import { ANIM_CHANNELS, BLEND_MODES, DIRECTIONS, EASING_NAMES, SCHEMA_VERSION, TRANSITION_TYPES, secToFrames } from "./timeline.js";
+export { ANIM_CHANNELS, BLEND_MODES, DIRECTIONS, EASING_NAMES, TRANSITION_TYPES };
 
-// ---------- D剪 时间线 JSON 契约 v2（多轨） ----------
-// 唯一事实源：AI 剪辑操作、WebUI 手动调整都编辑这份 JSON；渲染层吃 JSON 出 mp4。
+// ---------- D剪 时间线 JSON 契约 v5（多轨 + 稳定 id + 可选高级字段） ----------
+// 唯一事实源：AI 剪辑操作、面板手动调整都编辑这份 JSON；渲染层吃 JSON 出 mp4。
 //
-// v2 归一化模型（parseTimeline 输出一律是 v2 结构）：
-//   videoTracks[0]  = 主轨道：clips 串行（Series），无 atSeconds，时长 = Σ clipDuration
-//   videoTracks[1+] = 叠加轨（画中画）：clip 带绝对 atSeconds + 可选 box（0-1 分数矩形）
+// 归一化模型（parseTimeline 输出一律是 v5 结构）：
+//   videoTracks[0]  = 主轨道：clips 串行，无 atSeconds，时长 = Σ clipDuration（转场居中于剪辑点，不改总时长）
+//   videoTracks[1+] = 叠加轨（画中画/贴图）：clip 带绝对 atSeconds + 可选 box（0-1 分数矩形）；越靠后越在上层
 //   audioTracks     = 音频轨：clip 带 atSeconds / inPoint / duration，轨 volume×clip volume
-//   overlays        = 字幕叠加层，绝对秒区间
+//   overlays        = 文字/字幕层（稳定 id），绝对秒区间
+//   markers         = 标记点
 //
-// v1 兼容：{clips, audio} 旧字段在 parseTimeline 自动迁移——clips → 主轨道，audio → 单clip音频轨。
-// 总时长（帧）= max(主轨道Σ、所有叠加clip末尾、所有音频clip末尾、所有字幕区间末尾)，不由 JSON 声明。
+// 兼容：v1 {clips, audio} 自动迁移；v2–v4 缺 id 的字幕在解析时补确定性 id；
+// 新字段全部可选（additive），旧数据零改动可读。version 高于本引擎支持的数据拒绝加载，防止旧版覆盖新数据。
 
-export const transitionSchema = z.enum(["none", "fade"]).default("none");
+export const transitionObjectSchema = z.object({
+  type: z.enum(TRANSITION_TYPES),
+  duration: z.number().min(0.05).max(3),
+  direction: z.enum(DIRECTIONS).optional(),
+});
+// "none" / "fade"（旧：片头从黑场淡入）/ 对象（新：与前一片段交叠的转场，居中于剪辑点）
+export const transitionSchema = z.union([z.enum(["none", "fade"]), transitionObjectSchema]).default("none");
 
-// ---------- v3：关键帧 / 滤镜 / 变速（全 additive，旧 JSON 照收） ----------
-// 关键帧：t = clip 内相对秒（成片时间轴），v = 属性值；相邻帧间按缓动插值，区间外鉗端点
-// e = 从本帧到下一帧的缓动曲线（省略=线性）
-export const easingSchema = z.enum(["linear", "in", "out", "inOut", "bounce", "elastic"]);
+export const EASINGS = EASING_NAMES;
+export const easingSchema = z.union([
+  z.enum(EASINGS),
+  z.tuple([z.number().min(0).max(1), z.number(), z.number().min(0).max(1), z.number()]),
+]);
 export const keyframeSchema = z.object({
-  // A split keeps earlier keyframes at negative times to preserve the easing curve.
+  // 分割后左半段可能保留负时间的帧，用于维持曲线连续
   t: z.number(),
   v: z.number(),
   e: easingSchema.optional(),
 });
 
-// 动画通道：x/y 为画布分数偏移（0=原位），scale 1=原大，opacity 0-1，rotation 度，volume 0-1 乘在 clip.volume 上
+// 可动画通道。x/y 为画布分数偏移（0=原位），scale 1=原大，opacity 0-1，rotation 度，
+// volume 0-1 乘在片段音量上；brightness/contrast/saturate 1=原；blur 像素。
+export type AnimChannel = (typeof ANIM_CHANNELS)[number];
+const kfList = z.array(keyframeSchema).optional();
 export const animationsSchema = z.object({
-  x: z.array(keyframeSchema).optional(),
-  y: z.array(keyframeSchema).optional(),
-  scale: z.array(keyframeSchema).optional(),
-  opacity: z.array(keyframeSchema).optional(),
-  rotation: z.array(keyframeSchema).optional(),
-  volume: z.array(keyframeSchema).optional(),
+  x: kfList, y: kfList, scale: kfList, scaleX: kfList, scaleY: kfList, opacity: kfList,
+  rotation: kfList, volume: kfList, brightness: kfList, contrast: kfList, saturate: kfList, blur: kfList,
 });
 
-// 基础滤镜（CSS filter 子集）：省略 = 不调
 export const filterSchema = z.object({
-  brightness: z.number().min(0).max(3).optional(), // 1=原
+  brightness: z.number().min(0).max(3).optional(),
   contrast: z.number().min(0).max(3).optional(),
   saturate: z.number().min(0).max(3).optional(),
-  blur: z.number().min(0).max(20).optional(), // px
+  blur: z.number().min(0).max(20).optional(),
   grayscale: z.number().min(0).max(1).optional(),
   sepia: z.number().min(0).max(1).optional(),
-  hueRotate: z.number().min(0).max(360).optional(), // 度
+  hueRotate: z.number().min(0).max(360).optional(),
 });
 
-// 恒定变速：clipDuration 仍是成片占时；素材消耗 = 占时 × speed（2x = 快放，素材内走两倍）
+// 动画预设引用：渲染时按片段当前时长展开，裁剪/变速后自动对齐（不再把预设烤死成关键帧）
+export const effectSchema = z.object({
+  preset: z.string().min(1),
+});
 
-// 主轨道/叠加轨通用的片段字段
+const rectSchema = z.object({
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+  w: z.number().min(0.01).max(1),
+  h: z.number().min(0.01).max(1),
+});
+
+
 export const clipSchema = z.object({
-  id: z.string(),
+  id: z.string().min(1),
   type: z.enum(["video", "image"]),
-  src: z.string(), // 素材路径：相对于素材根目录（渲染时由 publicDir 决定）
+  src: z.string(), // 素材文件名：相对于项目素材目录
   inPoint: z.number().min(0),
   clipDuration: z.number().positive(),
   transition: transitionSchema,
   volume: z.number().min(0).max(1).default(1),
-  // 叠加轨专用：绝对起始秒（主轨道 clip 上无意义，渲染忽略）
-  atSeconds: z.number().min(0).optional(),
-  // 叠加轨专用：画中画盒子（0-1 分数，默认右下 30%）
-  box: z
-    .object({
-      x: z.number().min(0).max(1),
-      y: z.number().min(0).max(1),
-      w: z.number().min(0.01).max(1),
-      h: z.number().min(0.01).max(1),
-    })
-    .optional(),
-  // v3：变速 / 滤镜 / 关键帧动画
+  atSeconds: z.number().min(0).optional(), // 叠加轨专用
+  box: rectSchema.optional(), // 叠加轨专用：画中画盒子
   speed: z.number().min(0.1).max(10).default(1),
   filter: filterSchema.optional(),
   animations: animationsSchema.optional(),
+  effects: z.array(effectSchema).max(8).optional(),
+  // v5 画面
+  crop: rectSchema.optional(), // 源画面裁切（0-1 分数）
+  flipH: z.boolean().optional(),
+  flipV: z.boolean().optional(),
+  opacity: z.number().min(0).max(1).optional(),
+  blendMode: z.enum(BLEND_MODES).optional(),
+  fit: z.enum(["cover", "contain", "fill"]).optional(),
+  freeze: z.boolean().optional(), // 定格：整段停在 inPoint 那一帧
+  radius: z.number().min(0).max(0.5).optional(), // 画中画圆角（短边分数）
+  shadow: z.boolean().optional(), // 画中画投影（缺省开启）
+  // v5 声音
+  muted: z.boolean().optional(),
+  fadeIn: z.number().min(0).max(30).optional(),
+  fadeOut: z.number().min(0).max(30).optional(),
 });
 
 export const videoTrackSchema = z.object({
-  id: z.string(),
+  id: z.string().min(1),
   name: z.string().optional(),
+  hidden: z.boolean().optional(),
+  locked: z.boolean().optional(),
+  muted: z.boolean().optional(),
   clips: z.array(clipSchema).default([]),
 });
 
-// 音频轨片段：绝对时间轴摆放
 export const audioClipSchema = z.object({
-  id: z.string(),
+  id: z.string().min(1),
   src: z.string(),
   inPoint: z.number().min(0).default(0),
   duration: z.number().positive(),
   volume: z.number().min(0).max(1).default(1),
   atSeconds: z.number().min(0).default(0),
-  // v3：变速（duration 仍是占时）+ 音量包络
   speed: z.number().min(0.1).max(10).default(1),
   animations: animationsSchema.optional(),
+  muted: z.boolean().optional(),
+  fadeIn: z.number().min(0).max(30).optional(),
+  fadeOut: z.number().min(0).max(30).optional(),
 });
 
-export const audioTrackV2Schema = z.object({
-  id: z.string(),
+export const audioTrackSchema = z.object({
+  id: z.string().min(1),
   name: z.string().optional(),
   volume: z.number().min(0).max(1).default(1),
   muted: z.boolean().default(false),
+  locked: z.boolean().optional(),
+  role: z.enum(["music", "voice", "sfx"]).optional(),
+  // 闪避：有人声（role=voice 的轨）时把本轨压到 level，ramp 秒内渐变
+  duck: z.object({ level: z.number().min(0).max(1), ramp: z.number().min(0).max(3).optional() }).optional(),
   clips: z.array(audioClipSchema).default([]),
 });
+/** @deprecated 旧名，等同 audioTrackSchema */
+export const audioTrackV2Schema = audioTrackSchema;
 
-// v1 遗留字段（仅输入兼容，归一化后输出里不存在）
 export const legacyAudioSchema = z.object({
   src: z.string(),
   volume: z.number().min(0).max(1).default(1),
   startAtSeconds: z.number().min(0).default(0),
 });
 
+const colorSchema = z.string().max(40);
 export const overlaySchema = z.object({
+  id: z.string().min(1),
   text: z.string(),
   startSeconds: z.number().min(0),
   endSeconds: z.number().min(0),
   position: z.enum(["top", "center", "bottom"]).default("bottom"),
-  fontSize: z.number().positive().default(64),
-  color: z.string().default("#ffffff"),
-  // v4：字体（内置字体库 id，见 fonts.ts；省略 = 系统默认栈）
+  fontSize: z.number().positive().max(2000).default(64),
+  color: colorSchema.default("#ffffff"),
   fontFamily: z.string().optional(),
   fontWeight: z.number().int().min(100).max(900).optional(),
-  // v3：字幕关键帧动画（t = 字幕内相对秒，出现时刻=0；volume 通道对文本无意义，渲染忽略）
   animations: animationsSchema.optional(),
+  effects: z.array(effectSchema).max(8).optional(),
+  // v5 版式：x/y 给出时按锚点（文字块中心）自由摆放，覆盖 position
+  x: z.number().min(0).max(1).optional(),
+  y: z.number().min(0).max(1).optional(),
+  align: z.enum(["left", "center", "right"]).optional(),
+  maxWidth: z.number().min(0.1).max(1).optional(),
+  lineHeight: z.number().min(0.8).max(3).optional(),
+  letterSpacing: z.number().min(-0.2).max(1).optional(), // em
+  italic: z.boolean().optional(),
+  underline: z.boolean().optional(),
+  stroke: z.object({ color: colorSchema, width: z.number().min(0).max(40) }).optional(),
+  shadow: z.union([
+    z.literal(false),
+    z.object({ color: colorSchema, blur: z.number().min(0).max(80), x: z.number().min(-80).max(80).optional(), y: z.number().min(-80).max(80).optional() }),
+  ]).optional(),
+  background: z.object({
+    color: colorSchema,
+    opacity: z.number().min(0).max(1).optional(),
+    padding: z.number().min(0).max(200).optional(),
+    radius: z.number().min(0).max(200).optional(),
+  }).optional(),
+  kind: z.enum(["subtitle", "title"]).optional(),
+  track: z.number().int().min(0).max(31).optional(),
+});
+
+export const markerSchema = z.object({
+  id: z.string().min(1),
+  t: z.number().min(0),
+  label: z.string().max(80).optional(),
+  color: colorSchema.optional(),
 });
 
 const metaSchema = z.object({
-  fps: z.number().positive(),
-  width: z.number().int().positive(),
-  height: z.number().int().positive(),
+  fps: z.number().positive().max(240),
+  width: z.number().int().positive().max(16384),
+  height: z.number().int().positive().max(16384),
+  background: colorSchema.optional(),
 });
 
-// 输入 schema：v2 字段 + v1 遗留字段都收
+// 输入：v1–v5 字段都收（字幕/标记 id 可缺，由归一化补齐）
 const timelineInputSchema = z.object({
   meta: metaSchema,
+  version: z.number().int().optional(),
   videoTracks: z.array(videoTrackSchema).optional(),
-  audioTracks: z.array(audioTrackV2Schema).optional(),
+  audioTracks: z.array(audioTrackSchema).optional(),
   clips: z.array(clipSchema).optional(),
   audio: legacyAudioSchema.nullable().optional(),
-  overlays: z.array(overlaySchema).default([]),
+  overlays: z.array(overlaySchema.extend({ id: z.string().min(1).optional() })).default([]),
+  markers: z.array(markerSchema.extend({ id: z.string().min(1).optional() })).default([]),
 });
 
-// 输出（v2 规范形）
 export const timelineSchema = z.object({
   meta: metaSchema,
-  version: z.literal(2).default(2),
+  version: z.literal(SCHEMA_VERSION).default(SCHEMA_VERSION),
   videoTracks: z.array(videoTrackSchema).min(1),
-  audioTracks: z.array(audioTrackV2Schema),
+  audioTracks: z.array(audioTrackSchema),
   overlays: z.array(overlaySchema),
+  markers: z.array(markerSchema).default([]),
 });
 
 export type Transition = z.infer<typeof transitionSchema>;
+export type TransitionObject = z.infer<typeof transitionObjectSchema>;
+export type Easing = z.infer<typeof easingSchema>;
 export type Keyframe = z.infer<typeof keyframeSchema>;
 export type Animations = z.infer<typeof animationsSchema>;
 export type Filter = z.infer<typeof filterSchema>;
+export type Effect = z.infer<typeof effectSchema>;
 export type Clip = z.infer<typeof clipSchema>;
 export type VideoTrack = z.infer<typeof videoTrackSchema>;
 export type AudioClip = z.infer<typeof audioClipSchema>;
-export type AudioTrack = z.infer<typeof audioTrackV2Schema>;
+export type AudioTrack = z.infer<typeof audioTrackSchema>;
 export type Overlay = z.infer<typeof overlaySchema>;
+export type Marker = z.infer<typeof markerSchema>;
+export type Meta = z.infer<typeof metaSchema>;
 export type Timeline = z.infer<typeof timelineSchema>;
 
-export function shiftAnimations(animations: Animations | undefined, seconds: number): Animations | undefined {
-  if (!animations) return undefined;
-  return Object.fromEntries(Object.entries(animations).map(([channel, frames]) => [
-    channel, frames?.map((frame) => ({ ...frame, t: frame.t - seconds })),
-  ])) as Animations;
+// 纯函数从 timeline.ts 再导出（保持旧 import 路径可用）
+export {
+  SCHEMA_VERSION,
+  clipBox,
+  evalKeyframes,
+  shiftAnimations,
+  timelineDurationInFrames,
+  mainTrackStarts,
+  locateClip,
+  timelineHasContent,
+  srcLabel,
+} from "./timeline.js";
+
+export class TimelineVersionError extends Error {
+  constructor(public readonly version: number) {
+    super(`时间线由更新版本的 D剪 创建（格式 v${version}，当前引擎支持到 v${SCHEMA_VERSION}），请升级整合包后再打开；为防止数据丢失，本版本不会改写它。`);
+    this.name = "TimelineVersionError";
+  }
 }
 
-const SEC = (fps: number, s: number) => Math.round(s * fps);
-
-const DEFAULT_BOX = { x: 0.66, y: 0.66, w: 0.3, h: 0.3 };
-export const clipBox = (c: Clip) => c.box ?? DEFAULT_BOX;
-
-let trackSeq = 0;
-const autoId = (p: string) => `${p}${Date.now().toString(36)}${(trackSeq++).toString(36)}${Math.random().toString(36).slice(2, 5)}`;
-
-// 缓动曲线：f(0..1) → 0..1
-const EASING: Record<string, (f: number) => number> = {
-  linear: (f) => f,
-  in: (f) => f * f * f, // cubic 加速
-  out: (f) => 1 - Math.pow(1 - f, 3), // cubic 减速
-  inOut: (f) => (f < 0.5 ? 4 * f * f * f : 1 - Math.pow(-2 * f + 2, 3) / 2),
-  bounce: (f) => {
-    // ease-out bounce（落地弹跳感）
-    const n1 = 7.5625;
-    const d1 = 2.75;
-    if (f < 1 / d1) return n1 * f * f;
-    if (f < 2 / d1) return n1 * (f -= 1.5 / d1) * f + 0.75;
-    if (f < 2.5 / d1) return n1 * (f -= 2.25 / d1) * f + 0.9375;
-    return n1 * (f -= 2.625 / d1) * f + 0.984375;
-  },
-  elastic: (f) => {
-    // ease-out elastic（弹簧过冲）
-    if (f === 0 || f === 1) return f;
-    const c4 = (2 * Math.PI) / 3;
-    return Math.pow(2, -10 * f) * Math.sin((f * 10 - 0.75) * c4) + 1;
-  },
-};
-
-// 关键帧求值：相邻帧按前一帧的缓动曲线插值，区间外鉗端点。空/单点退化常值。
-export const evalKeyframes = (kfs: Keyframe[] | undefined, sec: number): number | undefined => {
-  if (!kfs || kfs.length === 0) return undefined;
-  if (kfs.length === 1) return kfs[0].v;
-  const sorted = [...kfs].sort((a, b) => a.t - b.t);
-  if (sec <= sorted[0].t) return sorted[0].v;
-  const last = sorted[sorted.length - 1];
-  if (sec >= last.t) return last.v;
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const a = sorted[i];
-    const b = sorted[i + 1];
-    if (sec >= a.t && sec <= b.t) {
-      const f = (sec - a.t) / (b.t - a.t);
-      const eased = EASING[a.e ?? "linear"](f);
-      return a.v + (b.v - a.v) * eased;
-    }
+// 确定性短哈希：旧数据补 id 时多次解析结果一致（FNV-1a）
+export const hash36 = (s: string): string => {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
   }
-  return last.v;
+  return (h >>> 0).toString(36);
 };
 
-// v1 → v2 迁移 + 不变量维护（至少一条视频轨）
-function normalize(input: z.infer<typeof timelineInputSchema>): Timeline {
-  let videoTracks = input.videoTracks ?? [];
-  let audioTracks = input.audioTracks ?? [];
+type Input = z.infer<typeof timelineInputSchema>;
+
+// v1 → v5 迁移 + 不变量维护（至少一条视频轨、id 全局唯一、时长至少一帧）
+function normalize(input: Input): Timeline {
+  const fps = input.meta.fps;
+  const frame = 1 / fps;
+  let videoTracks = (input.videoTracks ?? []).map((tr) => ({ ...tr, clips: tr.clips.map((c) => ({ ...c })) }));
+  let audioTracks = (input.audioTracks ?? []).map((tr) => ({ ...tr, clips: tr.clips.map((c) => ({ ...c })) }));
 
   if (!videoTracks.length && input.clips?.length) {
-    videoTracks = [{ id: "v1", name: "主轨道", clips: input.clips }];
+    videoTracks = [{ id: "v1", name: "主轨道", clips: input.clips.map((c) => ({ ...c })) }];
   }
   if (!videoTracks.length) videoTracks = [{ id: "v1", name: "主轨道", clips: [] }];
 
   if (!audioTracks.length && input.audio) {
-    // v1 单音频字段 → 一条音频轨一个 clip（时长先按主轨道估，渲染层会被总时长兜住）
     const mainDur = videoTracks[0].clips.reduce((s, c) => s + c.clipDuration, 0);
     const startAt = input.audio.startAtSeconds ?? 0;
-    audioTracks = [
-      {
-        id: "a1",
-        name: "配乐",
-        volume: input.audio.volume ?? 1,
-        muted: false,
-        clips: [
-          {
-            id: autoId("ac"),
-            src: input.audio.src,
-            inPoint: 0,
-            duration: Math.max(0.1, mainDur - startAt),
-            volume: 1,
-            atSeconds: startAt,
-            speed: 1,
-          },
-        ],
-      },
-    ];
+    audioTracks = [{
+      id: "a1", name: "配乐", volume: input.audio.volume ?? 1, muted: false,
+      clips: [{ id: "ac" + hash36(input.audio.src), src: input.audio.src, inPoint: 0, duration: Math.max(0.1, mainDur - startAt), volume: 1, atSeconds: startAt, speed: 1 }],
+    }];
   }
 
-  return {
-    meta: input.meta,
-    version: 2,
-    videoTracks,
-    audioTracks,
-    overlays: input.overlays,
+  // 全局 id 唯一：重复者改名（保留第一个）
+  const seen = new Set<string>();
+  const unique = (id: string, salt: string): string => {
+    let next = id;
+    let n = 1;
+    while (seen.has(next)) next = id + "_" + hash36(salt + String(n++));
+    seen.add(next);
+    return next;
   };
+  for (const tr of videoTracks) {
+    tr.id = unique(tr.id, "vt" + (tr.name ?? ""));
+    for (const c of tr.clips) {
+      c.id = unique(c.id, "c" + c.src + c.inPoint);
+      if (c.clipDuration < frame) c.clipDuration = frame;
+    }
+  }
+  for (const tr of audioTracks) {
+    tr.id = unique(tr.id, "at" + (tr.name ?? ""));
+    for (const c of tr.clips) {
+      c.id = unique(c.id, "ac" + c.src + c.inPoint);
+      if (c.duration < frame) c.duration = frame;
+    }
+  }
+  const overlays = input.overlays.map((o, i) => {
+    const id = unique(o.id ?? "o" + hash36(i + "|" + o.text + "|" + o.startSeconds), "o" + i + o.text);
+    const endSeconds = o.endSeconds < o.startSeconds + frame ? o.startSeconds + frame : o.endSeconds;
+    return { ...o, id, endSeconds };
+  });
+  const markers = input.markers.map((m, i) => ({ ...m, id: unique(m.id ?? "m" + hash36(i + "|" + m.t), "m" + m.t) }));
+
+  return { meta: input.meta, version: SCHEMA_VERSION, videoTracks, audioTracks, overlays, markers } as Timeline;
 }
 
-// 总时长（帧）：主轨道串行求和 vs 叠加clip/音频clip 的绝对末尾，取最大
-export const timelineDurationInFrames = (t: Timeline): number => {
-  const fps = t.meta.fps;
-  let frames = t.videoTracks[0]?.clips.reduce((acc, c) => acc + SEC(fps, c.clipDuration), 0) ?? 0;
-  for (const tr of t.videoTracks.slice(1)) {
-    for (const c of tr.clips) frames = Math.max(frames, SEC(fps, (c.atSeconds ?? 0) + c.clipDuration));
-  }
-  for (const tr of t.audioTracks) {
-    if (tr.muted) continue;
-    for (const c of tr.clips) frames = Math.max(frames, SEC(fps, c.atSeconds + c.duration));
-  }
-  for (const ov of t.overlays) frames = Math.max(frames, SEC(fps, ov.endSeconds));
-  return Math.max(1, frames);
-};
-
-// 解析 + 校验 + 归一化（对象或字符串），失败抛出带路径的错误；v1 输入自动升级 v2
+// 解析 + 校验 + 归一化（对象或字符串），失败抛出带路径的错误；旧格式自动升级
 export const parseTimeline = (input: unknown): Timeline => {
   const data = typeof input === "string" ? JSON.parse(input) : input;
+  const version = (data as { version?: unknown } | null)?.version;
+  if (typeof version === "number" && version > SCHEMA_VERSION) throw new TimelineVersionError(version);
   const result = timelineInputSchema.safeParse(data);
   if (!result.success) {
     const issues = result.error.issues
-      .map((i) => `  - ${i.path.join(".") || "(root)"}: ${i.message}`)
+      .slice(0, 12)
+      .map((i) => "  - " + (i.path.join(".") || "(root)") + ": " + i.message)
       .join("\n");
-    throw new Error(`时间线 JSON 校验失败：\n${issues}`);
+    throw new Error("时间线 JSON 校验失败：\n" + issues);
   }
   return normalize(result.data);
+};
+
+/** 严格校验一份已归一化的时间线（ops 应用后使用）；返回问题列表，空数组 = 合法 */
+export const validateTimeline = (t: unknown): string[] => {
+  const result = timelineSchema.safeParse(t);
+  if (!result.success) return result.error.issues.slice(0, 12).map((i) => (i.path.join(".") || "(root)") + ": " + i.message);
+  const issues: string[] = [];
+  const tl = result.data;
+  const ids = new Set<string>();
+  const dup = (id: string, where: string) => {
+    if (ids.has(id)) issues.push(where + ": id「" + id + "」重复");
+    ids.add(id);
+  };
+  tl.videoTracks.forEach((tr, i) => {
+    dup(tr.id, "videoTracks." + i);
+    tr.clips.forEach((c, j) => dup(c.id, "videoTracks." + i + ".clips." + j));
+  });
+  tl.audioTracks.forEach((tr, i) => {
+    dup(tr.id, "audioTracks." + i);
+    tr.clips.forEach((c, j) => dup(c.id, "audioTracks." + i + ".clips." + j));
+  });
+  tl.overlays.forEach((o, i) => {
+    dup(o.id, "overlays." + i);
+    if (secToFrames(tl.meta.fps, o.endSeconds) <= secToFrames(tl.meta.fps, o.startSeconds)) issues.push("overlays." + i + ": 结束时间必须晚于开始时间至少一帧");
+  });
+  tl.markers.forEach((m, i) => dup(m.id, "markers." + i));
+  return issues;
 };

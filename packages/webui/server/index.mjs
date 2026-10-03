@@ -12,10 +12,10 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { DeepSeekHarness } from "@deepseek-ai/dsh-sdk-client";
 import { execFileSync } from "node:child_process";
-import { renderFrame, renderVideo, invalidateBundle } from "@djian/engine/dist/render.js";
-import { parseTimeline } from "@djian/engine/dist/schema.js";
-import { expandAnimationPreset, listAnimationPresets } from "@djian/engine/dist/presets.js";
-import { FONTS, fontById } from "@djian/engine/dist/fonts.js";
+import { renderFrame, renderVideo, invalidateBundle } from "../../engine/dist/render.js";
+import { parseTimeline } from "../../engine/dist/schema.js";
+import { expandAnimationPreset, listAnimationPresets } from "../../engine/dist/presets.js";
+import { FONTS, fontById } from "../../engine/dist/fonts.js";
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
 const PORT = Number(process.env.PORT || 5180);

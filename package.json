@@ -2,18 +2,37 @@
   "name": "djian",
   "version": "0.1.0",
   "private": true,
-  "description": "D剪 — JSON 时间线驱动的视频剪辑引擎 + dsh 整合包",
-  "workspaces": [
-    "packages/*"
-  ],
+  "description": "D剪 — JSON 时间线驱动的 AI+人协同视频剪辑：引擎、剪辑面板、宿主桥接插件与 dsh 整合包",
   "scripts": {
-    "build:engine": "npm run build -w @djian/engine",
-    "check:timeline": "tsc -p packages/client-timeline/tsconfig.json --noEmit",
+    "build:engine": "tsc -p packages/engine/tsconfig.build.json",
+    "build:client": "npm run bundle:timeline && npm run bundle:library",
+    "bundle:timeline": "tsdown -c packages/client-timeline/tsdown.config.ts",
+    "bundle:library": "tsdown -c packages/client-library/tsdown.config.ts",
+    "check": "tsc -p packages/engine/tsconfig.json --noEmit && tsc -p packages/client-timeline/tsconfig.json --noEmit",
     "test": "npm run build:engine && node --test tests/*.test.mjs",
     "test:render": "npm run build:engine && node tests/integration/render-smoke.mjs",
     "test:sessions": "npm run build:engine && node tests/integration/session-isolation.mjs",
     "test:seek": "npm run build:engine && node tests/integration/media-seek.mjs",
+    "start:engine": "npm run build:engine && node packages/webui/server/index.mjs",
     "pack": "node packages/pack/scripts/build-dspack.mjs"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "5.6.3",
+    "tsdown": "^0.23.0",
+    "remotion": "4.0.526",
+    "@remotion/player": "4.0.526",
+    "@remotion/bundler": "4.0.526",
+    "@remotion/renderer": "4.0.526",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "zod": "3.25.76",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@types/node": "^22.10.0"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "type": "module"
 }
