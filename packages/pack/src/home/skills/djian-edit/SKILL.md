@@ -29,6 +29,7 @@ description: 视频剪辑操作速查——剪段、拼接、画中画、字幕�
 - 叠化转场：`updateClip{id, patch:{transition:{type:"dissolve", duration:0.5}}}`（作用于进入该片段的剪辑点）。
 - 画中画：`addClip{src, track:"pip", atSeconds, clipDuration, box:{x:0.62,y:0.06,w:0.34,h:0.34}, animationPreset:"slideInRight"}`。
 - 醒目字幕：`addOverlay{text, startSeconds, endSeconds, fontFamily:"sans", fontWeight:700, stroke:{color:"#000000", width:4}}`；底框用 `background:{color:"#000000", opacity:0.55}`。
+- 字幕文件：已有 SRT/VTT 用 `djian_subtitles{action:"import", path}` 一次导入（与已有字幕重叠会自动放到新字幕层，整批可撤销）；交付字幕用 `djian_subtitles{action:"export"}` 拿 SRT 文本。
 - 标题自由摆放：`addOverlay{text, startSeconds, endSeconds, kind:"title", x:0.5, y:0.3, fontSize:96, animationPreset:"zoomIn"}`。
 - 配乐 + 人声闪避：`addAudio{src, atSeconds:0, track:"配乐", fadeOut:2}`，`updateTrack{id:<人声轨>, patch:{role:"voice"}}`，`updateTrack{id:<配乐轨>, patch:{duck:{level:0.25}}}`。
 - 关键帧轨迹：`setKeyframe{id, channel:"x", t:0, v:-0.3}` + `setKeyframe{id, channel:"x", t:1, v:0, e:"out"}`（t 为片段内相对秒）。

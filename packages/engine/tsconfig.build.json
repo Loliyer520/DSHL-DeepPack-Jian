@@ -21,6 +21,7 @@
     "src/presets.ts",
     "src/fonts.ts",
     "src/browser.ts",
-    "src/nativeRuntime.ts"
+    "src/nativeRuntime.ts",
+    "src/srt.ts"
   ]
 }

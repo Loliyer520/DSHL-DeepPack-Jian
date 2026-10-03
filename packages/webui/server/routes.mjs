@@ -6,6 +6,7 @@ import { pipeline } from 'node:stream/promises';
 import { FONTS } from '../../engine/dist/fonts.js';
 import { listAnimationPresets } from '../../engine/dist/presets.js';
 import { OP_NAMES } from '../../engine/dist/ops.js';
+import { cuesToOps, parseSubtitles, toSrt, toVtt } from '../../engine/dist/srt.js';
 import { Router, HttpError, readJson, sendJson } from './http.mjs';
 import { serveMedia } from './media.mjs';
 import { probe, thumbnail, sprite, peaks } from './media-tools.mjs';
@@ -363,6 +364,34 @@ function registerPreviewRoutes(r, { store, project }) {
 }
 
 function registerRenderRoutes(r, { store, render, project }) {
+  // ---------- 字幕文件 ----------
+  // ?format=vtt 导出 WebVTT；?titles=1 连标题一起导出
+  r.add('GET', '/api/p/:pid/subtitles', (req, res, { params, url }) => {
+    const pid = project(params);
+    const { timeline } = store.load(pid);
+    const vtt = url.searchParams.get('format') === 'vtt';
+    const body = vtt ? toVtt(timeline.overlays) : toSrt(timeline.overlays, { includeTitles: url.searchParams.get('titles') === '1' });
+    const name = (store.readProjectMeta(pid)?.name ?? 'djian').replace(/[^\p{L}\p{N}_-]+/gu, '_').slice(0, 40) + (vtt ? '.vtt' : '.srt');
+    res.writeHead(200, {
+      'Content-Type': (vtt ? 'text/vtt' : 'application/x-subrip') + '; charset=utf-8',
+      'Content-Disposition': "attachment; filename*=UTF-8''" + encodeURIComponent(name),
+      'Cache-Control': 'no-store',
+    });
+    res.end('\uFEFF' + body);
+  });
+
+  // 导入字幕文本（SRT/VTT）：解析后以一批 addOverlay 应用；与已有字幕重叠时自动放到新字幕层
+  r.add('POST', '/api/p/:pid/subtitles', async (req, res, { params }) => {
+    const pid = project(params);
+    const body = await readJson(req, 8 * 1024 * 1024);
+    const cues = parseSubtitles(String(body?.text ?? ''));
+    if (!cues.length) throw new HttpError(400, '没有解析到字幕（支持 SRT / VTT）');
+    const { ops, track, truncated } = cuesToOps(store.load(pid).timeline, cues);
+    const actor = body?.actor === 'ai' ? 'ai' : 'user';
+    const result = store.apply(pid, { ops, actor, clientId: typeof body?.clientId === 'string' ? body.clientId : null, label: '导入字幕 ' + ops.length + ' 条', batchId: typeof body?.batchId === 'string' ? body.batchId : null });
+    sendJson(res, 200, { ...result, imported: ops.length, track, truncated });
+  });
+
   // ---------- 在线素材库 ----------
   r.add('GET', '/api/library/search', async (req, res, { url }) => {
     const q = (url.searchParams.get('q') ?? '').trim();

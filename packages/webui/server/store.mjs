@@ -295,7 +295,7 @@ export class Store {
     }
     if (p.readOnly) throw new StoreError(423, p.readOnly, 'READ_ONLY');
     if (!Array.isArray(ops) || !ops.length) throw new StoreError(400, 'ops 必须是非空数组');
-    if (ops.length > 500) throw new StoreError(413, '单批操作不能超过 500 条');
+    if (ops.length > 2000) throw new StoreError(413, '单批操作不能超过 2000 条');
     const before = p.timeline;
     const result = applyOps(before, ops, {
       actor: system ? 'system' : actor,

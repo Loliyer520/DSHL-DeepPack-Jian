@@ -5,6 +5,7 @@ import { splitOffset } from '../../../engine/src/ops';
 import type { Editor } from './context';
 import type { Op, AssetInfo } from './engine';
 import type { Selected } from './selection';
+import { cuesToOps, type Cue } from '../../../engine/src/srt';
 
 const frame = (t: Timeline) => 1 / t.meta.fps;
 const snapT = (t: Timeline, s: number) => Math.round(s * t.meta.fps) / t.meta.fps;
@@ -197,6 +198,13 @@ export function createActions(ed: Editor) {
       const tl = t(); if (!tl) return;
       const rel = Math.max(0, snapT(tl, now()) - start);
       run([remove ? { op: 'removeKeyframe', id: target.id, channel, t: rel } : { op: 'setKeyframe', id: target.id, channel, t: rel, v: value }], remove ? '删除关键帧' : '添加关键帧');
+    },
+    /** 导入 SRT/VTT：与已有字幕重叠时放到新的字幕层；整批一步，可一次撤销 */
+    importSubtitles(cues: Cue[]) {
+      const tl = t(); if (!tl || !cues.length) return;
+      const { ops, truncated } = cuesToOps(tl, cues);
+      run(ops as Op[], '导入字幕 ' + ops.length + ' 条');
+      if (truncated) ed.store.toast('info', '字幕超过 2000 条，只导入了前 2000 条');
     },
     /** “交给 AI”：把选中对象的描述插进聊天输入框（不自动发送） */
     askAi() {

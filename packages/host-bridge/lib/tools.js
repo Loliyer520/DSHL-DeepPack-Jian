@@ -1,5 +1,6 @@
 // D剪 剪辑工具：名称、说明、参数 schema 与执行逻辑（不依赖宿主，宿主插件与 MCP 适配器共用）。
 // execute(client, ctx, args) → { value: JSON, text: 给模型的文字, image?: { data: Buffer, mediaType } }
+import { readFile } from 'node:fs/promises';
 import { outline } from './outline.js';
 import { OPS_DOC, OPS_PARAMETERS } from './ops-doc.js';
 
@@ -115,6 +116,27 @@ export const TOOLS = [
     async execute(client, ctx, args) {
       const r = await client.post(p(ctx.projectId) + '/library/import', args, { timeoutMs: 120_000 });
       return { value: r, text: '已下载为「' + r.name + '」（' + r.type + (r.duration ? '，' + r.duration + 's' : '') + '）' };
+    },
+  },
+  {
+    name: 'djian_subtitles',
+    description: '字幕文件（SRT / WebVTT）：action=import 把字幕文件导入为时间线字幕（path 本地文件或 text 文本；与已有字幕重叠时自动放到新的字幕层，整批一步可撤销）；action=export 返回当前时间线字幕的 SRT 文本（titles=true 连标题一起）。逐条改字幕用 djian_apply_ops。',
+    parameters: { type: 'object', properties: { action: { type: 'string', enum: ['import', 'export'] }, path: { type: 'string', description: '字幕文件绝对路径（import）' }, text: { type: 'string', description: '字幕文本（import，与 path 二选一）' }, titles: { type: 'boolean' } }, required: ['action'] },
+    async execute(client, ctx, args) {
+      if (args.action === 'export') {
+        const r = await client.request('GET', p(ctx.projectId) + '/subtitles' + (args.titles ? '?titles=1' : ''), { raw: true });
+        const srt = (await r.text()).replace(/^\uFEFF/, '');
+        return { value: { srt }, text: srt.trim() ? srt : '时间线上还没有字幕' };
+      }
+      let text = str(args.text);
+      if (!text && args.path) {
+        const buf = await readFile(String(args.path));
+        try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { text = new TextDecoder('gb18030').decode(buf); }
+      }
+      if (!text) throw new Error('import 需要 path 或 text');
+      const r = await client.post(p(ctx.projectId) + '/subtitles', { text, actor: 'ai', clientId: ctx.clientId }, { timeoutMs: 60_000 });
+      ctx.observe(r.rev, r.changed);
+      return { value: { rev: r.rev, imported: r.imported, track: r.track }, text: '已导入 ' + r.imported + ' 条字幕' + (r.track ? '（与已有字幕重叠，放在第 ' + (r.track + 1) + ' 层）' : '') + (r.truncated ? '；超过 2000 条的部分未导入' : '') + '（rev ' + r.rev + '）' };
     },
   },
   {

@@ -162,7 +162,7 @@ export function Workspace() {
   return (
     <div ref={root} className={'dj-root dj-' + size} tabIndex={-1} onKeyDown={onKeyDown}
       onPointerDown={(e) => { if (!isTyping(e.target) && !(e.target as HTMLElement).closest('button,a,[tabindex]')) root.current?.focus({ preventScroll: true }); }}>
-      <TopBar onDialog={setDialog} narrowTabs={compact && project ? (['inspector', 'assets', 'activity'] as SideTab[]).map((k) => [k, SIDE_LABEL[k]]) : undefined} sheet={sheet} onSheet={(s) => setSheet(s as SideTab | null)} />
+      <TopBar actions={actions} onDialog={setDialog} narrowTabs={compact && project ? (['inspector', 'assets', 'activity'] as SideTab[]).map((k) => [k, SIDE_LABEL[k]]) : undefined} sheet={sheet} onSheet={(s) => setSheet(s as SideTab | null)} />
       {body}
       <Toasts />
       {dialog === 'export' && <ExportDialog onClose={() => setDialog(null)} />}

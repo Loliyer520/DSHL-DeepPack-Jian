@@ -1,12 +1,33 @@
 // 顶栏：项目名（可改）、同步状态、AI 状态、导出与更多；以及右下角提示条
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { parseSubtitles } from '../../../../engine/src/srt';
+import { absolute } from '../engine';
+import type { Actions } from '../actions';
 import { useEditor, useStore } from '../context';
 import { Icon } from '../Icon';
 import { ContextMenu, type MenuItem } from './common';
 
 const STATUS: Record<string, string> = { connecting: '连接中', live: '已同步', saving: '保存中', offline: '离线·重试中', error: '连接失败', readonly: '只读' };
 
-export function TopBar({ onDialog, narrowTabs, sheet, onSheet }: {
+/** 字幕文件常见 GBK 编码：先按 UTF-8 严格解码，失败再按 GB18030 */
+async function readSubtitleFile(file: File) {
+  const buf = await file.arrayBuffer();
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+  catch { return new TextDecoder('gb18030').decode(buf); }
+}
+
+function download(url: string) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.rel = 'noopener';
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+export function TopBar({ actions, onDialog, narrowTabs, sheet, onSheet }: {
+  actions: Actions;
   onDialog: (d: 'export' | 'history' | 'shortcuts') => void;
   narrowTabs?: [string, string][]; sheet?: string | null; onSheet?: (s: string | null) => void;
 }) {
@@ -20,9 +41,24 @@ export function TopBar({ onDialog, narrowTabs, sheet, onSheet }: {
   const ai = aiState && Date.now() - aiState.at < 120_000 ? aiState : null;
   const [name, setName] = useState(project?.name ?? '');
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const subInput = useRef<HTMLInputElement>(null);
+  const importSubs = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const cues = parseSubtitles(await readSubtitleFile(file));
+      if (!cues.length) { ed.store.toast('error', '没有在「' + file.name + '」里找到字幕（支持 SRT / VTT）'); return; }
+      actions.importSubtitles(cues);
+    } catch (e) { ed.store.toast('error', '读取字幕失败：' + (e instanceof Error ? e.message : String(e))); }
+  };
+  const subsUrl = (q = '') => absolute('/api/p/' + encodeURIComponent(project?.id ?? '') + '/subtitles' + q);
   useEffect(() => setName(project?.name ?? ''), [project?.name]);
   const items: MenuItem[] = [
     { label: '历史版本…', icon: 'history', run: () => onDialog('history') },
+    { separator: true, label: '' },
+    { label: '导入字幕（SRT / VTT）…', icon: 'text', run: () => subInput.current?.click() },
+    { label: '导出字幕 SRT', icon: 'export', disabled: !project, run: () => download(subsUrl()) },
+    { label: '导出字幕 VTT', disabled: !project, run: () => download(subsUrl('?format=vtt')) },
+    { separator: true, label: '' },
     { label: '快捷键…', icon: 'keyboard', kbd: '?', run: () => onDialog('shortcuts') },
     ...(ed.host.toggleExpand ? [{ label: ed.host.expanded ? '退出全屏' : '全屏编辑', icon: (ed.host.expanded ? 'collapse' : 'expand') as 'expand', run: ed.host.toggleExpand }] : []),
   ];
@@ -47,6 +83,7 @@ export function TopBar({ onDialog, narrowTabs, sheet, onSheet }: {
       {ed.host.toggleExpand && <button className="dj-icon-btn dj-hide-narrow" title={ed.host.expanded ? '退出全屏' : '全屏编辑'} aria-label={ed.host.expanded ? '退出全屏' : '全屏编辑'} onClick={ed.host.toggleExpand}><Icon name={ed.host.expanded ? 'collapse' : 'expand'} /></button>}
       <button className="dj-icon-btn" title="更多" aria-label="更多" aria-haspopup="menu" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ x: r.right - 180, y: r.bottom + 4 }); }}><Icon name="more" /></button>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={items} onClose={() => setMenu(null)} />}
+      <input ref={subInput} type="file" hidden accept=".srt,.vtt,text/vtt,application/x-subrip" onChange={(e) => { void importSubs(e.target.files?.[0]); e.target.value = ''; }} />
     </div>
   );
 }
