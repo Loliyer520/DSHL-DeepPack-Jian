@@ -1,12 +1,9 @@
 *.dspack
 *.log
-*.log
 .DS_Store
 .djian/
 dist/
 node_modules/
-node_modules/
-out/
 out/
 packages/engine/bundle/
 packages/engine/dist/

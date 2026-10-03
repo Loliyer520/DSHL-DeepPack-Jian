@@ -22,8 +22,9 @@ const chromiumOptions = {};
 
 type Browser = Awaited<ReturnType<typeof openBrowser>>;
 
-/** 源码内容哈希：src 任何改动都会换一个 bundle 目录，绝不复用旧代码 */
-export function sourceHash(): string {
+/** 源码内容哈希：src 任何改动都会换一个 bundle 目录，绝不复用旧代码；没有源码（精简安装）时返回 null */
+export function sourceHash(): string | null {
+  if (!fs.existsSync(SRC_DIR)) return null;
   const h = crypto.createHash("sha256");
   for (const f of fs.readdirSync(SRC_DIR).filter((x) => /\.(ts|tsx)$/.test(x)).sort()) {
     h.update(f).update(fs.readFileSync(path.join(SRC_DIR, f)));
@@ -36,17 +37,25 @@ const readStamp = (dir: string): string | null => {
 };
 
 /** 打包到指定目录（整合包构建时调用，安装后零打包） */
-export async function buildBundle(outDir: string, onProgress?: (p: number) => void): Promise<string> {
+export async function buildBundle(outDir: string, onProgress?: (p: number) => void, { minify = false } = {}): Promise<string> {
   const hash = sourceHash();
+  if (!hash) throw new Error("缺少引擎源码，无法打包渲染器");
   const publicDir = fs.mkdtempSync(path.join(os.tmpdir(), "djian-empty-public-"));
   try {
-    fs.rmSync(outDir, { recursive: true, force: true });
+    // 只清空目录内容而不删目录本身：Windows 上目录被其他进程当作工作目录时 rmdir 会 EBUSY
+    if (fs.existsSync(outDir)) for (const entry of fs.readdirSync(outDir)) fs.rmSync(path.join(outDir, entry), { recursive: true, force: true });
     // 按需加载打包器：整合包随附预构建 bundle 时，运行环境不需要 webpack 这一整套依赖
     const { bundle } = await import("@remotion/bundler");
     await bundle({
       entryPoint: ENTRY, outDir, publicDir, enableCaching: false, onProgress: (p) => onProgress?.(p),
       // 源码按 NodeNext 写 "./x.js" 导入：让 webpack 把 .js 映射回 .ts/.tsx
-      webpackOverride: (config) => ({ ...config, resolve: { ...config.resolve, extensionAlias: { ".js": [".ts", ".tsx", ".js"] } } }),
+      // 不产出 source map：渲染用不到。整合包里的预构建 bundle 额外压缩（体积约降三分之二）；本机临时缓存不压缩，打包更快
+      webpackOverride: (config) => ({
+        ...config,
+        devtool: false,
+        ...(minify ? { optimization: { ...config.optimization, minimize: true } } : {}),
+        resolve: { ...config.resolve, extensionAlias: { ".js": [".ts", ".tsx", ".js"] } },
+      }),
     });
     fs.writeFileSync(path.join(outDir, STAMP), JSON.stringify({ hash, builtAt: new Date().toISOString() }));
     return outDir;
@@ -55,14 +64,31 @@ export async function buildBundle(outDir: string, onProgress?: (p: number) => vo
   }
 }
 
+/** 清理一周前的旧 bundle 缓存（源码每改一次就多一个目录）；较新的可能正被其他版本的引擎使用，保留 */
+function pruneStaleBundles(keep: string) {
+  const weekAgo = Date.now() - 7 * 86400_000;
+  try {
+    for (const name of fs.readdirSync(os.tmpdir())) {
+      if (!/^djian-bundle-[0-9a-f]{16}$/.test(name)) continue;
+      const dir = path.join(os.tmpdir(), name);
+      if (dir === keep) continue;
+      if (fs.statSync(dir).mtimeMs < weekAgo) fs.rmSync(dir, { recursive: true, force: true });
+    }
+  } catch { /* 清理失败不影响渲染 */ }
+}
+
 let serveUrlTask: Promise<string> | null = null;
 export function getServeUrl(): Promise<string> {
   serveUrlTask ??= (async () => {
     const hash = sourceHash();
-    if (readStamp(PREBUILT_BUNDLE_DIR) === hash) return PREBUILT_BUNDLE_DIR;
+    const prebuilt = readStamp(PREBUILT_BUNDLE_DIR);
+    if (prebuilt && (hash === null || prebuilt === hash)) return PREBUILT_BUNDLE_DIR;
+    if (hash === null) throw new Error("渲染包缺失：引擎既没有预构建 bundle 也没有源码，请重新安装整合包");
     const cacheDir = path.join(os.tmpdir(), "djian-bundle-" + hash);
     if (readStamp(cacheDir) === hash && fs.existsSync(path.join(cacheDir, "index.html"))) return cacheDir;
-    return buildBundle(cacheDir);
+    const built = await buildBundle(cacheDir);
+    pruneStaleBundles(cacheDir);
+    return built;
   })().catch((e) => { serveUrlTask = null; throw e; });
   return serveUrlTask;
 }

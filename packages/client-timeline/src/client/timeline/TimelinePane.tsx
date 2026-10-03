@@ -28,7 +28,7 @@ type Drag =
 
 export interface TimelineApi { zoom: (factor: number) => void; fit: () => void; toggleSnap: () => void }
 
-export function TimelinePane({ actions, compact, onInspect, apiRef }: { actions: Actions; compact: boolean; onInspect: (section?: string) => void; apiRef?: React.MutableRefObject<TimelineApi | null> }) {
+export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChange }: { actions: Actions; compact: boolean; onInspect: (section?: string) => void; apiRef?: React.MutableRefObject<TimelineApi | null>; onFocusChange?: (focus: Focus) => void }) {
   const ed = useEditor();
   const timeline = useStore((s) => s.timeline);
   const project = useStore((s) => s.project);
@@ -40,6 +40,7 @@ export function TimelinePane({ actions, compact, onInspect, apiRef }: { actions:
   const [snapping, setSnapping] = useState(() => readPref(scope, 'snap', true));
   useEffect(() => writePref(scope, 'pps', pps), [scope, pps]);
   useEffect(() => writePref(scope, 'focus', focus), [scope, focus]);
+  useEffect(() => onFocusChange?.(focus), [focus, onFocusChange]);
   useEffect(() => writePref(scope, 'snap', snapping), [scope, snapping]);
   const scroll = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);

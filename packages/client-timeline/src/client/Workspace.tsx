@@ -58,6 +58,9 @@ export function Workspace() {
   const [sheet, setSheet] = useState<SideTab | null>(null);
   const [dialog, setDialog] = useState<'export' | 'history' | 'shortcuts' | null>(null);
   const [section, setSection] = useState<string | undefined>();
+  // 时间线专注的轨道类型（随在场状态告诉 AI：用户正在看哪类轨道）
+  const [mode, setMode] = useState('');
+  const onFocusChange = useCallback((f: string) => setMode(f === 'all' ? '' : f === 'text' ? 'subs' : f), []);
 
   // 尺寸档位
   useEffect(() => {
@@ -81,8 +84,8 @@ export function Workspace() {
 
   // 在场上报：选中/播放头（暂停时）/可见性 → 服务端，AI 下一轮能看到“你正在看哪里”
   const reporter = useMemo(() => new PresenceReporter(() => ed.store.project?.id ?? null, ed.store.clientId), [ed.store]);
-  useEffect(() => { reporter.report({ timeline, items, playhead: ed.clock.time(), mode: 'edit', visible: ed.host.visible }); }, [reporter, timeline, items, ed.host.visible, ed.clock]);
-  useEffect(() => ed.clock.subscribe((sec, playing) => { if (!playing) reporter.report({ timeline: ed.store.current, items: ed.sel.getSnapshot().items, playhead: sec, mode: 'edit', visible: ed.host.visible }); }), [reporter, ed]);
+  useEffect(() => { reporter.report({ timeline, items, playhead: ed.clock.time(), mode, visible: ed.host.visible }); }, [reporter, timeline, items, mode, ed.host.visible, ed.clock]);
+  useEffect(() => ed.clock.subscribe((sec, playing) => { if (!playing) reporter.report({ timeline: ed.store.current, items: ed.sel.getSnapshot().items, playhead: sec, mode, visible: ed.host.visible }); }), [reporter, ed, mode]);
 
   const inspect = useCallback((s?: string) => {
     setSection(s);
@@ -151,7 +154,7 @@ export function Workspace() {
         {status === 'readonly' && <div className="dj-banner" style={{ gridArea: 'top', alignSelf: 'end' }}>{error ?? '项目为只读'}</div>}
         <div className="dj-stagewrap"><PreviewPane /></div>
         <TransportBar actions={actions} />
-        <TimelinePane actions={actions} compact={compact} onInspect={inspect} apiRef={tlApi} />
+        <TimelinePane actions={actions} compact={compact} onInspect={inspect} apiRef={tlApi} onFocusChange={onFocusChange} />
         {size === 'wide' && <div className="dj-left"><SideTabs tabs={leftTabs} value={left} onChange={setLeft} />{pane(left)}</div>}
         {size === 'wide' && <div className="dj-side"><div className="dj-side-title">属性</div>{pane('inspector')}</div>}
         {size === 'medium' && <div className="dj-side"><SideTabs tabs={sideTabs} value={side} onChange={setSide} />{pane(side)}</div>}

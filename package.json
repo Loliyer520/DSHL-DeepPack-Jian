@@ -1,6 +1,6 @@
 {
   "name": "djian",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "D剪 — JSON 时间线驱动的 AI+人协同视频剪辑：引擎、剪辑面板、宿主桥接插件与 dsh 整合包",
   "scripts": {
@@ -11,10 +11,12 @@
     "check": "tsc -p packages/engine/tsconfig.json --noEmit && tsc -p packages/client-timeline/tsconfig.json --noEmit && tsc -p packages/client-library/tsconfig.json --noEmit",
     "test": "npm run build:engine && node --test tests/*.test.mjs",
     "test:render": "npm run build:engine && node tests/integration/render-smoke.mjs",
-    "test:sessions": "npm run build:engine && node tests/integration/session-isolation.mjs",
     "test:seek": "npm run build:engine && node tests/integration/media-seek.mjs",
     "start:engine": "npm run build:engine && node packages/webui/server/index.mjs",
-    "pack": "node packages/pack/scripts/build-dspack.mjs"
+    "pack": "node packages/pack/scripts/build-dspack.mjs",
+    "test:host": "npm run build:engine && node tests/integration/dsh-host.mjs",
+    "serve:dsh": "npm run build:engine && node tests/integration/dsh-serve.mjs",
+    "pack:check": "node packages/pack/scripts/build-dspack.mjs --check-only"
   },
   "license": "MIT",
   "devDependencies": {
