@@ -2,4 +2,7 @@ packages:
   - .
 
 nodeLinker: hoisted
-autoInstallPeers: true
+# 宿主包由 DSH 版本库提供（bundles 模板层），不要因为 peer 依赖把它们再装进 profile
+autoInstallPeers: false
+# pnpm 11 的发布冷静期会拒绝锁文件里的新版本；离线/冻结安装需要显式关闭
+minimumReleaseAge: 0

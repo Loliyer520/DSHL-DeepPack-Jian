@@ -1,6 +1,5 @@
 // 渲染服务：预打包 bundle（按源码哈希缓存）+ 常驻浏览器 + 素材经 HTTP 读取。
 // 取帧从「每次打包 + 两次冷启动浏览器」降为一次页面渲染；导出用 Remotion 原生 scale。
-import { bundle } from "@remotion/bundler";
 import { makeCancelSignal, openBrowser, renderMedia, renderStill, selectComposition } from "@remotion/renderer";
 import http from "node:http";
 import path from "node:path";
@@ -42,6 +41,8 @@ export async function buildBundle(outDir: string, onProgress?: (p: number) => vo
   const publicDir = fs.mkdtempSync(path.join(os.tmpdir(), "djian-empty-public-"));
   try {
     fs.rmSync(outDir, { recursive: true, force: true });
+    // 按需加载打包器：整合包随附预构建 bundle 时，运行环境不需要 webpack 这一整套依赖
+    const { bundle } = await import("@remotion/bundler");
     await bundle({
       entryPoint: ENTRY, outDir, publicDir, enableCaching: false, onProgress: (p) => onProgress?.(p),
       // 源码按 NodeNext 写 "./x.js" 导入：让 webpack 把 .js 映射回 .ts/.tsx

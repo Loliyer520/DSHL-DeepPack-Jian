@@ -1,19 +1,13 @@
 {
   "name": "@djian/webui",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "files": [
     "server"
   ],
   "dependencies": {
-    "@djian/engine": "0.1.0",
-    "@remotion/bundler": "4.0.526",
-    "@remotion/renderer": "4.0.526",
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "remotion": "4.0.526",
-    "zod": "3.25.76"
+    "@djian/engine": "0.2.0"
   },
   "scripts": {
     "start": "node server/index.mjs"
