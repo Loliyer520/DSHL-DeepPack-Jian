@@ -30,14 +30,268 @@ window.__ModuleLoader__.load({
 		react = __toESM(react, 1);
 		let react_jsx_runtime = require("react/jsx-runtime");
 		let react_dom = require("react-dom");
-		//#region src/client/bus.ts
-		const playerBus = { ref: null };
-		const seekToSeconds = (seconds, fps) => {
-			playerBus.ref?.seekTo(Math.round(seconds * fps));
+		//#region src/client/viewPreferences.ts
+		const preferenceKey = (sessionId, name) => `djian.view.${sessionId ?? "default"}.${name}`;
+		function readViewPreference(sessionId, name, fallback, valid) {
+			try {
+				const raw = localStorage.getItem(preferenceKey(sessionId, name));
+				if (raw === null) return fallback;
+				const value = JSON.parse(raw);
+				return valid(value) ? value : fallback;
+			} catch {
+				return fallback;
+			}
+		}
+		function saveViewPreference(sessionId, name, value) {
+			try {
+				localStorage.setItem(preferenceKey(sessionId, name), JSON.stringify(value));
+			} catch {}
+		}
+		//#endregion
+		//#region src/client/useDialog.ts
+		function useDialog(onClose) {
+			const ref = (0, react.useRef)(null);
+			const close = (0, react.useRef)(onClose);
+			close.current = onClose;
+			(0, react.useEffect)(() => {
+				const previous = document.activeElement;
+				const dialog = ref.current;
+				if (!dialog) return;
+				const targets = () => Array.from(dialog.querySelectorAll("button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, a[href], [tabindex=\"0\"]")).filter((node) => node.getClientRects().length > 0);
+				(targets()[0] ?? dialog).focus();
+				const onKey = (event) => {
+					if (event.key === "Escape") {
+						event.preventDefault();
+						event.stopPropagation();
+						close.current();
+					}
+					if (event.key !== "Tab") return;
+					const items = targets();
+					const first = items[0], last = items[items.length - 1];
+					if (!first) {
+						event.preventDefault();
+						return;
+					}
+					if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+						event.preventDefault();
+						last.focus();
+					} else if (!event.shiftKey && document.activeElement === last) {
+						event.preventDefault();
+						first.focus();
+					}
+				};
+				dialog.addEventListener("keydown", onKey);
+				return () => {
+					dialog.removeEventListener("keydown", onKey);
+					queueMicrotask(() => {
+						if (previous?.isConnected) previous.focus();
+					});
+				};
+			}, []);
+			return ref;
+		}
+		//#endregion
+		//#region src/client/ShortcutsDialog.tsx
+		const shortcuts = [
+			["空格", "播放 / 暂停"],
+			["← / →", "前后移动一帧"],
+			["Shift + ← / →", "前后移动一秒"],
+			["S", "分割选中片段；主轨模式下可直接分割"],
+			["Enter", "打开选中片段属性"],
+			["Delete / Backspace", "删除选中片段"],
+			["Ctrl / ⌘ + Z", "撤销"],
+			["Ctrl / ⌘ + Shift + Z", "重做"],
+			["Esc", "取消拖动、输入草稿或当前选择"]
+		];
+		function ShortcutsDialog({ onClose }) {
+			const ref = useDialog(onClose);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "djp-mask",
+				onClick: onClose,
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "djp-dialog djp-shortcuts",
+					ref,
+					role: "dialog",
+					"aria-modal": "true",
+					"aria-label": "操作与快捷键",
+					tabIndex: -1,
+					onClick: (event) => event.stopPropagation(),
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "djp-shortcuts-head",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "djp-dialog-title",
+								children: "操作与快捷键"
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "djp-btn",
+								onClick: onClose,
+								children: "关闭"
+							})]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", { children: "先点击剪辑工作区。输入文字、调整控件或使用宿主其他区域时，保留该区域的键盘操作。" }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("dl", { children: shortcuts.map(([keys, action]) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("dt", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("kbd", { children: keys }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("dd", { children: action })] }, keys)) }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", { children: "点击片段选中，双击打开属性。点击播放时间可输入时间或帧数定位；再次点击当前轨道模式可展开工具。" })
+					]
+				})
+			});
+		}
+		//#endregion
+		//#region src/client/VolumeSlider.tsx
+		/** Keep live audio feedback while treating one gesture as one undo operation. */
+		function VolumeSlider({ value, onChange }) {
+			const group = (0, react.useRef)(void 0);
+			const finish = () => {
+				group.current = void 0;
+			};
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+				type: "range",
+				min: 0,
+				max: 1,
+				step: .05,
+				value,
+				"aria-label": "轨道音量",
+				"aria-valuetext": `${Math.round(value * 100)}%`,
+				title: `${Math.round(value * 100)}%`,
+				onPointerDown: (event) => {
+					group.current = Symbol("volume gesture");
+					event.currentTarget.setPointerCapture(event.pointerId);
+				},
+				onPointerUp: finish,
+				onPointerCancel: finish,
+				onLostPointerCapture: finish,
+				onKeyDown: (event) => {
+					if ([
+						"ArrowLeft",
+						"ArrowRight",
+						"ArrowUp",
+						"ArrowDown",
+						"Home",
+						"End",
+						"PageUp",
+						"PageDown"
+					].includes(event.key)) group.current ?? (group.current = Symbol("volume keyboard gesture"));
+				},
+				onKeyUp: finish,
+				onBlur: finish,
+				onChange: (event) => onChange(Number(event.target.value), group.current),
+				style: { width: 70 }
+			});
+		}
+		//#endregion
+		//#region src/client/SubtitleTextField.tsx
+		function SubtitleTextField({ value, onCommit }) {
+			const [draft, setDraft] = (0, react.useState)(null);
+			const composing = (0, react.useRef)(false);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+				className: "djp-sub-text",
+				type: "text",
+				"aria-label": "字幕内容",
+				value: draft ?? value,
+				onChange: (event) => setDraft(event.target.value),
+				onCompositionStart: () => {
+					composing.current = true;
+				},
+				onCompositionEnd: () => {
+					composing.current = false;
+				},
+				onBlur: (event) => {
+					composing.current = false;
+					if (event.target.value !== value) onCommit(event.target.value);
+					setDraft(null);
+				},
+				onKeyDownCapture: (event) => {
+					if (event.key !== "Enter" && event.key !== "Escape") return;
+					if (composing.current || event.nativeEvent.isComposing || event.keyCode === 229) {
+						event.stopPropagation();
+						return;
+					}
+					if (event.key === "Escape" && draft !== null) {
+						event.preventDefault();
+						event.stopPropagation();
+						setDraft(null);
+					}
+					if (event.key === "Enter") {
+						event.preventDefault();
+						event.stopPropagation();
+						event.currentTarget.blur();
+					}
+				}
+			});
+		}
+		//#endregion
+		//#region src/client/splitPosition.ts
+		/** Resolve a playhead cut onto the frame grid, retaining at least one frame on each side. */
+		function splitOffset(start, duration, atSeconds, fps) {
+			if (![
+				start,
+				duration,
+				atSeconds,
+				fps
+			].every(Number.isFinite) || fps <= 0) return null;
+			const offset = Math.round(atSeconds * fps) / fps - start;
+			const frame = 1 / fps;
+			const epsilon = frame * 1e-7;
+			return offset >= frame - epsilon && duration - offset >= frame - epsilon ? offset : null;
+		}
+		//#endregion
+		//#region src/client/NumberField.tsx
+		/** Keep an unfinished edit separate from the saved timeline value. */
+		const NumberField = ({ label, value, step = .5, min = 0, max, onCommit }) => {
+			const [draft, setDraft] = (0, react.useState)(null);
+			const numeric = draft === null || draft.trim() === "" ? NaN : Number(draft);
+			const invalid = draft !== null && (!Number.isFinite(numeric) || numeric < min || max !== void 0 && numeric > max);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+				className: "djp-field",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: label }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+					type: "number",
+					value: draft ?? String(value),
+					step,
+					min,
+					max,
+					"aria-invalid": invalid || void 0,
+					title: invalid ? "数值无效，离开输入框将恢复原值" : void 0,
+					onChange: (event) => setDraft(event.target.value),
+					onBlur: () => {
+						if (draft !== null && !invalid && numeric !== value) onCommit(numeric);
+						setDraft(null);
+					},
+					onKeyDownCapture: (event) => {
+						if (event.key === "Escape" && draft !== null) {
+							event.preventDefault();
+							event.stopPropagation();
+							setDraft(null);
+						}
+						if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+							event.preventDefault();
+							event.stopPropagation();
+							event.currentTarget.blur();
+						}
+					}
+				})]
+			});
 		};
+		//#endregion
+		//#region src/client/bus.ts
+		function createPlayerBus() {
+			const bus = {
+				ref: null,
+				seekToSeconds: (seconds, fps) => bus.ref?.seekTo(Math.round(seconds * fps))
+			};
+			return bus;
+		}
+		const PlayerBusContext = (0, react.createContext)(null);
+		function usePlayerBus() {
+			const bus = (0, react.useContext)(PlayerBusContext);
+			if (!bus) throw new Error("Player controls must be inside an editor panel");
+			return bus;
+		}
 		//#endregion
 		//#region src/client/Icon.tsx
 		const paths = {
+			search: "M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15zM16 16l5 5",
+			image: "M3 3h18v18H3zM3 16l5-5 5 5 3-3 5 5M15 7h.01",
+			trash: "M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7",
+			settings: "M4 6h16M4 12h16M4 18h16M8 3v6m8 0v6m-6 0v6",
 			play: "m7 4 14 8-14 8z",
 			pause: "M7 4v16M17 4v16",
 			scissors: "M9 9 20 3M9 15 20 21M4 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm0 10a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
@@ -57,57 +311,286 @@ window.__ModuleLoader__.load({
 			volume: "m11 5-5 4H3v6h3l5 4zm4 3a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14",
 			muted: "m11 5-5 4H3v6h3l5 4zm5 4 5 6m0-6-5 6",
 			grip: "M9 5h.01M15 5h.01M9 12h.01M15 12h.01M9 19h.01M15 19h.01",
-			film: "M4 4h16v16H4zM8 4v16M16 4v16M4 9h4m-4 6h4m8-6h4m-4 6h4"
+			film: "M4 4h16v16H4zM8 4v16M16 4v16M4 9h4m-4 6h4m8-6h4m-4 6h4",
+			chevron: "m9 6 6 6-6 6",
+			dots: ""
 		};
-		function Icon({ name }) {
+		function Icon({ name, className }) {
+			const filled = name === "dots";
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("svg", {
-				className: "djp-icon",
+				className: `djp-icon${className ? ` ${className}` : ""}`,
 				width: "16",
 				height: "16",
 				viewBox: "0 0 24 24",
-				fill: "none",
-				stroke: "currentColor",
-				strokeWidth: name === "grip" ? 3 : 1.65,
+				fill: filled ? "currentColor" : "none",
+				stroke: filled ? "none" : "currentColor",
+				strokeWidth: 1.65,
 				strokeLinecap: "round",
 				strokeLinejoin: "round",
 				"aria-hidden": "true",
 				focusable: "false",
-				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: paths[name] })
+				style: name === "grip" ? { strokeWidth: 3 } : void 0,
+				children: filled ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+						cx: "4.5",
+						cy: "12",
+						r: "2"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+						cx: "12",
+						cy: "12",
+						r: "2"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+						cx: "19.5",
+						cy: "12",
+						r: "2"
+					})
+				] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: paths[name] })
 			});
+		}
+		//#endregion
+		//#region src/client/timePosition.ts
+		function formatTimePosition(frame, fps) {
+			const ms = Math.max(0, Math.round(frame / fps * 1e3));
+			const seconds = Math.floor(ms / 1e3);
+			const pad = (value) => String(value).padStart(2, "0");
+			const clock = `${pad(Math.floor(seconds / 60) % 60)}:${pad(seconds % 60)}.${String(ms % 1e3).padStart(3, "0")}`;
+			return seconds >= 3600 ? `${pad(Math.floor(seconds / 3600))}:${clock}` : clock;
+		}
+		function parseTimePosition(value, mode, fps, maxFrame) {
+			const input = value.trim();
+			let frame;
+			if (mode === "frame") {
+				if (!/^\d+$/.test(input)) return { error: "请输入从 0 开始的整数帧位置" };
+				frame = Number(input);
+			} else {
+				const parts = input.split(":");
+				if (parts.length > 3 || !/^\d+(?:\.\d+)?$/.test(parts[parts.length - 1] ?? "") || parts.slice(0, -1).some((part) => !/^\d+$/.test(part))) return { error: "请输入秒数、分:秒或时:分:秒，可带小数" };
+				const values = parts.map(Number);
+				if (values.length > 1 && (values[values.length - 1] >= 60 || values.length === 3 && values[1] >= 60)) return { error: "冒号后的分、秒必须小于 60" };
+				const seconds = values.reduce((total, part) => total * 60 + part, 0);
+				frame = Math.round(seconds * fps);
+			}
+			if (!Number.isFinite(fps) || fps <= 0 || !Number.isSafeInteger(frame) || frame < 0 || frame > maxFrame) return { error: mode === "frame" ? `帧位置范围为 0–${maxFrame}` : `时间范围为 0–${formatTimePosition(maxFrame, fps)}` };
+			return { frame };
 		}
 		//#endregion
 		//#region src/client/TransportBar.tsx
 		const clock = (seconds) => `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(Math.floor(seconds) % 60).padStart(2, "0")}`;
 		function TransportBar({ fps, duration, undo, redo, canUndo, canRedo }) {
+			const playerBus = usePlayerBus();
 			const time = (0, react.useRef)(null);
 			const [playing, setPlaying] = (0, react.useState)(false);
+			const [available, setAvailable] = (0, react.useState)(false);
+			const [open, setOpen] = (0, react.useState)(false);
+			const [mode, setMode] = (0, react.useState)("time");
+			const [position, setPosition] = (0, react.useState)("");
+			const [error, setError] = (0, react.useState)("");
+			const [jumpStyle, setJumpStyle] = (0, react.useState)({});
+			const positionId = (0, react.useId)();
+			const jumpRef = (0, react.useRef)(null);
+			const triggerRef = (0, react.useRef)(null);
+			const inputRef = (0, react.useRef)(null);
+			const maxFrame = Math.max(0, Math.round(duration * fps) - 1);
+			(0, react.useEffect)(() => {
+				if (!available) setOpen(false);
+			}, [available]);
+			const close = (restoreFocus = false) => {
+				setOpen(false);
+				if (restoreFocus) triggerRef.current?.focus();
+			};
+			const openJump = () => {
+				const player = playerBus.ref;
+				if (!player) return;
+				if (open) {
+					close();
+					return;
+				}
+				player.pause();
+				const frame = player.getCurrentFrame();
+				setPosition(mode === "frame" ? String(frame) : formatTimePosition(frame, fps));
+				setError("");
+				setOpen(true);
+			};
+			(0, react.useLayoutEffect)(() => {
+				if (!open) return;
+				const transport = jumpRef.current?.closest(".djp-transport");
+				const root = jumpRef.current?.closest(".djp-root");
+				if (!transport || !root) return;
+				const place = () => {
+					const bar = transport.getBoundingClientRect(), bounds = root.getBoundingClientRect();
+					const above = bar.top - Math.max(0, bounds.top) - 12;
+					const below = Math.min(window.innerHeight, bounds.bottom) - bar.bottom - 12;
+					const useBelow = above < 250 && below > above;
+					setJumpStyle({
+						top: useBelow ? "calc(100% + 6px)" : "auto",
+						bottom: useBelow ? "auto" : "calc(100% + 6px)",
+						maxHeight: Math.max(80, useBelow ? below : above)
+					});
+				};
+				const observer = new ResizeObserver(place);
+				observer.observe(root);
+				observer.observe(transport);
+				window.addEventListener("resize", place);
+				place();
+				return () => {
+					observer.disconnect();
+					window.removeEventListener("resize", place);
+				};
+			}, [open]);
+			(0, react.useEffect)(() => {
+				if (!open) return;
+				inputRef.current?.focus();
+				inputRef.current?.select();
+			}, [open, mode]);
+			(0, react.useEffect)(() => {
+				if (!open) return;
+				const outside = (event) => {
+					if (event.target instanceof Node && !jumpRef.current?.contains(event.target)) setOpen(false);
+				};
+				document.addEventListener("pointerdown", outside);
+				document.addEventListener("focusin", outside);
+				return () => {
+					document.removeEventListener("pointerdown", outside);
+					document.removeEventListener("focusin", outside);
+				};
+			}, [open]);
 			(0, react.useEffect)(() => {
 				let frame = 0;
 				const tick = () => {
 					const player = playerBus.ref;
 					if (time.current) time.current.textContent = clock((player?.getCurrentFrame() ?? 0) / fps);
 					setPlaying(player?.isPlaying() ?? false);
+					setAvailable(Boolean(player));
 					frame = requestAnimationFrame(tick);
 				};
 				frame = requestAnimationFrame(tick);
 				return () => cancelAnimationFrame(frame);
-			}, [fps]);
+			}, [fps, playerBus]);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "djp-transport",
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "djp-transport-time",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("output", {
-							ref: time,
-							"aria-label": "播放时间",
-							children: "00:00"
-						}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [" / ", clock(duration)] })]
+						ref: jumpRef,
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+							className: "djp-time-trigger",
+							ref: triggerRef,
+							"aria-label": "定位播放头",
+							"aria-expanded": open,
+							"aria-haspopup": "dialog",
+							title: "输入时间或帧数定位",
+							disabled: !available,
+							onClick: openJump,
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("output", {
+								ref: time,
+								"aria-label": "播放时间",
+								children: "00:00"
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [" / ", clock(duration)] })]
+						}), open && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("form", {
+							className: "djp-time-jump",
+							style: jumpStyle,
+							role: "dialog",
+							"aria-label": "定位播放头",
+							onKeyDown: (event) => {
+								if (event.key === "Escape") {
+									event.preventDefault();
+									event.stopPropagation();
+									close(true);
+								}
+							},
+							onSubmit: (event) => {
+								event.preventDefault();
+								const result = parseTimePosition(position, mode, fps, maxFrame);
+								if ("error" in result) {
+									setError(result.error);
+									inputRef.current?.focus();
+									return;
+								}
+								playerBus.ref?.seekTo(result.frame);
+								close(true);
+							},
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "djp-jump-head",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: "定位播放头" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										className: "djp-iconbtn",
+										type: "button",
+										"aria-label": "关闭定位",
+										onClick: () => close(true),
+										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "close" })
+									})]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "djp-jump-modes",
+									role: "group",
+									"aria-label": "定位方式",
+									children: ["time", "frame"].map((next) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										"aria-pressed": mode === next,
+										onClick: () => {
+											if (next === mode) {
+												inputRef.current?.focus();
+												inputRef.current?.select();
+												return;
+											}
+											const parsed = parseTimePosition(position, mode, fps, maxFrame);
+											const frame = "frame" in parsed ? parsed.frame : playerBus.ref?.getCurrentFrame() ?? 0;
+											setMode(next);
+											setPosition(next === "frame" ? String(frame) : formatTimePosition(frame, fps));
+											setError("");
+										},
+										children: next === "time" ? "时间" : "帧"
+									}, next))
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", {
+									htmlFor: positionId,
+									children: mode === "time" ? "目标时间" : "帧位置（从 0 开始）"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+									id: positionId,
+									ref: inputRef,
+									type: "text",
+									inputMode: mode === "frame" ? "numeric" : "text",
+									autoComplete: "off",
+									spellCheck: false,
+									value: position,
+									"aria-invalid": Boolean(error),
+									"aria-describedby": `${positionId}-hint`,
+									onChange: (event) => {
+										setPosition(event.target.value);
+										setError("");
+									}
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+									id: `${positionId}-hint`,
+									className: error ? "djp-jump-error" : "",
+									role: error ? "alert" : void 0,
+									children: error || (mode === "time" ? `最晚 ${formatTimePosition(maxFrame, fps)} · 自动对齐到帧` : `0–${maxFrame} 帧 · ${fps} FPS`)
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "djp-jump-actions",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										className: "djp-btn",
+										type: "button",
+										onClick: () => close(true),
+										children: "取消"
+									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										className: "djp-btn",
+										type: "submit",
+										children: "定位"
+									})]
+								})
+							]
+						})]
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						className: "djp-play-toggle",
 						"aria-label": playing ? "暂停" : "播放",
 						title: "播放 / 暂停（空格）",
-						onClick: () => playerBus.ref?.toggle(),
+						disabled: !available,
+						onClick: (event) => playerBus.ref?.toggle(event),
 						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: playing ? "pause" : "play" })
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -133,6 +616,7 @@ window.__ModuleLoader__.load({
 								className: "djp-iconbtn",
 								title: "全屏预览",
 								"aria-label": "全屏预览",
+								disabled: !available,
 								onClick: () => {
 									playerBus.ref?.requestFullscreen();
 								},
@@ -144,10 +628,14 @@ window.__ModuleLoader__.load({
 			});
 		}
 		//#endregion
-		//#region ../../node_modules/zod/lib/index.mjs
+		//#region src/client/ProjectSession.ts
+		const ProjectSession = (0, react.createContext)(void 0);
+		const useProjectSession = () => (0, react.useContext)(ProjectSession);
+		//#endregion
+		//#region ../../node_modules/zod/v3/helpers/util.js
 		var util;
 		(function(util) {
-			util.assertEqual = (val) => val;
+			util.assertEqual = (_) => {};
 			function assertIs(_arg) {}
 			util.assertIs = assertIs;
 			function assertNever(_x) {
@@ -178,7 +666,7 @@ window.__ModuleLoader__.load({
 			util.find = (arr, checker) => {
 				for (const item of arr) if (checker(item)) return item;
 			};
-			util.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && isFinite(val) && Math.floor(val) === val;
+			util.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
 			function joinValues(array, separator = " | ") {
 				return array.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
 			}
@@ -223,7 +711,7 @@ window.__ModuleLoader__.load({
 			switch (typeof data) {
 				case "undefined": return ZodParsedType.undefined;
 				case "string": return ZodParsedType.string;
-				case "number": return isNaN(data) ? ZodParsedType.nan : ZodParsedType.number;
+				case "number": return Number.isNaN(data) ? ZodParsedType.nan : ZodParsedType.number;
 				case "boolean": return ZodParsedType.boolean;
 				case "function": return ZodParsedType.function;
 				case "bigint": return ZodParsedType.bigint;
@@ -239,6 +727,8 @@ window.__ModuleLoader__.load({
 				default: return ZodParsedType.unknown;
 			}
 		};
+		//#endregion
+		//#region ../../node_modules/zod/v3/ZodError.js
 		const ZodIssueCode = util.arrayToEnum([
 			"invalid_type",
 			"invalid_literal",
@@ -257,10 +747,10 @@ window.__ModuleLoader__.load({
 			"not_multiple_of",
 			"not_finite"
 		]);
-		const quotelessJson = (obj) => {
-			return JSON.stringify(obj, null, 2).replace(/"([^"]+)":/g, "$1:");
-		};
 		var ZodError = class ZodError extends Error {
+			get errors() {
+				return this.issues;
+			}
 			constructor(issues) {
 				super();
 				this.issues = [];
@@ -275,9 +765,6 @@ window.__ModuleLoader__.load({
 				else this.__proto__ = actualProto;
 				this.name = "ZodError";
 				this.issues = issues;
-			}
-			get errors() {
-				return this.issues;
 			}
 			format(_mapper) {
 				const mapper = _mapper || function(issue) {
@@ -323,8 +810,9 @@ window.__ModuleLoader__.load({
 				const fieldErrors = {};
 				const formErrors = [];
 				for (const sub of this.issues) if (sub.path.length > 0) {
-					fieldErrors[sub.path[0]] = fieldErrors[sub.path[0]] || [];
-					fieldErrors[sub.path[0]].push(mapper(sub));
+					const firstEl = sub.path[0];
+					fieldErrors[firstEl] = fieldErrors[firstEl] || [];
+					fieldErrors[firstEl].push(mapper(sub));
 				} else formErrors.push(mapper(sub));
 				return {
 					formErrors,
@@ -338,6 +826,8 @@ window.__ModuleLoader__.load({
 		ZodError.create = (issues) => {
 			return new ZodError(issues);
 		};
+		//#endregion
+		//#region ../../node_modules/zod/v3/locales/en.js
 		const errorMap = (issue, _ctx) => {
 			let message;
 			switch (issue.code) {
@@ -384,6 +874,7 @@ window.__ModuleLoader__.load({
 					if (issue.type === "array") message = `Array must contain ${issue.exact ? "exactly" : issue.inclusive ? `at least` : `more than`} ${issue.minimum} element(s)`;
 					else if (issue.type === "string") message = `String must contain ${issue.exact ? "exactly" : issue.inclusive ? `at least` : `over`} ${issue.minimum} character(s)`;
 					else if (issue.type === "number") message = `Number must be ${issue.exact ? `exactly equal to ` : issue.inclusive ? `greater than or equal to ` : `greater than `}${issue.minimum}`;
+					else if (issue.type === "bigint") message = `Number must be ${issue.exact ? `exactly equal to ` : issue.inclusive ? `greater than or equal to ` : `greater than `}${issue.minimum}`;
 					else if (issue.type === "date") message = `Date must be ${issue.exact ? `exactly equal to ` : issue.inclusive ? `greater than or equal to ` : `greater than `}${new Date(Number(issue.minimum))}`;
 					else message = "Invalid input";
 					break;
@@ -413,13 +904,14 @@ window.__ModuleLoader__.load({
 			}
 			return { message };
 		};
+		//#endregion
+		//#region ../../node_modules/zod/v3/errors.js
 		let overrideErrorMap = errorMap;
-		function setErrorMap(map) {
-			overrideErrorMap = map;
-		}
 		function getErrorMap() {
 			return overrideErrorMap;
 		}
+		//#endregion
+		//#region ../../node_modules/zod/v3/helpers/parseUtil.js
 		const makeIssue = (params) => {
 			const { data, path, errorMaps, issueData } = params;
 			const fullPath = [...path, ...issueData.path || []];
@@ -444,7 +936,6 @@ window.__ModuleLoader__.load({
 				message: errorMessage
 			};
 		};
-		const EMPTY_PATH = [];
 		function addIssueToContext(ctx, issueData) {
 			const overrideMap = getErrorMap();
 			const issue = makeIssue({
@@ -523,38 +1014,15 @@ window.__ModuleLoader__.load({
 		const isDirty = (x) => x.status === "dirty";
 		const isValid = (x) => x.status === "valid";
 		const isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
-		/******************************************************************************
-		Copyright (c) Microsoft Corporation.
-
-		Permission to use, copy, modify, and/or distribute this software for any
-		purpose with or without fee is hereby granted.
-
-		THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
-		REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
-		AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
-		INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
-		LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
-		OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
-		PERFORMANCE OF THIS SOFTWARE.
-		***************************************************************************** */
-		function __classPrivateFieldGet(receiver, state, kind, f) {
-			if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a getter");
-			if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
-			return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
-		}
-		function __classPrivateFieldSet(receiver, state, value, kind, f) {
-			if (kind === "m") throw new TypeError("Private method is not writable");
-			if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a setter");
-			if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot write private member to an object whose class did not declare it");
-			return kind === "a" ? f.call(receiver, value) : f ? f.value = value : state.set(receiver, value), value;
-		}
+		//#endregion
+		//#region ../../node_modules/zod/v3/helpers/errorUtil.js
 		var errorUtil;
 		(function(errorUtil) {
 			errorUtil.errToObj = (message) => typeof message === "string" ? { message } : message || {};
-			errorUtil.toString = (message) => typeof message === "string" ? message : message === null || message === void 0 ? void 0 : message.message;
+			errorUtil.toString = (message) => typeof message === "string" ? message : message?.message;
 		})(errorUtil || (errorUtil = {}));
-		var _ZodEnum_cache;
-		var _ZodNativeEnum_cache;
+		//#endregion
+		//#region ../../node_modules/zod/v3/types.js
 		var ParseInputLazyPath = class {
 			constructor(parent, value, path, key) {
 				this._cachedPath = [];
@@ -565,7 +1033,7 @@ window.__ModuleLoader__.load({
 			}
 			get path() {
 				if (!this._cachedPath.length) {
-					if (this._key instanceof Array) this._cachedPath.push(...this._path, ...this._key);
+					if (Array.isArray(this._key)) this._cachedPath.push(...this._path, ...this._key);
 					else this._cachedPath.push(...this._path, this._key);
 				}
 				return this._cachedPath;
@@ -598,12 +1066,11 @@ window.__ModuleLoader__.load({
 				description
 			};
 			const customMap = (iss, ctx) => {
-				var _a, _b;
 				const { message } = params;
-				if (iss.code === "invalid_enum_value") return { message: message !== null && message !== void 0 ? message : ctx.defaultError };
-				if (typeof ctx.data === "undefined") return { message: (_a = message !== null && message !== void 0 ? message : required_error) !== null && _a !== void 0 ? _a : ctx.defaultError };
+				if (iss.code === "invalid_enum_value") return { message: message ?? ctx.defaultError };
+				if (typeof ctx.data === "undefined") return { message: message ?? required_error ?? ctx.defaultError };
 				if (iss.code !== "invalid_type") return { message: ctx.defaultError };
-				return { message: (_b = message !== null && message !== void 0 ? message : invalid_type_error) !== null && _b !== void 0 ? _b : ctx.defaultError };
+				return { message: message ?? invalid_type_error ?? ctx.defaultError };
 			};
 			return {
 				errorMap: customMap,
@@ -611,35 +1078,6 @@ window.__ModuleLoader__.load({
 			};
 		}
 		var ZodType = class {
-			constructor(def) {
-				/** Alias of safeParseAsync */
-				this.spa = this.safeParseAsync;
-				this._def = def;
-				this.parse = this.parse.bind(this);
-				this.safeParse = this.safeParse.bind(this);
-				this.parseAsync = this.parseAsync.bind(this);
-				this.safeParseAsync = this.safeParseAsync.bind(this);
-				this.spa = this.spa.bind(this);
-				this.refine = this.refine.bind(this);
-				this.refinement = this.refinement.bind(this);
-				this.superRefine = this.superRefine.bind(this);
-				this.optional = this.optional.bind(this);
-				this.nullable = this.nullable.bind(this);
-				this.nullish = this.nullish.bind(this);
-				this.array = this.array.bind(this);
-				this.promise = this.promise.bind(this);
-				this.or = this.or.bind(this);
-				this.and = this.and.bind(this);
-				this.transform = this.transform.bind(this);
-				this.brand = this.brand.bind(this);
-				this.default = this.default.bind(this);
-				this.catch = this.catch.bind(this);
-				this.describe = this.describe.bind(this);
-				this.pipe = this.pipe.bind(this);
-				this.readonly = this.readonly.bind(this);
-				this.isNullable = this.isNullable.bind(this);
-				this.isOptional = this.isOptional.bind(this);
-			}
 			get description() {
 				return this._def.description;
 			}
@@ -684,14 +1122,13 @@ window.__ModuleLoader__.load({
 				throw result.error;
 			}
 			safeParse(data, params) {
-				var _a;
 				const ctx = {
 					common: {
 						issues: [],
-						async: (_a = params === null || params === void 0 ? void 0 : params.async) !== null && _a !== void 0 ? _a : false,
-						contextualErrorMap: params === null || params === void 0 ? void 0 : params.errorMap
+						async: params?.async ?? false,
+						contextualErrorMap: params?.errorMap
 					},
-					path: (params === null || params === void 0 ? void 0 : params.path) || [],
+					path: params?.path || [],
 					schemaErrorMap: this._def.errorMap,
 					parent: null,
 					data,
@@ -704,6 +1141,38 @@ window.__ModuleLoader__.load({
 				});
 				return handleResult(ctx, result);
 			}
+			"~validate"(data) {
+				const ctx = {
+					common: {
+						issues: [],
+						async: !!this["~standard"].async
+					},
+					path: [],
+					schemaErrorMap: this._def.errorMap,
+					parent: null,
+					data,
+					parsedType: getParsedType(data)
+				};
+				if (!this["~standard"].async) try {
+					const result = this._parseSync({
+						data,
+						path: [],
+						parent: ctx
+					});
+					return isValid(result) ? { value: result.value } : { issues: ctx.common.issues };
+				} catch (err) {
+					if (err?.message?.toLowerCase()?.includes("encountered")) this["~standard"].async = true;
+					ctx.common = {
+						issues: [],
+						async: true
+					};
+				}
+				return this._parseAsync({
+					data,
+					path: [],
+					parent: ctx
+				}).then((result) => isValid(result) ? { value: result.value } : { issues: ctx.common.issues });
+			}
 			async parseAsync(data, params) {
 				const result = await this.safeParseAsync(data, params);
 				if (result.success) return result.data;
@@ -713,10 +1182,10 @@ window.__ModuleLoader__.load({
 				const ctx = {
 					common: {
 						issues: [],
-						contextualErrorMap: params === null || params === void 0 ? void 0 : params.errorMap,
+						contextualErrorMap: params?.errorMap,
 						async: true
 					},
-					path: (params === null || params === void 0 ? void 0 : params.path) || [],
+					path: params?.path || [],
 					schemaErrorMap: this._def.errorMap,
 					parent: null,
 					data,
@@ -775,6 +1244,40 @@ window.__ModuleLoader__.load({
 			superRefine(refinement) {
 				return this._refinement(refinement);
 			}
+			constructor(def) {
+				/** Alias of safeParseAsync */
+				this.spa = this.safeParseAsync;
+				this._def = def;
+				this.parse = this.parse.bind(this);
+				this.safeParse = this.safeParse.bind(this);
+				this.parseAsync = this.parseAsync.bind(this);
+				this.safeParseAsync = this.safeParseAsync.bind(this);
+				this.spa = this.spa.bind(this);
+				this.refine = this.refine.bind(this);
+				this.refinement = this.refinement.bind(this);
+				this.superRefine = this.superRefine.bind(this);
+				this.optional = this.optional.bind(this);
+				this.nullable = this.nullable.bind(this);
+				this.nullish = this.nullish.bind(this);
+				this.array = this.array.bind(this);
+				this.promise = this.promise.bind(this);
+				this.or = this.or.bind(this);
+				this.and = this.and.bind(this);
+				this.transform = this.transform.bind(this);
+				this.brand = this.brand.bind(this);
+				this.default = this.default.bind(this);
+				this.catch = this.catch.bind(this);
+				this.describe = this.describe.bind(this);
+				this.pipe = this.pipe.bind(this);
+				this.readonly = this.readonly.bind(this);
+				this.isNullable = this.isNullable.bind(this);
+				this.isOptional = this.isOptional.bind(this);
+				this["~standard"] = {
+					version: 1,
+					vendor: "zod",
+					validate: (data) => this["~validate"](data)
+				};
+			}
 			optional() {
 				return ZodOptional.create(this, this._def);
 			}
@@ -785,7 +1288,7 @@ window.__ModuleLoader__.load({
 				return this.nullable().optional();
 			}
 			array() {
-				return ZodArray.create(this, this._def);
+				return ZodArray.create(this);
 			}
 			promise() {
 				return ZodPromise.create(this, this._def);
@@ -854,23 +1357,28 @@ window.__ModuleLoader__.load({
 		};
 		const cuidRegex = /^c[^\s-]{8,}$/i;
 		const cuid2Regex = /^[0-9a-z]+$/;
-		const ulidRegex = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+		const ulidRegex = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
 		const uuidRegex = /^[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}$/i;
 		const nanoidRegex = /^[a-z0-9_-]{21}$/i;
+		const jwtRegex = /^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]*$/;
 		const durationRegex = /^[-+]?P(?!$)(?:(?:[-+]?\d+Y)|(?:[-+]?\d+[.,]\d+Y$))?(?:(?:[-+]?\d+M)|(?:[-+]?\d+[.,]\d+M$))?(?:(?:[-+]?\d+W)|(?:[-+]?\d+[.,]\d+W$))?(?:(?:[-+]?\d+D)|(?:[-+]?\d+[.,]\d+D$))?(?:T(?=[\d+-])(?:(?:[-+]?\d+H)|(?:[-+]?\d+[.,]\d+H$))?(?:(?:[-+]?\d+M)|(?:[-+]?\d+[.,]\d+M$))?(?:[-+]?\d+(?:[.,]\d+)?S)?)??$/;
 		const emailRegex = /^(?!\.)(?!.*\.\.)([A-Z0-9_'+\-\.]*)[A-Z0-9_+-]@([A-Z0-9][A-Z0-9\-]*\.)+[A-Z]{2,}$/i;
 		const _emojiRegex = `^(\\p{Extended_Pictographic}|\\p{Emoji_Component})+$`;
 		let emojiRegex;
 		const ipv4Regex = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$/;
-		const ipv6Regex = /^(([a-f0-9]{1,4}:){7}|::([a-f0-9]{1,4}:){0,6}|([a-f0-9]{1,4}:){1}:([a-f0-9]{1,4}:){0,5}|([a-f0-9]{1,4}:){2}:([a-f0-9]{1,4}:){0,4}|([a-f0-9]{1,4}:){3}:([a-f0-9]{1,4}:){0,3}|([a-f0-9]{1,4}:){4}:([a-f0-9]{1,4}:){0,2}|([a-f0-9]{1,4}:){5}:([a-f0-9]{1,4}:){0,1})([a-f0-9]{1,4}|(((25[0-5])|(2[0-4][0-9])|(1[0-9]{2})|([0-9]{1,2}))\.){3}((25[0-5])|(2[0-4][0-9])|(1[0-9]{2})|([0-9]{1,2})))$/;
+		const ipv4CidrRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\/(3[0-2]|[12]?[0-9])$/;
+		const ipv6Regex = /^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$/;
+		const ipv6CidrRegex = /^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))\/(12[0-8]|1[01][0-9]|[1-9]?[0-9])$/;
 		const base64Regex = /^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/;
+		const base64urlRegex = /^([0-9a-zA-Z-_]{4})*(([0-9a-zA-Z-_]{2}(==)?)|([0-9a-zA-Z-_]{3}(=)?))?$/;
 		const dateRegexSource = `((\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-((0[13578]|1[02])-(0[1-9]|[12]\\d|3[01])|(0[469]|11)-(0[1-9]|[12]\\d|30)|(02)-(0[1-9]|1\\d|2[0-8])))`;
 		const dateRegex = new RegExp(`^${dateRegexSource}$`);
 		function timeRegexSource(args) {
-			let regex = `([01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d`;
-			if (args.precision) regex = `${regex}\\.\\d{${args.precision}}`;
-			else if (args.precision == null) regex = `${regex}(\\.\\d+)?`;
-			return regex;
+			let secondsRegexSource = `[0-5]\\d`;
+			if (args.precision) secondsRegexSource = `${secondsRegexSource}\\.\\d{${args.precision}}`;
+			else if (args.precision == null) secondsRegexSource = `${secondsRegexSource}(\\.\\d+)?`;
+			const secondsQuantifier = args.precision ? "+" : "?";
+			return `([01]\\d|2[0-3]):[0-5]\\d(:${secondsRegexSource})${secondsQuantifier}`;
 		}
 		function timeRegex(args) {
 			return new RegExp(`^${timeRegexSource(args)}$`);
@@ -886,6 +1394,27 @@ window.__ModuleLoader__.load({
 		function isValidIP(ip, version) {
 			if ((version === "v4" || !version) && ipv4Regex.test(ip)) return true;
 			if ((version === "v6" || !version) && ipv6Regex.test(ip)) return true;
+			return false;
+		}
+		function isValidJWT(jwt, alg) {
+			if (!jwtRegex.test(jwt)) return false;
+			try {
+				const [header] = jwt.split(".");
+				if (!header) return false;
+				const base64 = header.replace(/-/g, "+").replace(/_/g, "/").padEnd(header.length + (4 - header.length % 4) % 4, "=");
+				const decoded = JSON.parse(atob(base64));
+				if (typeof decoded !== "object" || decoded === null) return false;
+				if ("typ" in decoded && decoded?.typ !== "JWT") return false;
+				if (!decoded.alg) return false;
+				if (alg && decoded.alg !== alg) return false;
+				return true;
+			} catch {
+				return false;
+			}
+		}
+		function isValidCidr(ip, version) {
+			if ((version === "v4" || !version) && ipv4CidrRegex.test(ip)) return true;
+			if ((version === "v6" || !version) && ipv6CidrRegex.test(ip)) return true;
 			return false;
 		}
 		var ZodString = class ZodString extends ZodType {
@@ -1024,7 +1553,7 @@ window.__ModuleLoader__.load({
 					}
 				} else if (check.kind === "url") try {
 					new URL(input.data);
-				} catch (_a) {
+				} catch {
 					ctx = this._getOrReturnCtx(input, ctx);
 					addIssueToContext(ctx, {
 						validation: "url",
@@ -1130,11 +1659,41 @@ window.__ModuleLoader__.load({
 						});
 						status.dirty();
 					}
+				} else if (check.kind === "jwt") {
+					if (!isValidJWT(input.data, check.alg)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							validation: "jwt",
+							code: ZodIssueCode.invalid_string,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "cidr") {
+					if (!isValidCidr(input.data, check.version)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							validation: "cidr",
+							code: ZodIssueCode.invalid_string,
+							message: check.message
+						});
+						status.dirty();
+					}
 				} else if (check.kind === "base64") {
 					if (!base64Regex.test(input.data)) {
 						ctx = this._getOrReturnCtx(input, ctx);
 						addIssueToContext(ctx, {
 							validation: "base64",
+							code: ZodIssueCode.invalid_string,
+							message: check.message
+						});
+						status.dirty();
+					}
+				} else if (check.kind === "base64url") {
+					if (!base64urlRegex.test(input.data)) {
+						ctx = this._getOrReturnCtx(input, ctx);
+						addIssueToContext(ctx, {
+							validation: "base64url",
 							code: ZodIssueCode.invalid_string,
 							message: check.message
 						});
@@ -1213,14 +1772,31 @@ window.__ModuleLoader__.load({
 					...errorUtil.errToObj(message)
 				});
 			}
+			base64url(message) {
+				return this._addCheck({
+					kind: "base64url",
+					...errorUtil.errToObj(message)
+				});
+			}
+			jwt(options) {
+				return this._addCheck({
+					kind: "jwt",
+					...errorUtil.errToObj(options)
+				});
+			}
 			ip(options) {
 				return this._addCheck({
 					kind: "ip",
 					...errorUtil.errToObj(options)
 				});
 			}
+			cidr(options) {
+				return this._addCheck({
+					kind: "cidr",
+					...errorUtil.errToObj(options)
+				});
+			}
 			datetime(options) {
-				var _a, _b;
 				if (typeof options === "string") return this._addCheck({
 					kind: "datetime",
 					precision: null,
@@ -1230,10 +1806,10 @@ window.__ModuleLoader__.load({
 				});
 				return this._addCheck({
 					kind: "datetime",
-					precision: typeof (options === null || options === void 0 ? void 0 : options.precision) === "undefined" ? null : options === null || options === void 0 ? void 0 : options.precision,
-					offset: (_a = options === null || options === void 0 ? void 0 : options.offset) !== null && _a !== void 0 ? _a : false,
-					local: (_b = options === null || options === void 0 ? void 0 : options.local) !== null && _b !== void 0 ? _b : false,
-					...errorUtil.errToObj(options === null || options === void 0 ? void 0 : options.message)
+					precision: typeof options?.precision === "undefined" ? null : options?.precision,
+					offset: options?.offset ?? false,
+					local: options?.local ?? false,
+					...errorUtil.errToObj(options?.message)
 				});
 			}
 			date(message) {
@@ -1250,8 +1826,8 @@ window.__ModuleLoader__.load({
 				});
 				return this._addCheck({
 					kind: "time",
-					precision: typeof (options === null || options === void 0 ? void 0 : options.precision) === "undefined" ? null : options === null || options === void 0 ? void 0 : options.precision,
-					...errorUtil.errToObj(options === null || options === void 0 ? void 0 : options.message)
+					precision: typeof options?.precision === "undefined" ? null : options?.precision,
+					...errorUtil.errToObj(options?.message)
 				});
 			}
 			duration(message) {
@@ -1271,8 +1847,8 @@ window.__ModuleLoader__.load({
 				return this._addCheck({
 					kind: "includes",
 					value,
-					position: options === null || options === void 0 ? void 0 : options.position,
-					...errorUtil.errToObj(options === null || options === void 0 ? void 0 : options.message)
+					position: options?.position,
+					...errorUtil.errToObj(options?.message)
 				});
 			}
 			startsWith(value, message) {
@@ -1311,8 +1887,7 @@ window.__ModuleLoader__.load({
 				});
 			}
 			/**
-			* @deprecated Use z.string().min(1) instead.
-			* @see {@link ZodString.min}
+			* Equivalent to `.min(1)`
 			*/
 			nonempty(message) {
 				return this.min(1, errorUtil.errToObj(message));
@@ -1374,8 +1949,14 @@ window.__ModuleLoader__.load({
 			get isIP() {
 				return !!this._def.checks.find((ch) => ch.kind === "ip");
 			}
+			get isCIDR() {
+				return !!this._def.checks.find((ch) => ch.kind === "cidr");
+			}
 			get isBase64() {
 				return !!this._def.checks.find((ch) => ch.kind === "base64");
+			}
+			get isBase64url() {
+				return !!this._def.checks.find((ch) => ch.kind === "base64url");
 			}
 			get minLength() {
 				let min = null;
@@ -1393,11 +1974,10 @@ window.__ModuleLoader__.load({
 			}
 		};
 		ZodString.create = (params) => {
-			var _a;
 			return new ZodString({
 				checks: [],
 				typeName: ZodFirstPartyTypeKind.ZodString,
-				coerce: (_a = params === null || params === void 0 ? void 0 : params.coerce) !== null && _a !== void 0 ? _a : false,
+				coerce: params?.coerce ?? false,
 				...processCreateParams(params)
 			});
 		};
@@ -1405,7 +1985,7 @@ window.__ModuleLoader__.load({
 			const valDecCount = (val.toString().split(".")[1] || "").length;
 			const stepDecCount = (step.toString().split(".")[1] || "").length;
 			const decCount = valDecCount > stepDecCount ? valDecCount : stepDecCount;
-			return parseInt(val.toFixed(decCount).replace(".", "")) % parseInt(step.toFixed(decCount).replace(".", "")) / Math.pow(10, decCount);
+			return Number.parseInt(val.toFixed(decCount).replace(".", "")) % Number.parseInt(step.toFixed(decCount).replace(".", "")) / 10 ** decCount;
 		}
 		var ZodNumber = class ZodNumber extends ZodType {
 			constructor() {
@@ -1600,7 +2180,8 @@ window.__ModuleLoader__.load({
 				return !!this._def.checks.find((ch) => ch.kind === "int" || ch.kind === "multipleOf" && util.isInteger(ch.value));
 			}
 			get isFinite() {
-				let max = null, min = null;
+				let max = null;
+				let min = null;
 				for (const ch of this._def.checks) if (ch.kind === "finite" || ch.kind === "int" || ch.kind === "multipleOf") return true;
 				else if (ch.kind === "min") {
 					if (min === null || ch.value > min) min = ch.value;
@@ -1614,7 +2195,7 @@ window.__ModuleLoader__.load({
 			return new ZodNumber({
 				checks: [],
 				typeName: ZodFirstPartyTypeKind.ZodNumber,
-				coerce: (params === null || params === void 0 ? void 0 : params.coerce) || false,
+				coerce: params?.coerce || false,
 				...processCreateParams(params)
 			});
 		};
@@ -1625,16 +2206,12 @@ window.__ModuleLoader__.load({
 				this.max = this.lte;
 			}
 			_parse(input) {
-				if (this._def.coerce) input.data = BigInt(input.data);
-				if (this._getType(input) !== ZodParsedType.bigint) {
-					const ctx = this._getOrReturnCtx(input);
-					addIssueToContext(ctx, {
-						code: ZodIssueCode.invalid_type,
-						expected: ZodParsedType.bigint,
-						received: ctx.parsedType
-					});
-					return INVALID;
+				if (this._def.coerce) try {
+					input.data = BigInt(input.data);
+				} catch {
+					return this._getInvalidInput(input);
 				}
+				if (this._getType(input) !== ZodParsedType.bigint) return this._getInvalidInput(input);
 				let ctx = void 0;
 				const status = new ParseStatus();
 				for (const check of this._def.checks) if (check.kind === "min") {
@@ -1676,6 +2253,15 @@ window.__ModuleLoader__.load({
 					status: status.value,
 					value: input.data
 				};
+			}
+			_getInvalidInput(input) {
+				const ctx = this._getOrReturnCtx(input);
+				addIssueToContext(ctx, {
+					code: ZodIssueCode.invalid_type,
+					expected: ZodParsedType.bigint,
+					received: ctx.parsedType
+				});
+				return INVALID;
 			}
 			gte(value, message) {
 				return this.setLimit("min", value, true, errorUtil.toString(message));
@@ -1761,11 +2347,10 @@ window.__ModuleLoader__.load({
 			}
 		};
 		ZodBigInt.create = (params) => {
-			var _a;
 			return new ZodBigInt({
 				checks: [],
 				typeName: ZodFirstPartyTypeKind.ZodBigInt,
-				coerce: (_a = params === null || params === void 0 ? void 0 : params.coerce) !== null && _a !== void 0 ? _a : false,
+				coerce: params?.coerce ?? false,
 				...processCreateParams(params)
 			});
 		};
@@ -1787,7 +2372,7 @@ window.__ModuleLoader__.load({
 		ZodBoolean.create = (params) => {
 			return new ZodBoolean({
 				typeName: ZodFirstPartyTypeKind.ZodBoolean,
-				coerce: (params === null || params === void 0 ? void 0 : params.coerce) || false,
+				coerce: params?.coerce || false,
 				...processCreateParams(params)
 			});
 		};
@@ -1803,7 +2388,7 @@ window.__ModuleLoader__.load({
 					});
 					return INVALID;
 				}
-				if (isNaN(input.data.getTime())) {
+				if (Number.isNaN(input.data.getTime())) {
 					addIssueToContext(this._getOrReturnCtx(input), { code: ZodIssueCode.invalid_date });
 					return INVALID;
 				}
@@ -1879,7 +2464,7 @@ window.__ModuleLoader__.load({
 		ZodDate.create = (params) => {
 			return new ZodDate({
 				checks: [],
-				coerce: (params === null || params === void 0 ? void 0 : params.coerce) || false,
+				coerce: params?.coerce || false,
 				typeName: ZodFirstPartyTypeKind.ZodDate,
 				...processCreateParams(params)
 			});
@@ -2157,10 +2742,11 @@ window.__ModuleLoader__.load({
 				if (this._cached !== null) return this._cached;
 				const shape = this._def.shape();
 				const keys = util.objectKeys(shape);
-				return this._cached = {
+				this._cached = {
 					shape,
 					keys
 				};
+				return this._cached;
 			}
 			_parse(input) {
 				if (this._getType(input) !== ZodParsedType.object) {
@@ -2211,8 +2797,7 @@ window.__ModuleLoader__.load({
 							});
 							status.dirty();
 						}
-					} else if (unknownKeys === "strip");
-					else throw new Error(`Internal ZodObject error: invalid unknownKeys value.`);
+					} else if (unknownKeys === "strip") {} else throw new Error(`Internal ZodObject error: invalid unknownKeys value.`);
 				} else {
 					const catchall = this._def.catchall;
 					for (const key of extraKeys) {
@@ -2253,9 +2838,8 @@ window.__ModuleLoader__.load({
 					...this._def,
 					unknownKeys: "strict",
 					...message !== void 0 ? { errorMap: (issue, ctx) => {
-						var _a, _b, _c, _d;
-						const defaultError = (_c = (_b = (_a = this._def).errorMap) === null || _b === void 0 ? void 0 : _b.call(_a, issue, ctx).message) !== null && _c !== void 0 ? _c : ctx.defaultError;
-						if (issue.code === "unrecognized_keys") return { message: (_d = errorUtil.errToObj(message).message) !== null && _d !== void 0 ? _d : defaultError };
+						const defaultError = this._def.errorMap?.(issue, ctx).message ?? ctx.defaultError;
+						if (issue.code === "unrecognized_keys") return { message: errorUtil.errToObj(message).message ?? defaultError };
 						return { message: defaultError };
 					} } : {}
 				});
@@ -2308,9 +2892,7 @@ window.__ModuleLoader__.load({
 			}
 			pick(mask) {
 				const shape = {};
-				util.objectKeys(mask).forEach((key) => {
-					if (mask[key] && this.shape[key]) shape[key] = this.shape[key];
-				});
+				for (const key of util.objectKeys(mask)) if (mask[key] && this.shape[key]) shape[key] = this.shape[key];
 				return new ZodObject({
 					...this._def,
 					shape: () => shape
@@ -2318,9 +2900,7 @@ window.__ModuleLoader__.load({
 			}
 			omit(mask) {
 				const shape = {};
-				util.objectKeys(this.shape).forEach((key) => {
-					if (!mask[key]) shape[key] = this.shape[key];
-				});
+				for (const key of util.objectKeys(this.shape)) if (!mask[key]) shape[key] = this.shape[key];
 				return new ZodObject({
 					...this._def,
 					shape: () => shape
@@ -2334,11 +2914,11 @@ window.__ModuleLoader__.load({
 			}
 			partial(mask) {
 				const newShape = {};
-				util.objectKeys(this.shape).forEach((key) => {
+				for (const key of util.objectKeys(this.shape)) {
 					const fieldSchema = this.shape[key];
 					if (mask && !mask[key]) newShape[key] = fieldSchema;
 					else newShape[key] = fieldSchema.optional();
-				});
+				}
 				return new ZodObject({
 					...this._def,
 					shape: () => newShape
@@ -2346,14 +2926,12 @@ window.__ModuleLoader__.load({
 			}
 			required(mask) {
 				const newShape = {};
-				util.objectKeys(this.shape).forEach((key) => {
-					if (mask && !mask[key]) newShape[key] = this.shape[key];
-					else {
-						let newField = this.shape[key];
-						while (newField instanceof ZodOptional) newField = newField._def.innerType;
-						newShape[key] = newField;
-					}
-				});
+				for (const key of util.objectKeys(this.shape)) if (mask && !mask[key]) newShape[key] = this.shape[key];
+				else {
+					let newField = this.shape[key];
+					while (newField instanceof ZodOptional) newField = newField._def.innerType;
+					newShape[key] = newField;
+				}
 				return new ZodObject({
 					...this._def,
 					shape: () => newShape
@@ -3066,10 +3644,6 @@ window.__ModuleLoader__.load({
 			});
 		}
 		var ZodEnum = class ZodEnum extends ZodType {
-			constructor() {
-				super(...arguments);
-				_ZodEnum_cache.set(this, void 0);
-			}
 			_parse(input) {
 				if (typeof input.data !== "string") {
 					const ctx = this._getOrReturnCtx(input);
@@ -3081,8 +3655,8 @@ window.__ModuleLoader__.load({
 					});
 					return INVALID;
 				}
-				if (!__classPrivateFieldGet(this, _ZodEnum_cache, "f")) __classPrivateFieldSet(this, _ZodEnum_cache, new Set(this._def.values), "f");
-				if (!__classPrivateFieldGet(this, _ZodEnum_cache, "f").has(input.data)) {
+				if (!this._cache) this._cache = new Set(this._def.values);
+				if (!this._cache.has(input.data)) {
 					const ctx = this._getOrReturnCtx(input);
 					const expectedValues = this._def.values;
 					addIssueToContext(ctx, {
@@ -3125,13 +3699,8 @@ window.__ModuleLoader__.load({
 				});
 			}
 		};
-		_ZodEnum_cache = /* @__PURE__ */ new WeakMap();
 		ZodEnum.create = createZodEnum;
 		var ZodNativeEnum = class extends ZodType {
-			constructor() {
-				super(...arguments);
-				_ZodNativeEnum_cache.set(this, void 0);
-			}
 			_parse(input) {
 				const nativeEnumValues = util.getValidEnumValues(this._def.values);
 				const ctx = this._getOrReturnCtx(input);
@@ -3144,8 +3713,8 @@ window.__ModuleLoader__.load({
 					});
 					return INVALID;
 				}
-				if (!__classPrivateFieldGet(this, _ZodNativeEnum_cache, "f")) __classPrivateFieldSet(this, _ZodNativeEnum_cache, new Set(util.getValidEnumValues(this._def.values)), "f");
-				if (!__classPrivateFieldGet(this, _ZodNativeEnum_cache, "f").has(input.data)) {
+				if (!this._cache) this._cache = new Set(util.getValidEnumValues(this._def.values));
+				if (!this._cache.has(input.data)) {
 					const expectedValues = util.objectValues(nativeEnumValues);
 					addIssueToContext(ctx, {
 						received: ctx.data,
@@ -3160,7 +3729,6 @@ window.__ModuleLoader__.load({
 				return this._def.values;
 			}
 		};
-		_ZodNativeEnum_cache = /* @__PURE__ */ new WeakMap();
 		ZodNativeEnum.create = (values, params) => {
 			return new ZodNativeEnum({
 				values,
@@ -3288,7 +3856,7 @@ window.__ModuleLoader__.load({
 							path: ctx.path,
 							parent: ctx
 						});
-						if (!isValid(base)) return base;
+						if (!isValid(base)) return INVALID;
 						const result = effect.transform(base.value, checkCtx);
 						if (result instanceof Promise) throw new Error(`Asynchronous transform encountered during synchronous parse operation. Use .parseAsync instead.`);
 						return {
@@ -3300,7 +3868,7 @@ window.__ModuleLoader__.load({
 						path: ctx.path,
 						parent: ctx
 					}).then((base) => {
-						if (!isValid(base)) return base;
+						if (!isValid(base)) return INVALID;
 						return Promise.resolve(effect.transform(base.value, checkCtx)).then((result) => ({
 							status: status.value,
 							value: result
@@ -3455,7 +4023,6 @@ window.__ModuleLoader__.load({
 				...processCreateParams(params)
 			});
 		};
-		const BRAND = Symbol("zod_brand");
 		var ZodBranded = class extends ZodType {
 			_parse(input) {
 				const { ctx } = this._processInputParams(input);
@@ -3539,23 +4106,7 @@ window.__ModuleLoader__.load({
 				...processCreateParams(params)
 			});
 		};
-		function custom(check, params = {}, fatal) {
-			if (check) return ZodAny.create().superRefine((data, ctx) => {
-				var _a, _b;
-				if (!check(data)) {
-					const p = typeof params === "function" ? params(data) : typeof params === "string" ? { message: params } : params;
-					const _fatal = (_b = (_a = p.fatal) !== null && _a !== void 0 ? _a : fatal) !== null && _b !== void 0 ? _b : true;
-					const p2 = typeof p === "string" ? { message: p } : p;
-					ctx.addIssue({
-						code: "custom",
-						...p2,
-						fatal: _fatal
-					});
-				}
-			});
-			return ZodAny.create();
-		}
-		const late = { object: ZodObject.lazycreate };
+		ZodObject.lazycreate;
 		var ZodFirstPartyTypeKind;
 		(function(ZodFirstPartyTypeKind) {
 			ZodFirstPartyTypeKind["ZodString"] = "ZodString";
@@ -3595,185 +4146,44 @@ window.__ModuleLoader__.load({
 			ZodFirstPartyTypeKind["ZodPipeline"] = "ZodPipeline";
 			ZodFirstPartyTypeKind["ZodReadonly"] = "ZodReadonly";
 		})(ZodFirstPartyTypeKind || (ZodFirstPartyTypeKind = {}));
-		const instanceOfType = (cls, params = { message: `Input not instance of ${cls.name}` }) => custom((data) => data instanceof cls, params);
 		const stringType = ZodString.create;
 		const numberType = ZodNumber.create;
-		const nanType = ZodNaN.create;
-		const bigIntType = ZodBigInt.create;
+		ZodNaN.create;
+		ZodBigInt.create;
 		const booleanType = ZodBoolean.create;
-		const dateType = ZodDate.create;
-		const symbolType = ZodSymbol.create;
-		const undefinedType = ZodUndefined.create;
-		const nullType = ZodNull.create;
-		const anyType = ZodAny.create;
-		const unknownType = ZodUnknown.create;
-		const neverType = ZodNever.create;
-		const voidType = ZodVoid.create;
+		ZodDate.create;
+		ZodSymbol.create;
+		ZodUndefined.create;
+		ZodNull.create;
+		ZodAny.create;
+		ZodUnknown.create;
+		ZodNever.create;
+		ZodVoid.create;
 		const arrayType = ZodArray.create;
 		const objectType = ZodObject.create;
-		const strictObjectType = ZodObject.strictCreate;
-		const unionType = ZodUnion.create;
-		const discriminatedUnionType = ZodDiscriminatedUnion.create;
-		const intersectionType = ZodIntersection.create;
-		const tupleType = ZodTuple.create;
-		const recordType = ZodRecord.create;
-		const mapType = ZodMap.create;
-		const setType = ZodSet.create;
-		const functionType = ZodFunction.create;
-		const lazyType = ZodLazy.create;
+		ZodObject.strictCreate;
+		ZodUnion.create;
+		ZodDiscriminatedUnion.create;
+		ZodIntersection.create;
+		ZodTuple.create;
+		ZodRecord.create;
+		ZodMap.create;
+		ZodSet.create;
+		ZodFunction.create;
+		ZodLazy.create;
 		const literalType = ZodLiteral.create;
 		const enumType = ZodEnum.create;
-		const nativeEnumType = ZodNativeEnum.create;
-		const promiseType = ZodPromise.create;
-		const effectsType = ZodEffects.create;
-		const optionalType = ZodOptional.create;
-		const nullableType = ZodNullable.create;
-		const preprocessType = ZodEffects.createWithPreprocess;
-		const pipelineType = ZodPipeline.create;
-		const ostring = () => stringType().optional();
-		const onumber = () => numberType().optional();
-		const oboolean = () => booleanType().optional();
-		var z = /*#__PURE__*/ Object.freeze({
-			__proto__: null,
-			defaultErrorMap: errorMap,
-			setErrorMap,
-			getErrorMap,
-			makeIssue,
-			EMPTY_PATH,
-			addIssueToContext,
-			ParseStatus,
-			INVALID,
-			DIRTY,
-			OK,
-			isAborted,
-			isDirty,
-			isValid,
-			isAsync,
-			get util() {
-				return util;
-			},
-			get objectUtil() {
-				return objectUtil;
-			},
-			ZodParsedType,
-			getParsedType,
-			ZodType,
-			datetimeRegex,
-			ZodString,
-			ZodNumber,
-			ZodBigInt,
-			ZodBoolean,
-			ZodDate,
-			ZodSymbol,
-			ZodUndefined,
-			ZodNull,
-			ZodAny,
-			ZodUnknown,
-			ZodNever,
-			ZodVoid,
-			ZodArray,
-			ZodObject,
-			ZodUnion,
-			ZodDiscriminatedUnion,
-			ZodIntersection,
-			ZodTuple,
-			ZodRecord,
-			ZodMap,
-			ZodSet,
-			ZodFunction,
-			ZodLazy,
-			ZodLiteral,
-			ZodEnum,
-			ZodNativeEnum,
-			ZodPromise,
-			ZodEffects,
-			ZodTransformer: ZodEffects,
-			ZodOptional,
-			ZodNullable,
-			ZodDefault,
-			ZodCatch,
-			ZodNaN,
-			BRAND,
-			ZodBranded,
-			ZodPipeline,
-			ZodReadonly,
-			custom,
-			Schema: ZodType,
-			ZodSchema: ZodType,
-			late,
-			get ZodFirstPartyTypeKind() {
-				return ZodFirstPartyTypeKind;
-			},
-			coerce: {
-				string: ((arg) => ZodString.create({
-					...arg,
-					coerce: true
-				})),
-				number: ((arg) => ZodNumber.create({
-					...arg,
-					coerce: true
-				})),
-				boolean: ((arg) => ZodBoolean.create({
-					...arg,
-					coerce: true
-				})),
-				bigint: ((arg) => ZodBigInt.create({
-					...arg,
-					coerce: true
-				})),
-				date: ((arg) => ZodDate.create({
-					...arg,
-					coerce: true
-				}))
-			},
-			any: anyType,
-			array: arrayType,
-			bigint: bigIntType,
-			boolean: booleanType,
-			date: dateType,
-			discriminatedUnion: discriminatedUnionType,
-			effect: effectsType,
-			"enum": enumType,
-			"function": functionType,
-			"instanceof": instanceOfType,
-			intersection: intersectionType,
-			lazy: lazyType,
-			literal: literalType,
-			map: mapType,
-			nan: nanType,
-			nativeEnum: nativeEnumType,
-			never: neverType,
-			"null": nullType,
-			nullable: nullableType,
-			number: numberType,
-			object: objectType,
-			oboolean,
-			onumber,
-			optional: optionalType,
-			ostring,
-			pipeline: pipelineType,
-			preprocess: preprocessType,
-			promise: promiseType,
-			record: recordType,
-			set: setType,
-			strictObject: strictObjectType,
-			string: stringType,
-			symbol: symbolType,
-			transformer: effectsType,
-			tuple: tupleType,
-			"undefined": undefinedType,
-			union: unionType,
-			unknown: unknownType,
-			"void": voidType,
-			NEVER: INVALID,
-			ZodIssueCode,
-			quotelessJson,
-			ZodError
-		});
+		ZodNativeEnum.create;
+		ZodPromise.create;
+		ZodEffects.create;
+		ZodOptional.create;
+		ZodNullable.create;
+		ZodEffects.createWithPreprocess;
+		ZodPipeline.create;
 		//#endregion
 		//#region ../engine/src/schema.ts
-		const transitionSchema = z.enum(["none", "fade"]).default("none");
-		const easingSchema = z.enum([
+		const transitionSchema = enumType(["none", "fade"]).default("none");
+		const easingSchema = enumType([
 			"linear",
 			"in",
 			"out",
@@ -3781,108 +4191,108 @@ window.__ModuleLoader__.load({
 			"bounce",
 			"elastic"
 		]);
-		const keyframeSchema = z.object({
-			t: z.number(),
-			v: z.number(),
+		const keyframeSchema = objectType({
+			t: numberType(),
+			v: numberType(),
 			e: easingSchema.optional()
 		});
-		const animationsSchema = z.object({
-			x: z.array(keyframeSchema).optional(),
-			y: z.array(keyframeSchema).optional(),
-			scale: z.array(keyframeSchema).optional(),
-			opacity: z.array(keyframeSchema).optional(),
-			rotation: z.array(keyframeSchema).optional(),
-			volume: z.array(keyframeSchema).optional()
+		const animationsSchema = objectType({
+			x: arrayType(keyframeSchema).optional(),
+			y: arrayType(keyframeSchema).optional(),
+			scale: arrayType(keyframeSchema).optional(),
+			opacity: arrayType(keyframeSchema).optional(),
+			rotation: arrayType(keyframeSchema).optional(),
+			volume: arrayType(keyframeSchema).optional()
 		});
-		const filterSchema = z.object({
-			brightness: z.number().min(0).max(3).optional(),
-			contrast: z.number().min(0).max(3).optional(),
-			saturate: z.number().min(0).max(3).optional(),
-			blur: z.number().min(0).max(20).optional(),
-			grayscale: z.number().min(0).max(1).optional(),
-			sepia: z.number().min(0).max(1).optional(),
-			hueRotate: z.number().min(0).max(360).optional()
+		const filterSchema = objectType({
+			brightness: numberType().min(0).max(3).optional(),
+			contrast: numberType().min(0).max(3).optional(),
+			saturate: numberType().min(0).max(3).optional(),
+			blur: numberType().min(0).max(20).optional(),
+			grayscale: numberType().min(0).max(1).optional(),
+			sepia: numberType().min(0).max(1).optional(),
+			hueRotate: numberType().min(0).max(360).optional()
 		});
-		const clipSchema = z.object({
-			id: z.string(),
-			type: z.enum(["video", "image"]),
-			src: z.string(),
-			inPoint: z.number().min(0),
-			clipDuration: z.number().positive(),
+		const clipSchema = objectType({
+			id: stringType(),
+			type: enumType(["video", "image"]),
+			src: stringType(),
+			inPoint: numberType().min(0),
+			clipDuration: numberType().positive(),
 			transition: transitionSchema,
-			volume: z.number().min(0).max(1).default(1),
-			atSeconds: z.number().min(0).optional(),
-			box: z.object({
-				x: z.number().min(0).max(1),
-				y: z.number().min(0).max(1),
-				w: z.number().min(.01).max(1),
-				h: z.number().min(.01).max(1)
+			volume: numberType().min(0).max(1).default(1),
+			atSeconds: numberType().min(0).optional(),
+			box: objectType({
+				x: numberType().min(0).max(1),
+				y: numberType().min(0).max(1),
+				w: numberType().min(.01).max(1),
+				h: numberType().min(.01).max(1)
 			}).optional(),
-			speed: z.number().min(.1).max(10).default(1),
+			speed: numberType().min(.1).max(10).default(1),
 			filter: filterSchema.optional(),
 			animations: animationsSchema.optional()
 		});
-		const videoTrackSchema = z.object({
-			id: z.string(),
-			name: z.string().optional(),
-			clips: z.array(clipSchema).default([])
+		const videoTrackSchema = objectType({
+			id: stringType(),
+			name: stringType().optional(),
+			clips: arrayType(clipSchema).default([])
 		});
-		const audioClipSchema = z.object({
-			id: z.string(),
-			src: z.string(),
-			inPoint: z.number().min(0).default(0),
-			duration: z.number().positive(),
-			volume: z.number().min(0).max(1).default(1),
-			atSeconds: z.number().min(0).default(0),
-			speed: z.number().min(.1).max(10).default(1),
+		const audioClipSchema = objectType({
+			id: stringType(),
+			src: stringType(),
+			inPoint: numberType().min(0).default(0),
+			duration: numberType().positive(),
+			volume: numberType().min(0).max(1).default(1),
+			atSeconds: numberType().min(0).default(0),
+			speed: numberType().min(.1).max(10).default(1),
 			animations: animationsSchema.optional()
 		});
-		const audioTrackV2Schema = z.object({
-			id: z.string(),
-			name: z.string().optional(),
-			volume: z.number().min(0).max(1).default(1),
-			muted: z.boolean().default(false),
-			clips: z.array(audioClipSchema).default([])
+		const audioTrackV2Schema = objectType({
+			id: stringType(),
+			name: stringType().optional(),
+			volume: numberType().min(0).max(1).default(1),
+			muted: booleanType().default(false),
+			clips: arrayType(audioClipSchema).default([])
 		});
-		const legacyAudioSchema = z.object({
-			src: z.string(),
-			volume: z.number().min(0).max(1).default(1),
-			startAtSeconds: z.number().min(0).default(0)
+		const legacyAudioSchema = objectType({
+			src: stringType(),
+			volume: numberType().min(0).max(1).default(1),
+			startAtSeconds: numberType().min(0).default(0)
 		});
-		const overlaySchema = z.object({
-			text: z.string(),
-			startSeconds: z.number().min(0),
-			endSeconds: z.number().min(0),
-			position: z.enum([
+		const overlaySchema = objectType({
+			text: stringType(),
+			startSeconds: numberType().min(0),
+			endSeconds: numberType().min(0),
+			position: enumType([
 				"top",
 				"center",
 				"bottom"
 			]).default("bottom"),
-			fontSize: z.number().positive().default(64),
-			color: z.string().default("#ffffff"),
-			fontFamily: z.string().optional(),
-			fontWeight: z.number().int().min(100).max(900).optional(),
+			fontSize: numberType().positive().default(64),
+			color: stringType().default("#ffffff"),
+			fontFamily: stringType().optional(),
+			fontWeight: numberType().int().min(100).max(900).optional(),
 			animations: animationsSchema.optional()
 		});
-		const metaSchema = z.object({
-			fps: z.number().positive(),
-			width: z.number().int().positive(),
-			height: z.number().int().positive()
+		const metaSchema = objectType({
+			fps: numberType().positive(),
+			width: numberType().int().positive(),
+			height: numberType().int().positive()
 		});
-		const timelineInputSchema = z.object({
+		const timelineInputSchema = objectType({
 			meta: metaSchema,
-			videoTracks: z.array(videoTrackSchema).optional(),
-			audioTracks: z.array(audioTrackV2Schema).optional(),
-			clips: z.array(clipSchema).optional(),
+			videoTracks: arrayType(videoTrackSchema).optional(),
+			audioTracks: arrayType(audioTrackV2Schema).optional(),
+			clips: arrayType(clipSchema).optional(),
 			audio: legacyAudioSchema.nullable().optional(),
-			overlays: z.array(overlaySchema).default([])
+			overlays: arrayType(overlaySchema).default([])
 		});
-		z.object({
+		objectType({
 			meta: metaSchema,
-			version: z.literal(2).default(2),
-			videoTracks: z.array(videoTrackSchema).min(1),
-			audioTracks: z.array(audioTrackV2Schema),
-			overlays: z.array(overlaySchema)
+			version: literalType(2).default(2),
+			videoTracks: arrayType(videoTrackSchema).min(1),
+			audioTracks: arrayType(audioTrackV2Schema),
+			overlays: arrayType(overlaySchema)
 		});
 		function shiftAnimations(animations, seconds) {
 			if (!animations) return void 0;
@@ -4071,25 +4481,41 @@ window.__ModuleLoader__.load({
 			}
 		}
 		ensureEngineBase();
-		const assetUrl = (src) => /^(?:[a-z]+:)?\/\//i.test(src) ? src : `${API_BASE}/${src.replace(/^\/+/, "")}`;
+		const scopedPath = (path, sessionId) => sessionId ? `${path}${path.includes("?") ? "&" : "?"}session=${encodeURIComponent(sessionId)}` : path;
+		const assetUrl = (src, sessionId) => /^(?:[a-z]+:)?\/\//i.test(src) ? src : `${API_BASE}${scopedPath(`/project-assets/${encodeURIComponent(src.split(/[\\/]/).pop() ?? src)}`, sessionId)}`;
 		async function getTimeline(sessionId, peek = false) {
-			const r = await apiFetch(`/api/internal/timeline${sessionId ? `?session=${encodeURIComponent(sessionId)}${peek ? "&peek=1" : ""}` : ""}`);
+			const r = await apiFetch(`/api/internal/timeline${sessionId ? `?session=${encodeURIComponent(sessionId)}${peek ? "&peek=1" : ""}` : ""}`, { signal: AbortSignal.timeout(15e3) });
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 			return r.json();
 		}
-		async function putTimeline(t, sessionId) {
+		var TimelineConflictError = class extends Error {};
+		async function putTimeline(t, sessionId, baseTimeline) {
 			const r = await apiFetch(`/api/internal/timeline`, {
+				signal: AbortSignal.timeout(15e3),
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(sessionId ? {
+				body: JSON.stringify({
 					timeline: t,
-					sessionId
-				} : t)
+					sessionId,
+					...baseTimeline === void 0 ? {} : { baseTimeline }
+				})
 			});
-			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+			if (!r.ok) {
+				const data = await r.json().catch(() => ({}));
+				if (r.status === 409 && data.code === "TIMELINE_CONFLICT") throw new TimelineConflictError(data.error);
+				throw new Error(data.error ?? `HTTP ${r.status}`);
+			}
 		}
-		async function getExportStatus() {
-			return (await apiFetch(`/api/export/status`)).json();
+		var ExportRequestError = class extends Error {
+			constructor(message, status) {
+				super(message);
+				this.status = status;
+			}
+		};
+		async function getExportStatus(jobId, signal) {
+			const r = await apiFetch(`/api/export/status${jobId ? `?jobId=${encodeURIComponent(jobId)}` : ""}`, { signal });
+			if (!r.ok) throw new ExportRequestError((await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`, r.status);
+			return r.json();
 		}
 		async function startExportWith(timeline, opts) {
 			const r = await apiFetch(`/api/export`, {
@@ -4098,13 +4524,17 @@ window.__ModuleLoader__.load({
 				body: JSON.stringify({
 					timeline,
 					scale: opts.scale ?? 1,
-					quality: opts.quality ?? "standard"
+					quality: opts.quality ?? "standard",
+					sessionId: opts.sessionId
 				})
 			});
 			if (r.status !== 202) {
 				const d = await r.json().catch(() => ({}));
 				throw new Error(d.error ?? `HTTP ${r.status}`);
 			}
+			const data = await r.json();
+			if (typeof data.jobId !== "string" || !data.jobId) throw new Error("导出服务未返回任务编号，请更新整合包后重试");
+			return data.jobId;
 		}
 		async function sessionProject(sessionId) {
 			const r = await apiFetch(`/api/session-project`, {
@@ -4120,13 +4550,13 @@ window.__ModuleLoader__.load({
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 			return (await r.json()).fonts ?? [];
 		}
-		async function listAssets() {
-			const r = await apiFetch(`/api/assets`);
+		async function listAssets(sessionId, signal) {
+			const r = await apiFetch(scopedPath(`/api/assets`, sessionId), { signal });
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 			return (await r.json()).assets ?? [];
 		}
-		async function uploadAsset(file) {
-			const r = await apiFetch(`/api/assets?name=${encodeURIComponent(file.name)}`, {
+		async function uploadAsset(file, sessionId) {
+			const r = await apiFetch(scopedPath(`/api/assets?name=${encodeURIComponent(file.name)}`, sessionId), {
 				method: "POST",
 				headers: { "Content-Type": "application/octet-stream" },
 				body: file
@@ -4135,19 +4565,112 @@ window.__ModuleLoader__.load({
 			if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
 			return d;
 		}
-		async function deleteAsset(name) {
-			const r = await apiFetch(`/api/assets/${encodeURIComponent(name)}`, { method: "DELETE" });
+		async function deleteAsset(name, sessionId) {
+			const r = await apiFetch(scopedPath(`/api/assets/${encodeURIComponent(name)}`, sessionId), { method: "DELETE" });
 			if (!r.ok) throw new Error(`HTTP ${r.status}`);
 		}
-		const assetThumbUrl = (name) => `${API_BASE}/api/assets/${encodeURIComponent(name)}/thumb`;
+		const assetThumbUrl = (name, sessionId) => `${API_BASE}${scopedPath(`/api/assets/${encodeURIComponent(name)}/thumb`, sessionId)}`;
+		//#endregion
+		//#region src/client/previewCache.ts
+		var PreviewQueue = class {
+			constructor(limit = 2) {
+				this.jobs = [];
+				this.running = 0;
+				this.limit = Math.max(1, limit);
+			}
+			run(load, signal, fallback) {
+				return new Promise((resolve) => {
+					const job = {
+						signal,
+						cancel: () => {
+							const index = this.jobs.indexOf(job);
+							if (index !== -1) this.jobs.splice(index, 1);
+							signal.removeEventListener("abort", job.cancel);
+							resolve(fallback);
+						},
+						start: () => {
+							signal.removeEventListener("abort", job.cancel);
+							this.running++;
+							Promise.resolve().then(() => signal.aborted ? fallback : load(signal)).then(resolve, () => resolve(fallback)).finally(() => {
+								this.running--;
+								this.drain();
+							});
+						}
+					};
+					if (signal.aborted) {
+						resolve(fallback);
+						return;
+					}
+					signal.addEventListener("abort", job.cancel, { once: true });
+					this.jobs.push(job);
+					this.drain();
+				});
+			}
+			drain() {
+				while (this.running < this.limit && this.jobs.length) {
+					const job = this.jobs.shift();
+					if (job.signal.aborted) job.cancel();
+					else job.start();
+				}
+			}
+		};
+		var PreviewCache = class {
+			constructor(queue, capacity, fallback) {
+				this.entries = /* @__PURE__ */ new Map();
+				this.queue = queue;
+				this.capacity = capacity;
+				this.fallback = fallback;
+			}
+			acquire(key, load) {
+				let entry = this.entries.get(key);
+				if (!entry) {
+					const controller = new AbortController();
+					entry = {
+						controller,
+						users: 0,
+						ready: false,
+						promise: this.queue.run(load, controller.signal, this.fallback)
+					};
+					const created = entry;
+					entry.promise.then(() => {
+						created.ready = true;
+						this.prune();
+					});
+					this.entries.set(key, entry);
+				} else {
+					this.entries.delete(key);
+					this.entries.set(key, entry);
+				}
+				entry.users++;
+				const acquired = entry;
+				let released = false;
+				return {
+					promise: entry.promise,
+					release: () => {
+						if (released) return;
+						released = true;
+						acquired.users--;
+						if (!acquired.users && !acquired.ready) {
+							acquired.controller.abort();
+							if (this.entries.get(key) === acquired) this.entries.delete(key);
+						}
+						this.prune();
+					}
+				};
+			}
+			prune() {
+				for (const [key, entry] of this.entries) {
+					if (this.entries.size <= this.capacity) break;
+					if (entry.ready && !entry.users) this.entries.delete(key);
+				}
+			}
+		};
 		//#endregion
 		//#region src/client/TrackMedia.tsx
-		const frames = /* @__PURE__ */ new Map();
-		function filmFrames(src, start, duration) {
-			const key = `${src}|${start}|${duration}`;
-			let cached = frames.get(key);
-			if (cached) return cached;
-			cached = new Promise((resolve) => {
+		const queue = new PreviewQueue(2);
+		const frames = new PreviewCache(queue, 48, []);
+		function filmFrames(src, start, duration, signal) {
+			return new Promise((resolve) => {
 				const video = document.createElement("video");
 				video.crossOrigin = "anonymous";
 				video.muted = true;
@@ -4161,12 +4684,18 @@ window.__ModuleLoader__.load({
 					if (done) return;
 					done = true;
 					clearTimeout(timer);
+					signal.removeEventListener("abort", finish);
 					video.onloadeddata = video.onseeked = video.onerror = null;
 					video.removeAttribute("src");
 					video.load();
 					resolve(results);
 				};
 				const timer = window.setTimeout(finish, 12e3);
+				signal.addEventListener("abort", finish, { once: true });
+				if (signal.aborted) {
+					finish();
+					return;
+				}
 				const seek = () => {
 					const target = Math.min(Math.max(0, video.duration - .05), start + duration * results.length / 3);
 					if (Math.abs(video.currentTime - target) < .001 && video.readyState >= 2) capture();
@@ -4188,22 +4717,24 @@ window.__ModuleLoader__.load({
 				video.onerror = finish;
 				video.src = src;
 			});
-			frames.set(key, cached);
-			if (frames.size > 48) frames.delete(frames.keys().next().value);
-			return cached;
 		}
-		function Filmstrip({ src, type, inPoint, duration, speed = 1 }) {
-			const url = assetUrl(src);
+		const Filmstrip = (0, react.memo)(function Filmstrip({ src, type, inPoint, duration, speed = 1 }) {
+			const url = assetUrl(src, useProjectSession());
 			const [images, setImages] = (0, react.useState)([]);
 			(0, react.useEffect)(() => {
 				let active = true;
 				setImages([]);
-				if (type === "image") setImages([url]);
-				else filmFrames(url, inPoint, duration * speed).then((value) => {
+				if (type === "image") {
+					setImages([url]);
+					return;
+				}
+				const preview = frames.acquire(`${url}|${inPoint}|${duration * speed}`, (signal) => filmFrames(url, inPoint, duration * speed, signal));
+				preview.promise.then((value) => {
 					if (active) setImages(value);
 				});
 				return () => {
 					active = false;
+					preview.release();
 				};
 			}, [
 				url,
@@ -4217,89 +4748,104 @@ window.__ModuleLoader__.load({
 				"aria-hidden": "true",
 				children: images.map((image, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { style: { backgroundImage: `url("${image}")` } }, i))
 			});
-		}
-		const waveforms = /* @__PURE__ */ new Map();
-		function loadWaveform(src) {
-			let cached = waveforms.get(src);
-			if (cached) return cached;
-			cached = (async () => {
-				let context;
-				try {
-					const response = await fetch(src, { signal: AbortSignal.timeout(15e3) });
-					if (!response.ok || Number(response.headers.get("content-length")) > 2e7) {
-						await response.body?.cancel();
+		});
+		const waveforms = new PreviewCache(queue, 12, null);
+		async function loadWaveform(src, signal) {
+			let context;
+			const controller = new AbortController();
+			const abort = () => controller.abort();
+			signal.addEventListener("abort", abort, { once: true });
+			const timeout = window.setTimeout(abort, 15e3);
+			try {
+				if (signal.aborted) return null;
+				const response = await fetch(src, { signal: controller.signal });
+				if (!response.ok || Number(response.headers.get("content-length")) > 2e7) {
+					await response.body?.cancel();
+					return null;
+				}
+				const reader = response.body?.getReader();
+				if (!reader) return null;
+				const chunks = [];
+				let size = 0;
+				while (true) {
+					const { value, done } = await reader.read();
+					if (done) break;
+					size += value.byteLength;
+					if (size > 2e7) {
+						await reader.cancel();
 						return null;
 					}
-					const reader = response.body?.getReader();
-					if (!reader) return null;
-					const chunks = [];
-					let size = 0;
-					while (true) {
-						const { value, done } = await reader.read();
-						if (done) break;
-						size += value.byteLength;
-						if (size > 2e7) {
-							await reader.cancel();
-							return null;
-						}
-						chunks.push(value);
-					}
-					const bytes = new Uint8Array(size);
-					let offset = 0;
-					for (const chunk of chunks) {
-						bytes.set(chunk, offset);
-						offset += chunk.length;
-					}
-					context = new AudioContext({ sampleRate: 8e3 });
-					const audio = await context.decodeAudioData(bytes.buffer);
-					const count = Math.min(12e3, Math.ceil(audio.duration * 60));
-					const values = Array.from({ length: count }, () => 0);
-					for (let c = 0; c < audio.numberOfChannels; c++) {
-						const channel = audio.getChannelData(c);
-						for (let i = 0; i < channel.length; i++) {
-							const bin = Math.min(count - 1, Math.floor(i / channel.length * count));
-							values[bin] = Math.max(values[bin], Math.abs(channel[i]));
-						}
-					}
-					return {
-						values,
-						duration: audio.duration
-					};
-				} catch {
-					return null;
-				} finally {
-					if (context) context.close();
+					chunks.push(value);
 				}
-			})();
-			waveforms.set(src, cached);
-			if (waveforms.size > 12) waveforms.delete(waveforms.keys().next().value);
-			return cached;
+				const bytes = new Uint8Array(size);
+				let offset = 0;
+				for (const chunk of chunks) {
+					bytes.set(chunk, offset);
+					offset += chunk.length;
+				}
+				context = new AudioContext({ sampleRate: 8e3 });
+				const audio = await context.decodeAudioData(bytes.buffer);
+				if (controller.signal.aborted) return null;
+				const count = Math.min(12e3, Math.ceil(audio.duration * 60));
+				const values = Array.from({ length: count }, () => 0);
+				for (let c = 0; c < audio.numberOfChannels; c++) {
+					const channel = audio.getChannelData(c);
+					for (let i = 0; i < channel.length; i++) {
+						if (i > 0 && i % 128e3 === 0) {
+							await new Promise((resolve) => window.setTimeout(resolve, 0));
+							if (controller.signal.aborted) return null;
+						}
+						const bin = Math.min(count - 1, Math.floor(i / channel.length * count));
+						values[bin] = Math.max(values[bin], Math.abs(channel[i]));
+					}
+				}
+				return {
+					values,
+					duration: audio.duration
+				};
+			} catch {
+				return null;
+			} finally {
+				clearTimeout(timeout);
+				signal.removeEventListener("abort", abort);
+				if (context) context.close();
+			}
 		}
-		function Waveform({ src, inPoint, duration, speed = 1 }) {
-			const url = assetUrl(src);
+		const Waveform = (0, react.memo)(function Waveform({ src, inPoint, duration, speed = 1 }) {
+			const url = assetUrl(src, useProjectSession());
 			const [peaks, setPeaks] = (0, react.useState)(null);
 			(0, react.useEffect)(() => {
 				let active = true;
 				setPeaks(null);
-				loadWaveform(url).then((value) => {
+				const preview = waveforms.acquire(url, (signal) => loadWaveform(url, signal));
+				preview.promise.then((value) => {
 					if (active) setPeaks(value);
 				});
 				return () => {
 					active = false;
+					preview.release();
 				};
 			}, [url]);
+			const bars = (0, react.useMemo)(() => {
+				if (!peaks) return "";
+				return Array.from({ length: 180 }, (_, i) => {
+					const from = Math.floor((inPoint + duration * speed * i / 180) / peaks.duration * peaks.values.length);
+					const to = Math.ceil((inPoint + duration * speed * (i + 1) / 180) / peaks.duration * peaks.values.length);
+					let peak = 0;
+					for (let j = Math.max(0, from); j < Math.min(peaks.values.length, to); j++) peak = Math.max(peak, peaks.values[j]);
+					const height = Math.max(.5, peak * 27);
+					return `L${i * 3 + 1} ${28 - height}`;
+				}).join("");
+			}, [
+				peaks,
+				inPoint,
+				duration,
+				speed
+			]);
 			if (!peaks) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 				className: "djp-wave-baseline",
 				"aria-hidden": "true"
 			});
-			const bars = Array.from({ length: 180 }, (_, i) => {
-				const from = Math.floor((inPoint + duration * speed * i / 180) / peaks.duration * peaks.values.length);
-				const to = Math.ceil((inPoint + duration * speed * (i + 1) / 180) / peaks.duration * peaks.values.length);
-				let peak = 0;
-				for (let j = Math.max(0, from); j < Math.min(peaks.values.length, to); j++) peak = Math.max(peak, peaks.values[j]);
-				const height = Math.max(.5, peak * 27);
-				return `L${i * 3 + 1} ${28 - height}`;
-			}).join("");
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("svg", {
 				className: "djp-waveform",
 				viewBox: "0 0 540 28",
@@ -4310,6 +4856,176 @@ window.__ModuleLoader__.load({
 					fill: "currentColor"
 				})
 			});
+		});
+		//#endregion
+		//#region src/client/ClipActions.tsx
+		function ClipActions({ label, start, duration, fps, onSplit, onDelete, onInspect, onClose }) {
+			const playerBus = usePlayerBus();
+			const [canSplit, setCanSplit] = (0, react.useState)(false);
+			(0, react.useEffect)(() => {
+				let frame = 0;
+				const tick = () => {
+					const at = (playerBus.ref?.getCurrentFrame() ?? 0) / fps;
+					setCanSplit(splitOffset(start, duration, at, fps) !== null);
+					frame = requestAnimationFrame(tick);
+				};
+				frame = requestAnimationFrame(tick);
+				return () => cancelAnimationFrame(frame);
+			}, [
+				start,
+				duration,
+				fps,
+				playerBus
+			]);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "djp-clip-actions",
+				role: "group",
+				"aria-label": "选中片段操作",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "djp-iconbtn",
+						"aria-label": "取消选择",
+						title: "取消选择（Esc）",
+						onClick: onClose,
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "close" })
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "djp-selected-label",
+						title: label,
+						children: [label, /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("small", { children: [duration.toFixed(2), "s"] })]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+						className: "djp-clip-action",
+						"aria-label": "分割选中片段",
+						disabled: !canSplit,
+						title: canSplit ? "在播放线处分割（S）" : "将播放线移到片段内部后分割",
+						onClick: onSplit,
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "split" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "分割" })]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+						className: "djp-clip-action",
+						"aria-label": "编辑选中片段属性",
+						title: "编辑属性（Enter）",
+						onClick: onInspect,
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "settings" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "属性" })]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+						className: "djp-clip-action",
+						"aria-label": "删除选中片段",
+						title: "删除（Delete），可撤销",
+						onClick: onDelete,
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "trash" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "删除" })]
+					})
+				]
+			});
+		}
+		//#endregion
+		//#region src/client/timelineGeometry.ts
+		/** Assign overlapping clips to display lanes without changing their actual tracks. */
+		function overlappingRows(items, range) {
+			const rows = [];
+			const ends = [];
+			const ordered = items.map((item) => ({
+				item,
+				...range(item)
+			})).sort((a, b) => a.at - b.at);
+			for (const { item, at, duration } of ordered) {
+				let lane = ends.findIndex((end) => end <= at + 1e-8);
+				if (lane === -1) {
+					lane = rows.length;
+					rows.push([]);
+				}
+				rows[lane].push(item);
+				ends[lane] = at + duration;
+			}
+			return rows;
+		}
+		function mergeTimeRanges(ranges) {
+			const merged = [];
+			for (const range of [...ranges].sort((a, b) => a.at - b.at)) {
+				const last = merged[merged.length - 1];
+				if (last && range.at <= last.at + last.duration + 1e-8) last.duration = Math.max(last.at + last.duration, range.at + range.duration) - last.at;
+				else merged.push({ ...range });
+			}
+			return merged;
+		}
+		function timelineWindow(bucket, viewport, pixelsPerSecond) {
+			const bucketWidth = Math.max(256, viewport);
+			return {
+				start: Math.max(0, (bucket * bucketWidth - viewport * 1.5) / pixelsPerSecond),
+				end: ((bucket + 1) * bucketWidth + viewport * 1.5) / pixelsPerSecond
+			};
+		}
+		function visibleTicks(start, end, total, step) {
+			const first = Math.max(0, Math.floor(start / step));
+			const last = Math.floor(Math.min(total, end) / step);
+			return Array.from({ length: Math.max(0, last - first + 1) }, (_, i) => (first + i) * step);
+		}
+		function dragPreview(input) {
+			const { start, duration, fps } = input;
+			const frame = 1 / fps;
+			const round = (seconds) => Math.round(seconds * fps) / fps;
+			const snap = (value) => {
+				let distance = input.threshold;
+				let anchor = null;
+				for (const point of input.anchors) if (Math.abs(point - value) < distance) {
+					distance = Math.abs(point - value);
+					anchor = point;
+				}
+				return {
+					value: anchor ?? value,
+					anchor,
+					distance
+				};
+			};
+			if (input.kind === "reorder") return {
+				at: Math.max(0, round(start + input.delta)),
+				duration,
+				snapAt: null
+			};
+			if (input.kind === "move") {
+				const raw = start + input.delta;
+				const left = snap(raw), right = snap(raw + duration);
+				const useRight = right.anchor !== null && (left.anchor === null || right.distance < left.distance);
+				const chosen = useRight ? right : left;
+				const at = Math.max(0, round(useRight ? right.value - duration : left.value));
+				const edge = useRight ? at + duration : at;
+				return {
+					at,
+					duration,
+					snapAt: chosen.anchor !== null && Math.abs(edge - chosen.anchor) <= frame / 2 + 1e-8 ? edge : null
+				};
+			}
+			if (input.kind === "trimL") {
+				const end = start + duration;
+				const earliest = input.subtitle ? 0 : Math.max(0, start - (input.inPoint ?? 0) / (input.speed ?? 1));
+				const min = Math.ceil((earliest - 1e-8) * fps) / fps;
+				const max = Math.floor((end - frame + 1e-8) * fps) / fps;
+				if (max < min) return {
+					at: start,
+					duration,
+					snapAt: null
+				};
+				const chosen = snap(start + input.delta);
+				const at = Math.min(max, Math.max(min, round(chosen.value)));
+				return {
+					at,
+					duration: end - at,
+					snapAt: chosen.anchor !== null && Math.abs(at - chosen.anchor) <= frame / 2 + 1e-8 ? at : null
+				};
+			}
+			const chosen = snap(start + duration + input.delta);
+			const end = Math.max(Math.ceil((start + frame - 1e-8) * fps) / fps, round(chosen.value));
+			return {
+				at: start,
+				duration: end - start,
+				snapAt: chosen.anchor !== null && Math.abs(end - chosen.anchor) <= frame / 2 + 1e-8 ? end : null
+			};
+		}
+		function edgeScrollSpeed(x, left, right, edge = 40) {
+			if (x < left + edge) return -360 * Math.min(1, Math.max(0, (left + edge - x) / edge));
+			if (x > right - edge) return 360 * Math.min(1, Math.max(0, (x - right + edge) / edge));
+			return 0;
 		}
 		//#endregion
 		//#region src/client/TrackStrip.tsx
@@ -4328,7 +5044,7 @@ window.__ModuleLoader__.load({
 				frames % fps
 			].map((n) => String(n).padStart(2, "0")).join(":");
 		};
-		function TrackRow({ code, name, kind, children, muted, action }) {
+		function TrackRow({ code, name, kind, children, muted, action, height }) {
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				"aria-label": name,
 				className: `djp-trow djp-lane-${kind} ${muted ? "djp-lane-muted" : ""}`,
@@ -4348,25 +5064,45 @@ window.__ModuleLoader__.load({
 					]
 				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "djp-track djp-trow-lane",
+					style: height === void 0 ? void 0 : { height },
 					children
 				})]
 			});
 		}
 		const TrackStrip = ({ t, o, playheadRef, onSeekClip, onAudio, onAdd, mode, onModeChange }) => {
+			const playerBus = usePlayerBus();
+			const { seekToSeconds } = playerBus;
 			const total = Math.max(1, timelineDurationInFrames(t) / t.meta.fps);
-			const [zoom, setZoom] = (0, react.useState)(1);
+			const sessionId = useProjectSession();
+			const [zoom, setZoom] = (0, react.useState)(() => readViewPreference(sessionId, "zoom", 1, (value) => typeof value === "number" && Number.isFinite(value) && value >= .25 && value <= 8));
+			(0, react.useEffect)(() => {
+				saveViewPreference(sessionId, "zoom", zoom);
+			}, [sessionId, zoom]);
 			const [selected, setSelected] = (0, react.useState)(null);
-			const [snapping, setSnapping] = (0, react.useState)(true);
+			const [snapping, setSnapping] = (0, react.useState)(() => readViewPreference(sessionId, "snapping", true, (value) => typeof value === "boolean"));
+			(0, react.useEffect)(() => {
+				saveViewPreference(sessionId, "snapping", snapping);
+			}, [sessionId, snapping]);
 			const [viewport, setViewport] = (0, react.useState)(320);
+			const [windowBucket, setWindowBucket] = (0, react.useState)(0);
+			const updateWindow = (x) => setWindowBucket(Math.floor(x / Math.max(256, viewport)));
 			const scrollRef = (0, react.useRef)(null);
+			const editorRef = (0, react.useRef)(null);
 			const programmaticScroll = (0, react.useRef)(0);
 			const manualUntil = (0, react.useRef)(0);
 			const pan = (0, react.useRef)(null);
 			const scrubRef = (0, react.useRef)(false);
+			const hiddenViewport = (0, react.useRef)(false);
 			(0, react.useEffect)(() => {
 				const el = scrollRef.current;
 				if (!el) return;
-				const observer = new ResizeObserver(() => setViewport(el.clientWidth));
+				const observer = new ResizeObserver(() => {
+					if (!el.clientWidth) {
+						hiddenViewport.current = true;
+						return;
+					}
+					setViewport(el.clientWidth);
+				});
 				observer.observe(el);
 				return () => observer.disconnect();
 			}, []);
@@ -4392,6 +5128,7 @@ window.__ModuleLoader__.load({
 				programmaticScroll.current = x;
 				manualUntil.current = 0;
 				if (scrollRef.current) scrollRef.current.scrollLeft = x;
+				updateWindow(x);
 			}, [
 				zoom,
 				viewport,
@@ -4413,7 +5150,15 @@ window.__ModuleLoader__.load({
 						const sec = p.getCurrentFrame() / ctxRef.current.t.meta.fps;
 						playheadRef.current = sec;
 						const scroll = scrollRef.current;
-						if (scroll && !dragRef.current && !pan.current && !scrubRef.current && performance.now() > manualUntil.current) {
+						if (scroll && !scroll.getClientRects().length) hiddenViewport.current = true;
+						else if (scroll && hiddenViewport.current) {
+							const x = sec * 56 * ctxRef.current.zoom;
+							programmaticScroll.current = x;
+							scroll.scrollLeft = x;
+							hiddenViewport.current = false;
+							manualUntil.current = 0;
+							updateWindow(x);
+						} else if (scroll && !dragRef.current && !pan.current && !scrubRef.current && performance.now() > manualUntil.current) {
 							const x = sec * 56 * ctxRef.current.zoom;
 							if (Math.abs(scroll.scrollLeft - x) > .5) {
 								programmaticScroll.current = x;
@@ -4425,12 +5170,17 @@ window.__ModuleLoader__.load({
 				};
 				raf = requestAnimationFrame(tick);
 				return () => cancelAnimationFrame(raf);
-			}, [playheadRef]);
+			}, [
+				playheadRef,
+				playerBus,
+				viewport
+			]);
 			(0, react.useEffect)(() => {
-				const snapV = (cur, v) => {
-					const SNAP = ctxRef.current.snapping ? cur.secPerPx * 7 : 0;
+				let dragFrame = 0;
+				let lastFrame = 0;
+				const anchors = (cur) => {
 					const tt = ctxRef.current.t;
-					const pts = [0, playheadRef.current];
+					const pts = [0, cur.snapPlayhead];
 					if (cur.lane === "main") {
 						let a = 0;
 						for (const c of tt.videoTracks[0]?.clips ?? []) {
@@ -4443,35 +5193,80 @@ window.__ModuleLoader__.load({
 						if ("sub-" + i !== cur.id) pts.push(ov.startSeconds, ov.endSeconds);
 					});
 					else for (const tr of tt.audioTracks) for (const c of tr.clips) if (c.id !== cur.id) pts.push(c.atSeconds, c.atSeconds + c.duration);
-					let best = v;
-					let bd = SNAP;
-					for (const p of pts) {
-						const dd = Math.abs(p - v);
-						if (dd < bd) {
-							bd = dd;
-							best = p;
+					return pts;
+				};
+				const updatePreview = (cur) => {
+					const delta = (cur.pointerX - cur.startX + (scrollRef.current?.scrollLeft ?? 0) - cur.startScroll) * cur.secPerPx;
+					const next = dragPreview({
+						kind: cur.kind,
+						start: cur.origAt,
+						duration: cur.origDur,
+						delta,
+						fps: ctxRef.current.t.meta.fps,
+						inPoint: cur.origIn,
+						speed: cur.speed,
+						subtitle: cur.lane === "subs",
+						anchors: anchors(cur),
+						threshold: ctxRef.current.snapping ? cur.secPerPx * 7 : 0
+					});
+					if (next.at !== cur.previewAt || next.duration !== cur.previewDur || next.snapAt !== cur.snapAt) {
+						cur.previewAt = next.at;
+						cur.previewDur = next.duration;
+						cur.snapAt = next.snapAt;
+						forceRender((x) => x + 1);
+					}
+				};
+				const tickDrag = (now) => {
+					dragFrame = 0;
+					const cur = dragRef.current;
+					if (!cur || !cur.moved) return;
+					if (cur.source !== ctxRef.current.t) {
+						cancel();
+						return;
+					}
+					const scroll = scrollRef.current;
+					let speed = 0;
+					if (scroll) {
+						const rect = scroll.getBoundingClientRect();
+						if (cur.pointerY >= rect.top && cur.pointerY <= rect.bottom) speed = edgeScrollSpeed(cur.pointerX, rect.left, rect.right);
+						const before = scroll.scrollLeft;
+						scroll.scrollLeft = Math.max(0, Math.min(scroll.scrollWidth - scroll.clientWidth, before + speed * Math.min(32, now - (lastFrame || now)) / 1e3));
+						if (scroll.scrollLeft !== before) {
+							programmaticScroll.current = scroll.scrollLeft;
+							const seconds = Math.min((timelineDurationInFrames(ctxRef.current.t) - 1) / ctxRef.current.t.meta.fps, scroll.scrollLeft * cur.secPerPx);
+							playheadRef.current = seconds;
+							seekToSeconds(seconds, ctxRef.current.t.meta.fps);
 						}
 					}
-					return Math.round(best * tt.meta.fps) / tt.meta.fps;
+					lastFrame = now;
+					updatePreview(cur);
+					if (speed) dragFrame = requestAnimationFrame(tickDrag);
 				};
 				const onMove = (e) => {
 					const cur = dragRef.current;
-					if (!cur) return;
-					if (Math.abs(e.clientX - cur.startX) < 3) return;
-					const dsec = (e.clientX - cur.startX) * cur.secPerPx;
-					if (cur.kind === "reorder") cur.previewAt = Math.max(0, cur.origAt + dsec);
-					else if (cur.kind === "move") cur.previewAt = Math.max(0, snapV(cur, cur.origAt + dsec));
-					else if (cur.kind === "trimL") {
-						let at = snapV(cur, cur.origAt + dsec);
-						const earliest = cur.lane === "subs" ? 0 : Math.max(0, cur.origAt - (cur.origIn ?? 0) / (cur.speed ?? 1));
-						at = Math.min(Math.max(earliest, at), cur.origAt + cur.origDur - .1);
-						cur.previewAt = at;
-						cur.previewDur = cur.origDur - (at - cur.origAt);
-					} else cur.previewDur = Math.max(cur.origAt + .1, snapV(cur, cur.origAt + cur.origDur + dsec)) - cur.origAt;
-					forceRender((x) => x + 1);
+					if (!cur || e.pointerId !== cur.pointerId) return;
+					cur.pointerX = e.clientX;
+					cur.pointerY = e.clientY;
+					if (!cur.moved && Math.abs(e.clientX - cur.startX) < 3) return;
+					cur.moved = true;
+					if (!dragFrame) {
+						lastFrame = performance.now();
+						dragFrame = requestAnimationFrame(tickDrag);
+					}
 				};
-				const onUp = () => {
+				const onUp = (e) => {
 					const cur = dragRef.current;
+					if (!cur || e.pointerId !== cur.pointerId) return;
+					cancelAnimationFrame(dragFrame);
+					dragFrame = 0;
+					if (cur.source !== ctxRef.current.t) {
+						cancel();
+						return;
+					}
+					if (cur.moved) {
+						cur.pointerX = e.clientX;
+						updatePreview(cur);
+					}
 					dragRef.current = null;
 					if (cur) {
 						const moved = Math.abs(cur.previewAt - cur.origAt) > .001 || Math.abs(cur.previewDur - cur.origDur) > .001;
@@ -4487,7 +5282,7 @@ window.__ModuleLoader__.load({
 						}
 						const { o: oo } = ctxRef.current;
 						const at = cur.previewAt;
-						const dur = Math.max(.1, cur.previewDur);
+						const dur = cur.previewDur;
 						if (cur.lane === "subs") oo.updateOverlay(Number(cur.id.slice(4)), {
 							startSeconds: at,
 							endSeconds: at + dur,
@@ -4534,8 +5329,13 @@ window.__ModuleLoader__.load({
 					forceRender((x) => x + 1);
 				};
 				const cancel = () => {
+					cancelAnimationFrame(dragFrame);
+					dragFrame = 0;
 					dragRef.current = null;
 					forceRender((x) => x + 1);
+				};
+				const onCancel = (e) => {
+					if (e.pointerId === dragRef.current?.pointerId) cancel();
 				};
 				const escape = (e) => {
 					if (e.key === "Escape") cancel();
@@ -4543,20 +5343,22 @@ window.__ModuleLoader__.load({
 				window.addEventListener("keydown", escape);
 				window.addEventListener("pointermove", onMove);
 				window.addEventListener("pointerup", onUp);
-				window.addEventListener("pointercancel", cancel);
+				window.addEventListener("pointercancel", onCancel);
 				return () => {
+					cancelAnimationFrame(dragFrame);
 					window.removeEventListener("pointermove", onMove);
 					window.removeEventListener("pointerup", onUp);
-					window.removeEventListener("pointercancel", cancel);
+					window.removeEventListener("pointercancel", onCancel);
 					window.removeEventListener("keydown", escape);
 				};
-			}, [playheadRef]);
+			}, [playheadRef, seekToSeconds]);
 			const beginDrag = (e, init) => {
-				if (e.button !== 0) return;
+				if (e.button !== 0 || dragRef.current) return;
 				e.stopPropagation();
 				e.preventDefault();
+				playerBus.ref?.pause();
 				e.currentTarget.setPointerCapture(e.pointerId);
-				e.currentTarget.closest(".djp-track-block")?.focus();
+				e.currentTarget.closest(".djp-track-block")?.focus({ preventScroll: true });
 				setSelected(init.id);
 				const laneEl = e.currentTarget.closest(".djp-trow-lane");
 				if (!laneEl) return;
@@ -4564,6 +5366,14 @@ window.__ModuleLoader__.load({
 				dragRef.current = {
 					...init,
 					startX: e.clientX,
+					pointerId: e.pointerId,
+					pointerX: e.clientX,
+					pointerY: e.clientY,
+					startScroll: scrollRef.current?.scrollLeft ?? 0,
+					moved: false,
+					snapAt: null,
+					snapPlayhead: playheadRef.current,
+					source: t,
 					secPerPx: total / Math.max(1, rect.width),
 					previewAt: init.origAt,
 					previewDur: init.origDur
@@ -4578,6 +5388,7 @@ window.__ModuleLoader__.load({
 			const drag = dragRef.current;
 			const pct = (v) => `${Math.max(0, v) / total * 100}%`;
 			const laneWidth = total * 56 * zoom;
+			const visible = timelineWindow(windowBucket, viewport, 56 * zoom);
 			const step = [
 				1 / t.meta.fps,
 				.1,
@@ -4596,7 +5407,7 @@ window.__ModuleLoader__.load({
 				1800,
 				3600
 			].find((n) => n * laneWidth / total >= 64) ?? total / 4;
-			const ticks = Array.from({ length: Math.ceil(total / step) }, (_, i) => i * step);
+			const ticks = visibleTicks(visible.start, visible.end, total, step);
 			const subtitleRows = [];
 			t.overlays.map((overlay, index) => ({
 				overlay,
@@ -4606,10 +5417,51 @@ window.__ModuleLoader__.load({
 				if (row) row.push(item);
 				else subtitleRows.push([item]);
 			});
-			const block = (lane, id, label, at, duration, clip, overlay) => {
+			const currentTime = () => (playerBus.ref?.getCurrentFrame() ?? 0) / t.meta.fps;
+			const clearSelection = () => {
+				dragRef.current = null;
+				setSelected(null);
+				editorRef.current?.focus({ preventScroll: true });
+			};
+			const splitSelection = (lane, id) => {
+				if (lane === "subs") o.splitOverlay(Number(id.slice(4)), currentTime());
+				else o.splitClip(id, currentTime());
+			};
+			const deleteSelection = (lane, id) => {
+				if (lane === "subs") o.removeOverlay(Number(id.slice(4)));
+				else if (lane === "audio") o.removeAudioClip(id);
+				else o.removeClip(id);
+				clearSelection();
+			};
+			const selectionKey = (e, lane, id) => {
+				if (e.ctrlKey || e.metaKey || e.altKey) return;
+				if (e.key === "Enter") {
+					e.preventDefault();
+					e.stopPropagation();
+					onSeekClip(currentTime(), lane, id);
+				}
+				if (e.key.toLowerCase() === "s") {
+					e.preventDefault();
+					e.stopPropagation();
+					splitSelection(lane, id);
+				}
+				if (e.key === "Delete" || e.key === "Backspace") {
+					e.preventDefault();
+					e.stopPropagation();
+					deleteSelection(lane, id);
+				}
+				if (e.key === "Escape") {
+					e.preventDefault();
+					e.stopPropagation();
+					clearSelection();
+				}
+			};
+			const block = (lane, id, label, at, duration, clip, overlay, displayRow) => {
 				const isD = drag?.id === id && drag.lane === lane;
 				const start = isD ? drag.previewAt : at;
 				const dur = isD ? drag.previewDur : duration;
+				const inView = start + dur >= visible.start && start <= visible.end;
+				if (!inView && selected !== id && !isD) return null;
 				const init = {
 					lane,
 					id,
@@ -4621,7 +5473,7 @@ window.__ModuleLoader__.load({
 				};
 				const activate = () => {
 					setSelected(id);
-					seekToSeconds(at, t.meta.fps);
+					playerBus.ref?.pause();
 				};
 				return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					role: "button",
@@ -4632,7 +5484,12 @@ window.__ModuleLoader__.load({
 					className: `djp-track-block djp-${lane}-block ${selected === id ? "djp-clip-selected" : ""} ${isD ? "djp-dragging" : ""}`,
 					style: {
 						left: pct(start),
-						width: pct(dur)
+						width: pct(dur),
+						...displayRow === void 0 ? {} : {
+							top: displayRow * 56 + 4,
+							height: 48,
+							bottom: "auto"
+						}
 					},
 					title: `${label} · ${fmtSec$1(duration)} · 双击编辑属性`,
 					onPointerDown: (e) => beginDrag(e, {
@@ -4645,20 +5502,9 @@ window.__ModuleLoader__.load({
 					},
 					onDoubleClick: (e) => {
 						e.stopPropagation();
-						if (!justDragged.current) onSeekClip(at, lane, id);
+						if (!justDragged.current) onSeekClip(currentTime(), lane, id);
 					},
-					onKeyDown: (e) => {
-						if (e.key === "Enter") {
-							e.preventDefault();
-							e.stopPropagation();
-							onSeekClip(at, lane, id);
-						}
-						if (e.key.toLowerCase() === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-							e.preventDefault();
-							e.stopPropagation();
-							if (lane !== "subs") o.splitClip(id, playheadRef.current);
-						}
-					},
+					onKeyDown: (e) => selectionKey(e, lane, id),
 					children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "djp-clip-caption",
@@ -4668,14 +5514,14 @@ window.__ModuleLoader__.load({
 								(clip?.speed ?? 1) !== 1 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("small", { children: [clip?.speed, "×"] })
 							]
 						}),
-						clip && lane !== "audio" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Filmstrip, {
+						clip && inView && lane !== "audio" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Filmstrip, {
 							src: clip.src,
 							type: clip.type,
 							inPoint: clip.inPoint,
 							duration,
 							speed: clip.speed
 						}),
-						clip && lane === "audio" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Waveform, {
+						clip && inView && lane === "audio" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Waveform, {
 							src: clip.src,
 							inPoint: clip.inPoint,
 							duration,
@@ -4747,226 +5593,293 @@ window.__ModuleLoader__.load({
 					}))
 				}
 			].filter((entry) => entry.mode !== mode && entry.clips.length);
+			let clipStart = 0;
+			const selection = mode === "main" ? (t.videoTracks[0]?.clips ?? []).map((clip) => {
+				const start = clipStart;
+				clipStart += clip.clipDuration;
+				return {
+					id: clip.id,
+					label: clip.src,
+					start,
+					duration: clip.clipDuration
+				};
+			}).find((clip) => clip.id === selected) : mode === "audio" ? t.audioTracks.flatMap((track) => track.clips).map((clip) => ({
+				id: clip.id,
+				label: clip.src,
+				start: clip.atSeconds,
+				duration: clip.duration
+			})).find((clip) => clip.id === selected) : mode === "pip" ? t.videoTracks.slice(1).flatMap((track) => track.clips).map((clip) => ({
+				id: clip.id,
+				label: clip.src,
+				start: clip.atSeconds ?? 0,
+				duration: clip.clipDuration
+			})).find((clip) => clip.id === selected) : t.overlays.map((overlay, i) => ({
+				id: "sub-" + i,
+				label: overlay.text,
+				start: overlay.startSeconds,
+				duration: overlay.endSeconds - overlay.startSeconds
+			})).find((clip) => clip.id === selected);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				ref: editorRef,
+				tabIndex: 0,
+				"aria-label": "时间线编辑区",
 				className: "djp-editor-timeline",
 				"data-mode": mode,
 				style: { "--djp-summary-count": collapsed.length },
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "djp-timeline-tools",
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							className: "djp-iconbtn djp-snap",
-							"aria-label": "吸附",
-							title: "吸附到播放头与片段边缘",
-							"aria-pressed": snapping,
-							onClick: () => setSnapping(!snapping),
-							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "magnet" })
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
-							className: "djp-zoom",
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									"aria-hidden": "true",
-									children: "−"
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-									"aria-label": "时间线缩放",
-									type: "range",
-									min: "0.25",
-									max: "8",
-									step: "0.25",
-									value: zoom,
-									onChange: (e) => setZoom(Number(e.target.value))
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									"aria-hidden": "true",
-									children: "+"
-								})
-							]
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							className: "djp-iconbtn",
-							title: "适合窗口",
-							"aria-label": "适合窗口",
-							onClick: () => setZoom(Math.max(.25, Math.min(8, viewport * .8 / (56 * total)))),
-							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "fit" })
-						})
-					]
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "djp-timeline-viewport",
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							className: "djp-timeline-scroll",
-							ref: scrollRef,
-							"aria-label": "剪辑轨道",
-							onScroll: (e) => {
-								const x = e.currentTarget.scrollLeft;
-								if (Math.abs(x - programmaticScroll.current) < 1 || dragRef.current) return;
-								programmaticScroll.current = x;
-								manualUntil.current = performance.now() + 120;
-								playerBus.ref?.pause();
-								seekToSeconds(Math.min((timelineDurationInFrames(t) - 1) / t.meta.fps, x / (56 * zoom)), t.meta.fps);
-							},
-							onPointerDown: (e) => {
-								if (e.button !== 0 || e.target.closest(".djp-track-block, button, .djp-ruler")) return;
-								e.preventDefault();
-								e.currentTarget.setPointerCapture(e.pointerId);
-								pan.current = {
-									x: e.clientX,
-									scroll: e.currentTarget.scrollLeft
-								};
-								playerBus.ref?.pause();
-							},
-							onPointerMove: (e) => {
-								if (pan.current) e.currentTarget.scrollLeft = pan.current.scroll + pan.current.x - e.clientX;
-							},
-							onPointerUp: () => {
-								pan.current = null;
-							},
-							onPointerCancel: () => {
-								pan.current = null;
-							},
-							children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "djp-tstrip",
-								style: {
-									width: laneWidth + viewport,
-									paddingInline: viewport / 2,
-									"--djp-grid-step": `${step * laneWidth / total}px`
-								},
+				onKeyDown: (e) => {
+					if (selection && e.target === e.currentTarget) selectionKey(e, mode, selection.id);
+				},
+				children: [
+					selection && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ClipActions, {
+						label: selection.label,
+						start: selection.start,
+						duration: selection.duration,
+						fps: t.meta.fps,
+						onSplit: () => splitSelection(mode, selection.id),
+						onDelete: () => deleteSelection(mode, selection.id),
+						onInspect: () => onSeekClip(currentTime(), mode, selection.id),
+						onClose: clearSelection
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "djp-timeline-tools",
+						hidden: Boolean(selection),
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "djp-iconbtn djp-snap",
+								"aria-label": "吸附",
+								title: "吸附到播放头与片段边缘",
+								"aria-pressed": snapping,
+								onClick: () => setSnapping(!snapping),
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "magnet" })
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+								className: "djp-zoom",
 								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "djp-trow djp-ruler-row",
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-											className: "djp-trow-name djp-ruler-unit",
-											children: [t.meta.fps, " FPS"]
-										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-											className: "djp-ruler",
-											"aria-label": "时间标尺",
-											onPointerDown: (e) => {
-												if (e.button !== 0) return;
-												e.preventDefault();
-												e.currentTarget.setPointerCapture(e.pointerId);
-												scrubRef.current = true;
-												playerBus.ref?.pause();
-												seek(e.clientX, e.currentTarget);
-											},
-											onPointerMove: (e) => {
-												if (scrubRef.current) seek(e.clientX, e.currentTarget);
-											},
-											onPointerUp: () => {
-												scrubRef.current = false;
-											},
-											onPointerCancel: () => {
-												scrubRef.current = false;
-											},
-											children: ticks.map((sec) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-												className: "djp-tick",
-												style: { left: pct(sec) },
-												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: step >= 1 ? timecode(sec, t.meta.fps).slice(0, 5) : timecode(sec, t.meta.fps) })
-											}, sec))
-										})]
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										"aria-hidden": "true",
+										children: "−"
 									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										className: "djp-track-overview",
-										"aria-label": "其他轨道概览",
-										children: collapsed.map((entry) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-											className: `djp-track-summary djp-summary-${entry.mode}`,
-											"aria-label": `切换到${modeNames[entry.mode]}模式`,
-											title: `${modeNames[entry.mode]} · ${entry.clips.length} 个片段 · 点击展开`,
-											onClick: () => onModeChange(entry.mode),
-											children: entry.clips.map((clip, index) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { style: {
-												left: pct(clip.at),
-												width: pct(clip.duration)
-											} }, index))
-										}, entry.mode))
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+										"aria-label": "时间线缩放",
+										type: "range",
+										min: "0.25",
+										max: "8",
+										step: "0.25",
+										value: zoom,
+										onChange: (e) => setZoom(Number(e.target.value))
 									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "djp-active-tracks",
-										role: "group",
-										"aria-label": `${modeNames[mode]}编辑轨道`,
-										children: [
-											mode === "main" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(TrackRow, {
-												code: "V1",
-												name: "主画面",
-												kind: "main",
-												children: [mainBlocks, !mainBlocks.length && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-													className: "djp-empty-audio",
-													onClick: onAdd,
-													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" }), "添加画面"]
-												})]
-											}),
-											mode === "audio" && t.audioTracks.map((tr, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackRow, {
-												code: `A${i + 1}`,
-												name: tr.name ?? "音频",
-												kind: "audio",
-												muted: tr.muted,
-												action: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-													className: "djp-track-mute",
-													title: tr.muted ? "取消静音" : "静音轨道",
-													"aria-label": `${tr.name ?? "音频"}${tr.muted ? "取消静音" : "静音"}`,
-													"aria-pressed": tr.muted,
-													onClick: () => o.updateAudioTrack(tr.id, { muted: !tr.muted }),
-													children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: tr.muted ? "muted" : "volume" })
-												}),
-												children: tr.clips.map((c) => block("audio", c.id, c.src, c.atSeconds, c.duration, c))
-											}, tr.id)),
-											mode === "audio" && !t.audioTracks.length && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackRow, {
-												code: "A1",
-												name: "音频",
-												kind: "audio",
-												children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-													className: "djp-empty-audio",
-													onClick: (e) => {
-														e.stopPropagation();
-														onAudio();
-													},
-													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" }), "添加音频"]
-												})
-											}),
-											mode === "pip" && t.videoTracks.slice(1).map((tr, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackRow, {
-												code: `V${i + 2}`,
-												name: tr.name ?? "画中画",
-												kind: "pip",
-												children: tr.clips.map((c) => block("pip", c.id, c.src, c.atSeconds ?? 0, c.clipDuration, c))
-											}, tr.id)),
-											mode === "subs" && subtitleRows.map((row, lane) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackRow, {
-												code: `T${lane + 1}`,
-												name: "字幕",
-												kind: "subs",
-												children: row.map(({ overlay: ov, index }) => block("subs", "sub-" + index, ov.text, ov.startSeconds, ov.endSeconds - ov.startSeconds, void 0, ov))
-											}, lane)),
-											(mode === "pip" && !t.videoTracks.slice(1).some((track) => track.clips.length) || mode === "subs" && !t.overlays.length) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackRow, {
-												code: "",
-												name: modeNames[mode],
-												kind: mode,
-												children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-													className: "djp-empty-audio",
-													onClick: onAdd,
-													children: [
-														/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" }),
-														"添加",
-														modeNames[mode]
-													]
-												})
-											})
-										]
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										"aria-hidden": "true",
+										children: "+"
 									})
 								]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "djp-iconbtn",
+								title: "适合窗口",
+								"aria-label": "适合窗口",
+								onClick: () => setZoom(Math.max(.25, Math.min(8, viewport * .8 / (56 * total)))),
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "fit" })
 							})
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							className: "djp-center-playhead",
-							"aria-hidden": "true"
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							className: "djp-timeline-add",
-							"aria-label": `添加${mode === "main" ? "素材" : modeNames[mode]}`,
-							title: `添加${mode === "main" ? "素材" : modeNames[mode]}`,
-							onClick: onAdd,
-							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" })
-						})
-					]
-				})]
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "djp-timeline-viewport",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "djp-timeline-scroll",
+								ref: scrollRef,
+								"aria-label": "剪辑轨道",
+								onScroll: (e) => {
+									if (!e.currentTarget.clientWidth || hiddenViewport.current) return;
+									const x = e.currentTarget.scrollLeft;
+									updateWindow(x);
+									if (Math.abs(x - programmaticScroll.current) < 1 || dragRef.current) return;
+									programmaticScroll.current = x;
+									manualUntil.current = performance.now() + 120;
+									playerBus.ref?.pause();
+									seekToSeconds(Math.min((timelineDurationInFrames(t) - 1) / t.meta.fps, x / (56 * zoom)), t.meta.fps);
+								},
+								onPointerDown: (e) => {
+									if (e.button !== 0 || e.target.closest(".djp-track-block, button, .djp-ruler")) return;
+									e.preventDefault();
+									e.currentTarget.setPointerCapture(e.pointerId);
+									pan.current = {
+										x: e.clientX,
+										scroll: e.currentTarget.scrollLeft
+									};
+									playerBus.ref?.pause();
+								},
+								onPointerMove: (e) => {
+									if (pan.current) e.currentTarget.scrollLeft = pan.current.scroll + pan.current.x - e.clientX;
+								},
+								onPointerUp: () => {
+									pan.current = null;
+								},
+								onPointerCancel: () => {
+									pan.current = null;
+								},
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "djp-tstrip",
+									style: {
+										width: laneWidth + viewport,
+										paddingInline: viewport / 2,
+										"--djp-grid-step": `${step * laneWidth / total}px`
+									},
+									children: [
+										drag?.snapAt != null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "djp-snap-guide",
+											"aria-hidden": "true",
+											style: { left: viewport / 2 + drag.snapAt * 56 * zoom }
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "djp-trow djp-ruler-row",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												className: "djp-trow-name djp-ruler-unit",
+												children: [t.meta.fps, " FPS"]
+											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+												className: "djp-ruler",
+												"aria-label": "时间标尺",
+												onPointerDown: (e) => {
+													if (e.button !== 0) return;
+													e.preventDefault();
+													e.currentTarget.setPointerCapture(e.pointerId);
+													scrubRef.current = true;
+													playerBus.ref?.pause();
+													seek(e.clientX, e.currentTarget);
+												},
+												onPointerMove: (e) => {
+													if (scrubRef.current) seek(e.clientX, e.currentTarget);
+												},
+												onPointerUp: () => {
+													scrubRef.current = false;
+												},
+												onPointerCancel: () => {
+													scrubRef.current = false;
+												},
+												children: ticks.map((sec) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+													className: "djp-tick",
+													style: { left: pct(sec) },
+													children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: step >= 1 ? timecode(sec, t.meta.fps).slice(0, 5) : timecode(sec, t.meta.fps) })
+												}, sec))
+											})]
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "djp-track-overview",
+											"aria-label": "其他轨道概览",
+											children: collapsed.map((entry) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												className: `djp-track-summary djp-summary-${entry.mode}`,
+												"aria-label": `切换到${modeNames[entry.mode]}模式`,
+												title: `${modeNames[entry.mode]} · ${entry.clips.length} 个片段 · 点击展开`,
+												onClick: () => onModeChange(entry.mode),
+												children: mergeTimeRanges(entry.clips).map((clip, index) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { style: {
+													left: pct(clip.at),
+													width: pct(clip.duration)
+												} }, index))
+											}, entry.mode))
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "djp-active-tracks",
+											role: "group",
+											"aria-label": `${modeNames[mode]}编辑轨道`,
+											children: [
+												mode === "main" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(TrackRow, {
+													code: "V1",
+													name: "主画面",
+													kind: "main",
+													children: [mainBlocks, !mainBlocks.length && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+														className: "djp-empty-audio",
+														onClick: onAdd,
+														children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" }), "添加画面"]
+													})]
+												}),
+												mode === "audio" && t.audioTracks.map((tr, i) => {
+													const rows = overlappingRows(tr.clips, (clip) => ({
+														at: clip.atSeconds,
+														duration: clip.duration
+													}));
+													return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackRow, {
+														code: `A${i + 1}`,
+														name: tr.name ?? "音频",
+														kind: "audio",
+														muted: tr.muted,
+														height: Math.max(1, rows.length) * 56,
+														action: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+															className: "djp-track-mute",
+															title: tr.muted ? "取消静音" : "静音轨道",
+															"aria-label": `${tr.name ?? "音频"}${tr.muted ? "取消静音" : "静音"}`,
+															"aria-pressed": tr.muted,
+															onClick: () => o.updateAudioTrack(tr.id, { muted: !tr.muted }),
+															children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: tr.muted ? "muted" : "volume" })
+														}),
+														children: rows.flatMap((row, lane) => row.map((c) => block("audio", c.id, c.src, c.atSeconds, c.duration, c, void 0, lane)))
+													}, tr.id);
+												}),
+												mode === "audio" && !t.audioTracks.length && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackRow, {
+													code: "A1",
+													name: "音频",
+													kind: "audio",
+													children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+														className: "djp-empty-audio",
+														onClick: (e) => {
+															e.stopPropagation();
+															onAudio();
+														},
+														children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" }), "添加音频"]
+													})
+												}),
+												mode === "pip" && t.videoTracks.slice(1).map((tr, i) => {
+													const rows = overlappingRows(tr.clips, (clip) => ({
+														at: clip.atSeconds ?? 0,
+														duration: clip.clipDuration
+													}));
+													return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackRow, {
+														code: `V${i + 2}`,
+														name: tr.name ?? "画中画",
+														kind: "pip",
+														height: Math.max(1, rows.length) * 56,
+														children: rows.flatMap((row, lane) => row.map((c) => block("pip", c.id, c.src, c.atSeconds ?? 0, c.clipDuration, c, void 0, lane)))
+													}, tr.id);
+												}),
+												mode === "subs" && subtitleRows.map((row, lane) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackRow, {
+													code: `T${lane + 1}`,
+													name: "字幕",
+													kind: "subs",
+													children: row.map(({ overlay: ov, index }) => block("subs", "sub-" + index, ov.text, ov.startSeconds, ov.endSeconds - ov.startSeconds, void 0, ov))
+												}, lane)),
+												(mode === "pip" && !t.videoTracks.slice(1).some((track) => track.clips.length) || mode === "subs" && !t.overlays.length) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TrackRow, {
+													code: "",
+													name: modeNames[mode],
+													kind: mode,
+													children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+														className: "djp-empty-audio",
+														onClick: onAdd,
+														children: [
+															/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" }),
+															"添加",
+															modeNames[mode]
+														]
+													})
+												})
+											]
+										})
+									]
+								})
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "djp-center-playhead",
+								"aria-hidden": "true"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "djp-timeline-add",
+								"aria-label": `添加${mode === "main" ? "素材" : modeNames[mode]}`,
+								title: `添加${mode === "main" ? "素材" : modeNames[mode]}`,
+								onClick: onAdd,
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" })
+							})
+						]
+					})
+				]
 			});
 		};
 		//#endregion
@@ -4983,6 +5896,9 @@ window.__ModuleLoader__.load({
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
 				className: "djp-more",
 				ref,
+				onBlur: (event) => {
+					if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+				},
 				onKeyDown: (event) => {
 					if (event.key === "Escape" && ref.current?.open) {
 						event.stopPropagation();
@@ -4991,84 +5907,21 @@ window.__ModuleLoader__.load({
 					}
 				},
 				onClick: (event) => {
-					if (event.target.closest("button") && ref.current) ref.current.open = false;
+					if (event.target.closest("button") && ref.current) {
+						ref.current.open = false;
+						ref.current.querySelector("summary")?.focus();
+					}
 				},
 				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", {
 					className: "djp-iconbtn",
 					"aria-label": "更多工具",
 					title: "更多工具",
-					children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
-						width: "16",
-						height: "16",
-						viewBox: "0 0 16 16",
-						fill: "currentColor",
-						"aria-hidden": "true",
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
-								cx: "3",
-								cy: "8",
-								r: "1.3"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
-								cx: "8",
-								cy: "8",
-								r: "1.3"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
-								cx: "13",
-								cy: "8",
-								r: "1.3"
-							})
-						]
-					})
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "dots" })
 				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "djp-more-content",
 					children
 				})]
 			});
-		}
-		//#endregion
-		//#region src/client/useDialog.ts
-		function useDialog(onClose) {
-			const ref = (0, react.useRef)(null);
-			const close = (0, react.useRef)(onClose);
-			close.current = onClose;
-			(0, react.useEffect)(() => {
-				const previous = document.activeElement;
-				const dialog = ref.current;
-				if (!dialog) return;
-				const targets = () => Array.from(dialog.querySelectorAll("button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, a[href], [tabindex=\"0\"]")).filter((node) => node.getClientRects().length > 0);
-				(targets()[0] ?? dialog).focus();
-				const onKey = (event) => {
-					if (event.key === "Escape") {
-						event.preventDefault();
-						event.stopPropagation();
-						close.current();
-					}
-					if (event.key !== "Tab") return;
-					const items = targets();
-					const first = items[0], last = items[items.length - 1];
-					if (!first) {
-						event.preventDefault();
-						return;
-					}
-					if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
-						event.preventDefault();
-						last.focus();
-					} else if (!event.shiftKey && document.activeElement === last) {
-						event.preventDefault();
-						first.focus();
-					}
-				};
-				dialog.addEventListener("keydown", onKey);
-				return () => {
-					dialog.removeEventListener("keydown", onKey);
-					queueMicrotask(() => {
-						if (previous?.isConnected) previous.focus();
-					});
-				};
-			}, []);
-			return ref;
 		}
 		//#endregion
 		//#region src/client/InspectorRow.tsx
@@ -5178,16 +6031,9 @@ window.__ModuleLoader__.load({
 							className: "djp-item-summary",
 							children: summary
 						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("svg", {
-							className: "djp-chevron",
-							width: "14",
-							height: "14",
-							viewBox: "0 0 16 16",
-							fill: "none",
-							stroke: "currentColor",
-							strokeWidth: "1.5",
-							"aria-hidden": "true",
-							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "m6 4 4 4-4 4" })
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, {
+							name: "chevron",
+							className: "djp-chevron"
 						})
 					]
 				}), open && container && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(InspectorDrawer, {
@@ -5209,6 +6055,163 @@ window.__ModuleLoader__.load({
 				})]
 			});
 		}
+		//#endregion
+		//#region ../engine/src/presets.ts
+		const kf = (t, v, e) => ({
+			t,
+			v,
+			...e ? { e } : {}
+		});
+		const ANIMATION_PRESETS = {
+			fadeIn: {
+				label: "淡入",
+				group: "入场",
+				expand: (d) => ({ opacity: [kf(0, 0, "out"), kf(Math.min(.8, d * .3), 1)] })
+			},
+			slideInLeft: {
+				label: "左滑入",
+				group: "入场",
+				expand: (d) => ({
+					x: [kf(0, -.5, "out"), kf(Math.min(.7, d * .25), 0)],
+					opacity: [kf(0, 0), kf(Math.min(.4, d * .15), 1)]
+				})
+			},
+			slideInRight: {
+				label: "右滑入",
+				group: "入场",
+				expand: (d) => ({
+					x: [kf(0, .5, "out"), kf(Math.min(.7, d * .25), 0)],
+					opacity: [kf(0, 0), kf(Math.min(.4, d * .15), 1)]
+				})
+			},
+			slideInUp: {
+				label: "上滑入",
+				group: "入场",
+				expand: (d) => ({
+					y: [kf(0, .5, "out"), kf(Math.min(.7, d * .25), 0)],
+					opacity: [kf(0, 0), kf(Math.min(.4, d * .15), 1)]
+				})
+			},
+			zoomIn: {
+				label: "放大入场",
+				group: "入场",
+				expand: (d) => ({
+					scale: [kf(0, .3, "out"), kf(Math.min(.8, d * .3), 1)],
+					opacity: [kf(0, 0), kf(Math.min(.4, d * .15), 1)]
+				})
+			},
+			bounceIn: {
+				label: "弹跳入场",
+				group: "入场",
+				expand: (d) => ({
+					scale: [kf(0, .2, "bounce"), kf(Math.min(.9, d * .35), 1)],
+					opacity: [kf(0, 0), kf(Math.min(.3, d * .1), 1)]
+				})
+			},
+			spinIn: {
+				label: "旋转入场",
+				group: "入场",
+				expand: (d) => ({
+					rotation: [kf(0, -180, "out"), kf(Math.min(.9, d * .3), 0)],
+					scale: [kf(0, .4, "out"), kf(Math.min(.9, d * .3), 1)],
+					opacity: [kf(0, 0), kf(Math.min(.4, d * .15), 1)]
+				})
+			},
+			fadeOut: {
+				label: "淡出",
+				group: "出场",
+				expand: (d) => ({ opacity: [kf(Math.max(0, d - Math.min(.8, d * .3)), 1, "in"), kf(d, 0)] })
+			},
+			slideOutLeft: {
+				label: "左滑出",
+				group: "出场",
+				expand: (d) => ({
+					x: [kf(Math.max(0, d - Math.min(.7, d * .25)), 0, "in"), kf(d, -.5)],
+					opacity: [kf(Math.max(0, d - Math.min(.4, d * .15)), 1), kf(d, 0)]
+				})
+			},
+			slideOutRight: {
+				label: "右滑出",
+				group: "出场",
+				expand: (d) => ({
+					x: [kf(Math.max(0, d - Math.min(.7, d * .25)), 0, "in"), kf(d, .5)],
+					opacity: [kf(Math.max(0, d - Math.min(.4, d * .15)), 1), kf(d, 0)]
+				})
+			},
+			zoomOut: {
+				label: "缩小出场",
+				group: "出场",
+				expand: (d) => ({
+					scale: [kf(Math.max(0, d - Math.min(.8, d * .3)), 1, "in"), kf(d, .3)],
+					opacity: [kf(Math.max(0, d - Math.min(.4, d * .15)), 1), kf(d, 0)]
+				})
+			},
+			kenBurns: {
+				label: "镜头缓推",
+				group: "组合",
+				expand: (d) => ({
+					scale: [kf(0, 1, "inOut"), kf(d, 1.15)],
+					x: [kf(0, 0, "inOut"), kf(d, .02)]
+				})
+			},
+			kenBurnsOut: {
+				label: "镜头缓拉",
+				group: "组合",
+				expand: (d) => ({
+					scale: [kf(0, 1.15, "inOut"), kf(d, 1)],
+					y: [kf(0, .02, "inOut"), kf(d, 0)]
+				})
+			},
+			pop: {
+				label: "弹跳强调",
+				group: "组合",
+				expand: (d) => ({ scale: [kf(0, .9, "elastic"), kf(Math.min(.7, d * .25), 1)] })
+			},
+			tilt: {
+				label: "摇摆",
+				group: "组合",
+				expand: (d) => ({ rotation: [
+					kf(0, -3, "inOut"),
+					kf(d / 4, 3, "inOut"),
+					kf(d / 2, -3, "inOut"),
+					kf(d * 3 / 4, 3, "inOut"),
+					kf(d, -3)
+				] })
+			},
+			pulse: {
+				label: "脉冲",
+				group: "循环",
+				expand: (d) => {
+					const kfs = [];
+					for (let i = 0; i * 1 <= d; i++) kfs.push(kf(i, i % 2 ? 1.06 : 1, "inOut"));
+					if (kfs[kfs.length - 1].t < d) kfs.push(kf(d, kfs.length % 2 ? 1.06 : 1));
+					return { scale: kfs };
+				}
+			},
+			wobble: {
+				label: "抖动",
+				group: "循环",
+				expand: (d) => {
+					const kfs = [];
+					for (let i = 0; i * .5 <= d; i++) kfs.push(kf(i * .5, i % 2 ? .008 : -.008, "linear"));
+					return { x: kfs };
+				}
+			},
+			float: {
+				label: "漂浮",
+				group: "循环",
+				expand: (d) => {
+					const kfs = [];
+					for (let i = 0; i * 2 <= d; i++) kfs.push(kf(i * 2, i % 2 ? -.015 : .015, "inOut"));
+					if (kfs[kfs.length - 1].t < d) kfs.push(kf(d, kfs.length % 2 ? -.015 : .015));
+					return { y: kfs };
+				}
+			}
+		};
+		const expandAnimationPreset = (name, dur) => {
+			const p = ANIMATION_PRESETS[name];
+			return p ? p.expand(Math.max(.1, dur)) : void 0;
+		};
 		//#endregion
 		//#region \0@oxc-project+runtime@0.150.0/helpers/esm/typeof.js
 		function _typeof(o) {
@@ -18410,10 +19413,10 @@ Check that all your Remotion packages are on the same version. If your dependenc
             rotate: 360deg;
           }
         }
-
+        
         .${className} {
             animation: ${remotionBufferingAnimation} 1s linear infinite;
-        }
+        }        
 			`
 			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				style,
@@ -21376,163 +22379,6 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		};
 		(0, react.forwardRef)(ThumbnailFn);
 		//#endregion
-		//#region ../engine/src/presets.ts
-		const kf = (t, v, e) => ({
-			t,
-			v,
-			...e ? { e } : {}
-		});
-		const ANIMATION_PRESETS = {
-			fadeIn: {
-				label: "淡入",
-				group: "入场",
-				expand: (d) => ({ opacity: [kf(0, 0, "out"), kf(Math.min(.8, d * .3), 1)] })
-			},
-			slideInLeft: {
-				label: "左滑入",
-				group: "入场",
-				expand: (d) => ({
-					x: [kf(0, -.5, "out"), kf(Math.min(.7, d * .25), 0)],
-					opacity: [kf(0, 0), kf(Math.min(.4, d * .15), 1)]
-				})
-			},
-			slideInRight: {
-				label: "右滑入",
-				group: "入场",
-				expand: (d) => ({
-					x: [kf(0, .5, "out"), kf(Math.min(.7, d * .25), 0)],
-					opacity: [kf(0, 0), kf(Math.min(.4, d * .15), 1)]
-				})
-			},
-			slideInUp: {
-				label: "上滑入",
-				group: "入场",
-				expand: (d) => ({
-					y: [kf(0, .5, "out"), kf(Math.min(.7, d * .25), 0)],
-					opacity: [kf(0, 0), kf(Math.min(.4, d * .15), 1)]
-				})
-			},
-			zoomIn: {
-				label: "放大入场",
-				group: "入场",
-				expand: (d) => ({
-					scale: [kf(0, .3, "out"), kf(Math.min(.8, d * .3), 1)],
-					opacity: [kf(0, 0), kf(Math.min(.4, d * .15), 1)]
-				})
-			},
-			bounceIn: {
-				label: "弹跳入场",
-				group: "入场",
-				expand: (d) => ({
-					scale: [kf(0, .2, "bounce"), kf(Math.min(.9, d * .35), 1)],
-					opacity: [kf(0, 0), kf(Math.min(.3, d * .1), 1)]
-				})
-			},
-			spinIn: {
-				label: "旋转入场",
-				group: "入场",
-				expand: (d) => ({
-					rotation: [kf(0, -180, "out"), kf(Math.min(.9, d * .3), 0)],
-					scale: [kf(0, .4, "out"), kf(Math.min(.9, d * .3), 1)],
-					opacity: [kf(0, 0), kf(Math.min(.4, d * .15), 1)]
-				})
-			},
-			fadeOut: {
-				label: "淡出",
-				group: "出场",
-				expand: (d) => ({ opacity: [kf(Math.max(0, d - Math.min(.8, d * .3)), 1, "in"), kf(d, 0)] })
-			},
-			slideOutLeft: {
-				label: "左滑出",
-				group: "出场",
-				expand: (d) => ({
-					x: [kf(Math.max(0, d - Math.min(.7, d * .25)), 0, "in"), kf(d, -.5)],
-					opacity: [kf(Math.max(0, d - Math.min(.4, d * .15)), 1), kf(d, 0)]
-				})
-			},
-			slideOutRight: {
-				label: "右滑出",
-				group: "出场",
-				expand: (d) => ({
-					x: [kf(Math.max(0, d - Math.min(.7, d * .25)), 0, "in"), kf(d, .5)],
-					opacity: [kf(Math.max(0, d - Math.min(.4, d * .15)), 1), kf(d, 0)]
-				})
-			},
-			zoomOut: {
-				label: "缩小出场",
-				group: "出场",
-				expand: (d) => ({
-					scale: [kf(Math.max(0, d - Math.min(.8, d * .3)), 1, "in"), kf(d, .3)],
-					opacity: [kf(Math.max(0, d - Math.min(.4, d * .15)), 1), kf(d, 0)]
-				})
-			},
-			kenBurns: {
-				label: "镜头缓推",
-				group: "组合",
-				expand: (d) => ({
-					scale: [kf(0, 1, "inOut"), kf(d, 1.15)],
-					x: [kf(0, 0, "inOut"), kf(d, .02)]
-				})
-			},
-			kenBurnsOut: {
-				label: "镜头缓拉",
-				group: "组合",
-				expand: (d) => ({
-					scale: [kf(0, 1.15, "inOut"), kf(d, 1)],
-					y: [kf(0, .02, "inOut"), kf(d, 0)]
-				})
-			},
-			pop: {
-				label: "弹跳强调",
-				group: "组合",
-				expand: (d) => ({ scale: [kf(0, .9, "elastic"), kf(Math.min(.7, d * .25), 1)] })
-			},
-			tilt: {
-				label: "摇摆",
-				group: "组合",
-				expand: (d) => ({ rotation: [
-					kf(0, -3, "inOut"),
-					kf(d / 4, 3, "inOut"),
-					kf(d / 2, -3, "inOut"),
-					kf(d * 3 / 4, 3, "inOut"),
-					kf(d, -3)
-				] })
-			},
-			pulse: {
-				label: "脉冲",
-				group: "循环",
-				expand: (d) => {
-					const kfs = [];
-					for (let i = 0; i * 1 <= d; i++) kfs.push(kf(i, i % 2 ? 1.06 : 1, "inOut"));
-					if (kfs[kfs.length - 1].t < d) kfs.push(kf(d, kfs.length % 2 ? 1.06 : 1));
-					return { scale: kfs };
-				}
-			},
-			wobble: {
-				label: "抖动",
-				group: "循环",
-				expand: (d) => {
-					const kfs = [];
-					for (let i = 0; i * .5 <= d; i++) kfs.push(kf(i * .5, i % 2 ? .008 : -.008, "linear"));
-					return { x: kfs };
-				}
-			},
-			float: {
-				label: "漂浮",
-				group: "循环",
-				expand: (d) => {
-					const kfs = [];
-					for (let i = 0; i * 2 <= d; i++) kfs.push(kf(i * 2, i % 2 ? -.015 : .015, "inOut"));
-					if (kfs[kfs.length - 1].t < d) kfs.push(kf(d, kfs.length % 2 ? -.015 : .015));
-					return { y: kfs };
-				}
-			}
-		};
-		const expandAnimationPreset = (name, dur) => {
-			const p = ANIMATION_PRESETS[name];
-			return p ? p.expand(Math.max(.1, dur)) : void 0;
-		};
-		//#endregion
 		//#region ../engine/src/fonts.ts
 		const FONTS = [
 			{
@@ -21603,6 +22449,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		//#region ../engine/src/TimelineVideo.tsx
 		const SEC = (fps, s) => Math.round(s * fps);
 		const AssetResolver = react.default.createContext(staticFile);
+		const MediaErrorHandler = react.default.createContext(void 0);
 		const directAsset = (src) => src;
 		const filterCss = (f) => {
 			if (!f) return void 0;
@@ -21650,6 +22497,8 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		};
 		const ClipSegment = ({ clip }) => {
 			const resolveAsset = react.default.useContext(AssetResolver);
+			const reportError = react.default.useContext(MediaErrorHandler);
+			const onError = reportError ? () => reportError(clip.src) : void 0;
 			const { fps } = useVideoConfig();
 			const fade = clip.transition === "fade";
 			const speed = clip.speed ?? 1;
@@ -21657,6 +22506,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			const anim = animStyle(clip.animations, local);
 			const inner = clip.type === "image" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Img, {
 				src: resolveAsset(clip.src),
+				onError,
 				style: {
 					width: "100%",
 					height: "100%",
@@ -21665,9 +22515,9 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					...anim
 				}
 			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Video, {
+				onError,
 				src: resolveAsset(clip.src),
 				startFrom: SEC(fps, clip.inPoint),
-				endAt: SEC(fps, clip.inPoint + clip.clipDuration * speed),
 				playbackRate: speed,
 				volume: clip.volume * (evalKeyframes(clip.animations?.volume, local) ?? 1),
 				style: {
@@ -21719,7 +22569,6 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AudioVolumeEnv, {
 					src: resolveAsset(clip.src),
 					startFrom: SEC(fps, clip.inPoint),
-					endAt: SEC(fps, clip.inPoint + clip.duration * speed),
 					playbackRate: speed,
 					baseVolume: trackVolume * clip.volume,
 					env,
@@ -21727,13 +22576,24 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				})
 			});
 		};
-		const AudioVolumeEnv = ({ src, startFrom, endAt, playbackRate, baseVolume, env, fps }) => {
+		const AudioVolumeEnv = ({ src, startFrom, playbackRate, baseVolume, env, fps }) => {
+			const reportError = react.default.useContext(MediaErrorHandler);
+			const audioRef = react.default.useRef(null);
+			react.default.useEffect(() => {
+				const audio = audioRef.current;
+				if (!audio || !reportError) return;
+				const failed = () => reportError(src);
+				audio.addEventListener("error", failed);
+				if (audio.error && audio.src === src) failed();
+				return () => audio.removeEventListener("error", failed);
+			}, [src, reportError]);
 			const local = useCurrentFrame() / fps;
 			const envV = evalKeyframes(env, local);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Audio, {
+				ref: audioRef,
+				onError: reportError ? () => reportError(src) : void 0,
 				src,
 				startFrom,
-				endAt,
 				playbackRate,
 				volume: baseVolume * (envV ?? 1)
 			});
@@ -21774,100 +22634,269 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				})
 			});
 		};
-		const TimelineVideo = ({ timeline, directSources = false, fontsBase }) => {
+		const TimelineVideo = ({ timeline, directSources = false, fontsBase, onMediaError }) => {
 			const { fps } = useVideoConfig();
 			const [mainTrack, ...overlayTracks] = timeline.videoTracks;
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AssetResolver.Provider, {
-				value: directSources ? directAsset : staticFile,
-				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(AbsoluteFill, {
-					style: { backgroundColor: "#000" },
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(FontGate, {
-							timeline,
-							fontsBase
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Series, { children: mainTrack.clips.map((clip) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Series.Sequence, {
-							durationInFrames: SEC(fps, clip.clipDuration),
-							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ClipSegment, { clip })
-						}, clip.id)) }),
-						overlayTracks.map((tr) => tr.clips.map((clip) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PipSegment, { clip }, clip.id))),
-						timeline.audioTracks.map((tr) => tr.clips.map((clip) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AudioSegment, {
-							clip,
-							trackVolume: tr.volume,
-							muted: tr.muted
-						}, clip.id))),
-						timeline.overlays.map((ov, i) => {
-							const from = SEC(fps, ov.startSeconds);
-							const duration = Math.max(1, SEC(fps, ov.endSeconds - ov.startSeconds));
-							return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Sequence, {
-								from,
-								durationInFrames: duration,
-								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AbsoluteFill, { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(OverlayView, { ov }) })
-							}, i);
-						})
-					]
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(MediaErrorHandler.Provider, {
+				value: onMediaError,
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AssetResolver.Provider, {
+					value: directSources ? directAsset : staticFile,
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(AbsoluteFill, {
+						style: { backgroundColor: "#000" },
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(FontGate, {
+								timeline,
+								fontsBase
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Series, { children: mainTrack.clips.map((clip) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Series.Sequence, {
+								durationInFrames: SEC(fps, clip.clipDuration),
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ClipSegment, { clip })
+							}, clip.id)) }),
+							overlayTracks.map((tr) => tr.clips.map((clip) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PipSegment, { clip }, clip.id))),
+							timeline.audioTracks.map((tr) => tr.clips.map((clip) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AudioSegment, {
+								clip,
+								trackVolume: tr.volume,
+								muted: tr.muted
+							}, clip.id))),
+							timeline.overlays.map((ov, i) => {
+								const from = SEC(fps, ov.startSeconds);
+								const duration = Math.max(1, SEC(fps, ov.endSeconds - ov.startSeconds));
+								return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Sequence, {
+									from,
+									durationInFrames: duration,
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AbsoluteFill, { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(OverlayView, { ov }) })
+								}, i);
+							})
+						]
+					})
 				})
 			});
 		};
 		//#endregion
 		//#region src/client/PreviewVideo.tsx
-		const PreviewVideo = ({ timeline }) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TimelineVideo, {
-			timeline,
-			directSources: true,
-			fontsBase: API_BASE + "/fonts"
-		});
+		const PreviewVideo = ({ timeline }) => {
+			const [error, setError] = react.default.useState(null);
+			const onMediaError = react.default.useCallback((src) => {
+				let name = src;
+				try {
+					name = decodeURIComponent(new URL(src, window.location.href).pathname.split("/").pop() ?? src);
+				} catch {}
+				setError(/* @__PURE__ */ new Error(`无法加载素材「${name}」`));
+			}, []);
+			if (error) throw error;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TimelineVideo, {
+				timeline,
+				directSources: true,
+				fontsBase: API_BASE + "/fonts",
+				onMediaError
+			});
+		};
+		//#endregion
+		//#region src/client/PreviewStage.tsx
+		function ReportFailure({ error, report }) {
+			(0, react.useEffect)(() => report(error), [error, report]);
+			return null;
+		}
+		function PreviewStage({ timeline, durationInFrames, onOpenAssets }) {
+			const playerBus = usePlayerBus();
+			const [failure, setFailure] = (0, react.useState)(null);
+			const [attempt, setAttempt] = (0, react.useState)(0);
+			const initialFrame = (0, react.useRef)(0);
+			const stageRef = (0, react.useRef)(null);
+			const player = (0, react.useRef)(null);
+			const attach = (0, react.useCallback)((value) => {
+				if (value) playerBus.ref = value;
+				else if (playerBus.ref === player.current) playerBus.ref = null;
+				player.current = value;
+			}, [playerBus]);
+			(0, react.useEffect)(() => {
+				const stage = stageRef.current;
+				if (!stage) return;
+				const pauseWhenHidden = () => {
+					const fullscreen = document.fullscreenElement && stage.contains(document.fullscreenElement);
+					if (document.hidden || !fullscreen && (!stage.getClientRects().length || getComputedStyle(stage).visibility === "hidden")) player.current?.pause();
+				};
+				const resize = new ResizeObserver(pauseWhenHidden);
+				const intersection = new IntersectionObserver(pauseWhenHidden);
+				const attributes = new MutationObserver(pauseWhenHidden);
+				for (let ancestor = stage; ancestor; ancestor = ancestor.parentElement) attributes.observe(ancestor, {
+					attributes: true,
+					attributeFilter: [
+						"class",
+						"style",
+						"hidden"
+					]
+				});
+				resize.observe(stage);
+				intersection.observe(stage);
+				document.addEventListener("visibilitychange", pauseWhenHidden);
+				pauseWhenHidden();
+				return () => {
+					resize.disconnect();
+					intersection.disconnect();
+					attributes.disconnect();
+					document.removeEventListener("visibilitychange", pauseWhenHidden);
+				};
+			}, []);
+			const report = (0, react.useCallback)((error) => {
+				initialFrame.current = player.current?.getCurrentFrame() ?? initialFrame.current;
+				player.current?.pause();
+				setFailure(error.message);
+			}, []);
+			const retry = (0, react.useCallback)(() => {
+				initialFrame.current = Math.max(0, Math.min(durationInFrames - 1, player.current?.getCurrentFrame() ?? initialFrame.current));
+				setFailure(null);
+				setAttempt((value) => value + 1);
+			}, [durationInFrames]);
+			const sources = JSON.stringify([...timeline.videoTracks, ...timeline.audioTracks].flatMap((track) => track.clips.map((clip) => clip.src)));
+			const previousSources = (0, react.useRef)(sources);
+			(0, react.useEffect)(() => {
+				if (previousSources.current !== sources && failure) retry();
+				previousSources.current = sources;
+			}, [
+				sources,
+				failure,
+				retry
+			]);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "djp-stage",
+				ref: stageRef,
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Player, {
+					ref: attach,
+					component: PreviewVideo,
+					inputProps: { timeline },
+					initialFrame: Math.min(initialFrame.current, durationInFrames - 1),
+					durationInFrames,
+					fps: timeline.meta.fps,
+					compositionWidth: timeline.meta.width,
+					compositionHeight: timeline.meta.height,
+					errorFallback: ({ error }) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ReportFailure, {
+						error,
+						report
+					}),
+					controls: false,
+					acknowledgeRemotionLicense: true,
+					style: {
+						width: "100%",
+						height: "100%"
+					}
+				}, `${attempt}-${timeline.meta.fps}-${timeline.meta.width}-${timeline.meta.height}`), failure && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "djp-preview-error",
+					role: "alert",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: "预览暂时不可用" }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: failure.startsWith("无法加载素材「") ? failure : "画面加载失败，请重试。" }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("small", { children: "请检查素材是否存在，以及浏览器是否支持该格式。" }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: "djp-btn",
+							onClick: retry,
+							children: "重试预览"
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: "djp-btn",
+							onClick: onOpenAssets,
+							children: "打开素材库"
+						})] })
+					]
+				})]
+			});
+		}
 		//#endregion
 		//#region src/client/useHistory.ts
 		function useHistory(timeline, mutate) {
 			const undoStack = (0, react.useRef)([]);
 			const redoStack = (0, react.useRef)([]);
+			const expected = (0, react.useRef)(timeline);
+			const activeGroup = (0, react.useRef)(null);
 			const [, force] = (0, react.useState)(0);
+			const acceptCurrent = (0, react.useCallback)((current) => {
+				if (expected.current === current) return;
+				undoStack.current = [];
+				redoStack.current = [];
+				activeGroup.current = null;
+				expected.current = current;
+			}, []);
+			(0, react.useLayoutEffect)(() => {
+				if (!timeline || expected.current === timeline) return;
+				const hadHistory = undoStack.current.length > 0 || redoStack.current.length > 0;
+				acceptCurrent(timeline);
+				if (hadHistory) force((n) => n + 1);
+			}, [timeline, acceptCurrent]);
 			return {
-				commit: (0, react.useCallback)((fn) => {
-					if (!timeline) return;
-					undoStack.current.push(timeline);
-					if (undoStack.current.length > 50) undoStack.current.shift();
-					redoStack.current = [];
-					mutate(fn);
-					force((x) => x + 1);
-				}, [timeline, mutate]),
+				commit: (0, react.useCallback)((fn, group) => {
+					mutate((current) => {
+						acceptCurrent(current);
+						const next = fn(current);
+						if (next === current || JSON.stringify(next) === JSON.stringify(current)) return current;
+						if (group !== void 0) {
+							if (activeGroup.current?.id !== group) activeGroup.current = {
+								id: group,
+								initial: current,
+								undo: [...undoStack.current],
+								redo: [...redoStack.current]
+							};
+							const gesture = activeGroup.current;
+							if (JSON.stringify(next) === JSON.stringify(gesture.initial)) {
+								undoStack.current = [...gesture.undo];
+								redoStack.current = [...gesture.redo];
+							} else {
+								undoStack.current = [...gesture.undo, gesture.initial].slice(-50);
+								redoStack.current = [];
+							}
+						} else {
+							activeGroup.current = null;
+							undoStack.current.push(current);
+							if (undoStack.current.length > 50) undoStack.current.shift();
+							redoStack.current = [];
+						}
+						expected.current = next;
+						force((x) => x + 1);
+						return next;
+					});
+				}, [mutate, acceptCurrent]),
 				undo: (0, react.useCallback)(() => {
-					const prev = undoStack.current.pop();
-					if (!prev || !timeline) return;
-					redoStack.current.push(timeline);
-					mutate(() => prev);
-					force((x) => x + 1);
-				}, [timeline, mutate]),
+					activeGroup.current = null;
+					mutate((current) => {
+						acceptCurrent(current);
+						const prev = undoStack.current.pop();
+						if (!prev) return current;
+						redoStack.current.push(current);
+						expected.current = prev;
+						force((x) => x + 1);
+						return prev;
+					});
+				}, [mutate, acceptCurrent]),
 				redo: (0, react.useCallback)(() => {
-					const next = redoStack.current.pop();
-					if (!next || !timeline) return;
-					undoStack.current.push(timeline);
-					mutate(() => next);
-					force((x) => x + 1);
-				}, [timeline, mutate]),
+					activeGroup.current = null;
+					mutate((current) => {
+						acceptCurrent(current);
+						const next = redoStack.current.pop();
+						if (!next) return current;
+						undoStack.current.push(current);
+						expected.current = next;
+						force((x) => x + 1);
+						return next;
+					});
+				}, [mutate, acceptCurrent]),
 				clear: (0, react.useCallback)(() => {
+					activeGroup.current = null;
 					undoStack.current = [];
 					redoStack.current = [];
 					force((x) => x + 1);
 				}, []),
-				snapshot: (0, react.useCallback)(() => {
-					if (!timeline) return;
-					undoStack.current.push(timeline);
-					if (undoStack.current.length > 50) undoStack.current.shift();
-					redoStack.current = [];
-					force((x) => x + 1);
-				}, [timeline]),
 				canUndo: undoStack.current.length > 0,
 				canRedo: redoStack.current.length > 0
 			};
 		}
 		//#endregion
 		//#region src/client/useTimelineSync.ts
+		const serializeTimeline = (timeline) => JSON.stringify(parseTimeline(timeline));
 		function useTimelineSync(sessionId, rootRef) {
 			const draftKey = `djian.unsaved.${sessionId ?? "default"}`;
 			const [timeline, setTimeline] = (0, react.useState)(null);
 			const [saveState, setSaveState] = (0, react.useState)("saved");
 			const [syncError, setSyncError] = (0, react.useState)("");
+			const [hasConflict, setHasConflict] = (0, react.useState)(false);
+			const conflict = (0, react.useRef)(false);
 			const current = (0, react.useRef)(null);
 			const pending = (0, react.useRef)(null);
 			const revision = (0, react.useRef)(0);
@@ -21877,6 +22906,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			const saving = (0, react.useRef)(null);
 			const debounce = (0, react.useRef)(null);
 			const flush = (0, react.useCallback)(() => {
+				if (conflict.current) return Promise.resolve();
 				if (saving.current) return saving.current;
 				if (!pending.current) return Promise.resolve();
 				const task = (async () => {
@@ -21885,16 +22915,25 @@ Check that all your Remotion packages are on the same version. If your dependenc
 						pending.current = null;
 						if (alive.current) setSaveState("saving");
 						try {
-							await putTimeline(next, sessionId);
-							savedJson.current = JSON.stringify(next);
+							await putTimeline(next, sessionId, savedJson.current || null);
+							savedJson.current = serializeTimeline(next);
 							try {
-								if (localStorage.getItem(draftKey) === savedJson.current) localStorage.removeItem(draftKey);
+								if (current.current && serializeTimeline(current.current) !== savedJson.current) localStorage.setItem(draftKey, JSON.stringify({
+									format: "djian-draft-v1",
+									timeline: current.current,
+									baseTimeline: savedJson.current
+								}));
+								else localStorage.removeItem(draftKey);
 							} catch {}
 						} catch (error) {
 							pending.current ?? (pending.current = next);
+							if (error instanceof TimelineConflictError) {
+								conflict.current = true;
+								if (alive.current) setHasConflict(true);
+							}
 							if (alive.current) {
 								setSaveState("error");
-								setSyncError(error instanceof Error ? `保存失败：${error.message}` : "保存失败，请检查连接后重试");
+								setSyncError(error instanceof Error && error.name === "TimeoutError" ? "保存请求超时，本地修改仍保留，请检查连接后重试。" : error instanceof Error ? `保存失败：${error.message}` : "保存失败，请检查连接后重试");
 							}
 							return;
 						}
@@ -21919,7 +22958,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				try {
 					const next = await getTimeline(sessionId, hidden);
 					if (!alive.current || dirty.current || revision.current !== atRevision) return;
-					const json = JSON.stringify(next);
+					const json = serializeTimeline(next);
 					if (json !== savedJson.current) {
 						savedJson.current = json;
 						current.current = next;
@@ -21935,7 +22974,9 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				if (!current.current) try {
 					const draft = localStorage.getItem(draftKey);
 					if (draft) {
-						const restored = parseTimeline(JSON.parse(draft));
+						const data = JSON.parse(draft);
+						const restored = parseTimeline(data.format === "djian-draft-v1" ? data.timeline : data);
+						savedJson.current = data.format === "djian-draft-v1" && typeof data.baseTimeline === "string" ? data.baseTimeline : "";
 						current.current = pending.current = restored;
 						dirty.current = true;
 						revision.current++;
@@ -21976,22 +23017,75 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				mutate: (0, react.useCallback)((fn) => {
 					if (!current.current) return;
 					const next = fn(current.current);
+					if (next === current.current) return;
 					current.current = next;
 					revision.current++;
 					dirty.current = true;
 					pending.current = next;
 					try {
-						localStorage.setItem(draftKey, JSON.stringify(next));
+						localStorage.setItem(draftKey, JSON.stringify({
+							format: "djian-draft-v1",
+							timeline: next,
+							baseTimeline: savedJson.current
+						}));
 					} catch {}
 					setTimeline(next);
-					setSaveState("pending");
+					setSaveState(conflict.current ? "error" : "pending");
 					if (debounce.current) clearTimeout(debounce.current);
-					debounce.current = setTimeout(() => void flush(), 600);
+					if (!conflict.current) debounce.current = setTimeout(() => void flush(), 600);
 				}, [flush, draftKey]),
 				reload,
 				saveState,
 				syncError,
-				retrySave: flush
+				hasConflict,
+				resolveConflict: (0, react.useCallback)(async (choice) => {
+					if (!conflict.current || saving.current) return;
+					const atRevision = revision.current;
+					try {
+						const latest = await getTimeline(sessionId, true);
+						if (!alive.current || !conflict.current) return;
+						if (revision.current !== atRevision) {
+							setSyncError("读取期间又有本地修改，请重新选择要保留的版本。");
+							return;
+						}
+						savedJson.current = serializeTimeline(latest);
+						if (choice === "remote") {
+							current.current = latest;
+							pending.current = null;
+							dirty.current = false;
+							revision.current++;
+							setTimeline(latest);
+							setSaveState("saved");
+							setSyncError("");
+							try {
+								localStorage.removeItem(draftKey);
+							} catch {}
+						} else if (current.current) try {
+							localStorage.setItem(draftKey, JSON.stringify({
+								format: "djian-draft-v1",
+								timeline: current.current,
+								baseTimeline: savedJson.current
+							}));
+						} catch {}
+						conflict.current = false;
+						setHasConflict(false);
+						if (choice === "local") await flush();
+					} catch {
+						if (alive.current) setSyncError("读取最新版本失败，本地修改仍保留，请重试。");
+					}
+				}, [
+					sessionId,
+					draftKey,
+					flush
+				]),
+				retrySave: flush,
+				saveBeforeRestore: (0, react.useCallback)(async () => {
+					if (debounce.current) clearTimeout(debounce.current);
+					await flush();
+					if (!alive.current) throw new Error("编辑面板已关闭，请重新打开后恢复。");
+					if (conflict.current) throw new Error("请先处理版本冲突，再恢复历史版本。本地修改仍然保留。");
+					if (dirty.current || pending.current) throw new Error("当前修改尚未保存，暂未恢复历史版本。请检查连接后重试。");
+				}, [flush])
 			};
 		}
 		//#endregion
@@ -22200,378 +23294,783 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		};
 		//#endregion
 		//#region src/client/AssetsSection.tsx
-		const fmtSize$1 = (n) => n >= 1048576 ? `${(n / 1024 / 1024).toFixed(1)}MB` : `${Math.round(n / 1024)}KB`;
-		const fmtDur = (d) => d == null ? "" : `${d.toFixed(1)}s`;
-		const AssetsSection = ({ onAddClip, onSetBgm }) => {
+		const fmtSize = (n) => n >= 1048576 ? `${(n / 1024 / 1024).toFixed(1)}MB` : `${Math.round(n / 1024)}KB`;
+		const fmtDur = (d) => d == null ? "" : `${Math.floor(d / 60)}:${String(Math.floor(d % 60)).padStart(2, "0")}`;
+		const kinds = {
+			video: "视频",
+			image: "图片",
+			audio: "音频"
+		};
+		const AssetsSection = ({ onAddClip, onAddAudio, usedSources = [], videoTarget = "主轨道" }) => {
+			const sessionId = useProjectSession();
 			const [assets, setAssets] = (0, react.useState)([]);
-			const [collapsed, setCollapsed] = (0, react.useState)(false);
+			const [query, setQuery] = (0, react.useState)("");
+			const [kind, setKind] = (0, react.useState)("all");
+			const [expanded, setExpanded] = (0, react.useState)(null);
+			const [confirming, setConfirming] = (0, react.useState)(null);
+			const [notice, setNotice] = (0, react.useState)("");
+			const detailsId = (0, react.useId)();
+			const sectionRef = (0, react.useRef)(null);
+			const cancelRef = (0, react.useRef)(null);
+			const searchRef = (0, react.useRef)(null);
 			const [busy, setBusy] = (0, react.useState)(false);
 			const [error, setError] = (0, react.useState)("");
+			const [loadError, setLoadError] = (0, react.useState)("");
+			const [loading, setLoading] = (0, react.useState)(true);
+			const [progress, setProgress] = (0, react.useState)("");
+			const [deleting, setDeleting] = (0, react.useState)(null);
+			const alive = (0, react.useRef)(false);
+			const operation = (0, react.useRef)(false);
+			const pending = (0, react.useRef)(null);
 			const fileRef = (0, react.useRef)(null);
-			const refresh = async () => {
-				try {
-					setAssets(await listAssets());
-					setError("");
-				} catch {}
+			const usage = (0, react.useMemo)(() => {
+				const counts = /* @__PURE__ */ new Map();
+				for (const src of usedSources) {
+					if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(src)) continue;
+					const name = src.replace(/\\/g, "/").split("/").pop() ?? src;
+					counts.set(name, (counts.get(name) ?? 0) + 1);
+				}
+				return counts;
+			}, [usedSources]);
+			const visible = assets.filter((a) => (kind === "all" || a.type === kind) && a.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+			const restoreMoreFocus = (name) => {
+				sectionRef.current?.querySelectorAll("[data-asset-more]").forEach((button) => {
+					if (button.dataset.assetMore === name) button.focus();
+				});
 			};
 			(0, react.useEffect)(() => {
-				refresh();
-				const timer = window.setInterval(() => void refresh(), 5e3);
-				return () => window.clearInterval(timer);
-			}, []);
+				if (confirming) cancelRef.current?.focus();
+			}, [confirming]);
+			const refresh = (0, react.useCallback)(async () => {
+				pending.current?.abort();
+				const controller = new AbortController();
+				pending.current = controller;
+				const timeout = window.setTimeout(() => controller.abort(), 15e3);
+				try {
+					const next = await listAssets(sessionId, controller.signal);
+					if (!alive.current || pending.current !== controller) return;
+					setAssets(next);
+					setLoadError("");
+				} catch {
+					if (alive.current && pending.current === controller) setLoadError("素材暂时无法加载，请检查连接后重试。");
+				} finally {
+					window.clearTimeout(timeout);
+					if (alive.current && pending.current === controller) setLoading(false);
+				}
+			}, [sessionId]);
+			(0, react.useEffect)(() => {
+				alive.current = true;
+				let stopped = false;
+				let timer;
+				const poll = async () => {
+					await refresh();
+					if (!stopped) timer = window.setTimeout(poll, 5e3);
+				};
+				poll();
+				return () => {
+					stopped = true;
+					alive.current = false;
+					window.clearTimeout(timer);
+					pending.current?.abort();
+				};
+			}, [refresh]);
 			const onFiles = async (files) => {
-				if (!files?.length || busy) return;
+				if (!files?.length || operation.current) return;
+				operation.current = true;
 				setBusy(true);
 				setError("");
+				setNotice("");
+				const batch = Array.from(files);
+				const failures = [];
 				try {
-					for (const f of Array.from(files)) await uploadAsset(f);
-					await refresh();
-				} catch (e) {
-					setError(e instanceof Error ? e.message : String(e));
+					for (const [index, f] of batch.entries()) {
+						if (!alive.current) break;
+						setProgress(`上传 ${index + 1}/${batch.length} · ${f.name}`);
+						try {
+							await uploadAsset(f, sessionId);
+						} catch (e) {
+							failures.push(`${f.name}：${e instanceof Error ? e.message : String(e)}`);
+						}
+					}
+					if (alive.current) {
+						setError(failures.length ? `${failures.length} 个素材上传失败：${failures.join("；")}` : "");
+						setNotice(`已上传 ${batch.length - failures.length}/${batch.length} 个素材`);
+						await refresh();
+					}
 				} finally {
-					setBusy(false);
+					operation.current = false;
+					if (alive.current) {
+						setBusy(false);
+						setProgress("");
+					}
 					if (fileRef.current) fileRef.current.value = "";
 				}
 			};
 			const onDelete = async (name) => {
-				if (!window.confirm(`删除素材「${name}」？时间线里引用它的片段会失效。`)) return;
+				if (operation.current || usage.has(name)) return;
+				operation.current = true;
+				setDeleting(name);
+				setError("");
 				try {
-					await deleteAsset(name);
-					await refresh();
+					await deleteAsset(name, sessionId);
+					if (alive.current) {
+						setAssets((current) => current.filter((a) => a.name !== name));
+						setConfirming(null);
+						setExpanded(null);
+						setNotice(`已删除 ${name}`);
+						searchRef.current?.focus();
+						await refresh();
+					}
 				} catch (e) {
-					setError(e instanceof Error ? e.message : String(e));
+					if (alive.current) setError(e instanceof Error ? e.message : String(e));
+				} finally {
+					operation.current = false;
+					if (alive.current) setDeleting(null);
 				}
 			};
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "djp-section",
+				className: "djp-section djp-asset-browser",
+				ref: sectionRef,
+				onKeyDown: (e) => {
+					if (e.key === "Escape" && expanded) {
+						e.stopPropagation();
+						setConfirming(null);
+						setExpanded(null);
+						restoreMoreFocus(expanded);
+					}
+				},
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "djp-section-head",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-							style: {
-								cursor: "pointer",
-								userSelect: "none"
-							},
-							onClick: () => setCollapsed((v) => !v),
-							title: collapsed ? "展开" : "收起",
-							children: [
-								collapsed ? "▸" : "▾",
-								" 素材库（",
-								assets.length,
-								"）"
-							]
-						}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-							style: {
-								display: "flex",
-								gap: 6
-							},
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+						className: "djp-asset-toolbar",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "djp-asset-search",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "search" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+									ref: searchRef,
+									type: "search",
+									"aria-label": "搜索当前项目素材",
+									placeholder: "搜索素材",
+									value: query,
+									onChange: (e) => {
+										setQuery(e.target.value);
+										setExpanded(null);
+										setConfirming(null);
+									}
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
 								ref: fileRef,
 								type: "file",
 								multiple: true,
 								accept: "video/*,image/*,audio/*",
 								style: { display: "none" },
 								onChange: (e) => void onFiles(e.target.files)
-							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								className: "djp-btn",
-								disabled: busy,
+								disabled: busy || deleting !== null,
 								onClick: () => fileRef.current?.click(),
 								title: "上传视频/图片/音频到当前项目素材文件夹",
 								children: busy ? "上传中…" : "上传"
-							})]
-						})]
+							})
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "djp-asset-filters",
+						role: "group",
+						"aria-label": "素材类型",
+						children: [[
+							"all",
+							"video",
+							"image",
+							"audio"
+						].map((type) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							"aria-pressed": kind === type,
+							onClick: () => {
+								setKind(type);
+								setExpanded(null);
+								setConfirming(null);
+							},
+							children: type === "all" ? "全部" : kinds[type]
+						}, type)), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [visible.length, " 项"] })]
+					}),
+					progress && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "djp-hint",
+						role: "status",
+						children: progress
+					}),
+					notice && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "djp-hint",
+						role: "status",
+						children: notice
 					}),
 					error && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "djp-hint",
+						role: "alert",
 						style: { color: "var(--dsw-alias-state-error-primary)" },
 						children: error
 					}),
-					!collapsed && (assets.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					loadError && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "djp-hint",
-						children: "空素材库——点「上传」把素材放进当前项目"
-					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "djp-assets",
-						children: assets.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "djp-asset",
-							title: `${a.name} · ${fmtSize$1(a.size)}${a.duration ? ` · ${fmtDur(a.duration)}` : ""}`,
-							children: [
-								a.thumb ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
-									className: "djp-asset-thumb",
-									src: assetThumbUrl(a.name),
-									alt: a.name,
-									loading: "lazy"
-								}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									className: "djp-asset-thumb djp-asset-audio",
-									children: "♪"
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									className: "djp-asset-name",
-									children: a.name
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "djp-asset-acts",
-									children: [a.type !== "audio" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-										title: "加为片段",
-										onClick: () => onAddClip(a),
-										children: "＋片段"
-									}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-										title: "设为配乐",
-										onClick: () => onSetBgm(a.name),
-										children: "♪配乐"
-									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-										title: "删除素材",
-										onClick: () => void onDelete(a.name),
-										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "close" })
-									})]
-								})
-							]
-						}, a.name))
-					}))
-				]
-			});
-		};
-		//#endregion
-		//#region src/client/ExportControl.tsx
-		const fmtSize = (n) => n >= 1048576 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;
-		const ExportControl = ({ t }) => {
-			const [exp, setExp] = (0, react.useState)({ phase: "idle" });
-			const [open, setOpen] = (0, react.useState)(false);
-			const [scale, setScale] = (0, react.useState)(1);
-			const [quality, setQuality] = (0, react.useState)("standard");
-			const pollRef = (0, react.useRef)(null);
-			const stopPolling = () => {
-				if (pollRef.current !== null) {
-					window.clearInterval(pollRef.current);
-					pollRef.current = null;
-				}
-			};
-			(0, react.useEffect)(() => stopPolling, []);
-			const start = async () => {
-				setOpen(false);
-				setExp({
-					phase: "rendering",
-					percent: 0
-				});
-				try {
-					await startExportWith(t, {
-						scale,
-						quality
-					});
-					stopPolling();
-					pollRef.current = window.setInterval(async () => {
-						try {
-							const s = await getExportStatus();
-							if (s.status === "rendering") setExp({
-								phase: "rendering",
-								percent: s.progress?.percent ?? 0
-							});
-							else if (s.status === "done") {
-								stopPolling();
-								setExp({
-									phase: "done",
-									fileName: s.result.fileName,
-									sizeBytes: s.result.sizeBytes
-								});
-							} else if (s.status === "error") {
-								stopPolling();
-								setExp({
-									phase: "error",
-									message: s.error ?? "渲染失败"
-								});
-							}
-						} catch {}
-					}, 1e3);
-				} catch (e) {
-					setExp({
-						phase: "error",
-						message: e instanceof Error ? e.message : String(e)
-					});
-				}
-			};
-			if (exp.phase === "rendering") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-				className: "djp-export",
-				disabled: true,
-				children: [
-					"导出中 ",
-					exp.percent,
-					"%"
-				]
-			});
-			if (exp.phase === "done") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("a", {
-				className: "djp-export",
-				href: exportDownloadUrl,
-				download: exp.fileName,
-				title: `${exp.fileName} · ${fmtSize(exp.sizeBytes)}`,
-				onClick: () => window.setTimeout(() => setExp({ phase: "idle" }), 4e3),
-				children: "下载 mp4"
-			});
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-				className: "djp-expwrap",
-				children: [
-					exp.phase === "error" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						className: "djp-export djp-error",
-						onClick: () => setOpen(true),
-						title: exp.message,
-						children: "失败重试"
-					}),
-					exp.phase !== "error" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						className: "djp-export",
-						onClick: () => setOpen((v) => !v),
-						children: "导出"
-					}),
-					open && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "djp-pop djp-exppop",
+						role: "status",
 						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
-								className: "djp-field",
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "分辨率" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
-									className: "djp-select",
-									value: scale,
-									onChange: (e) => setScale(Number(e.target.value)),
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("option", {
-											value: 1,
-											children: [
-												"原始（",
-												t.meta.width,
-												"×",
-												t.meta.height,
-												"）"
-											]
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("option", {
-											value: .5,
-											children: [
-												"50%（",
-												Math.round(t.meta.width * .5 / 2) * 2,
-												"×",
-												Math.round(t.meta.height * .5 / 2) * 2,
-												"）"
-											]
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("option", {
-											value: 2,
-											children: [
-												"200%（",
-												t.meta.width * 2,
-												"×",
-												t.meta.height * 2,
-												"）"
-											]
-										})
-									]
-								})]
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
-								className: "djp-field",
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "质量" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
-									className: "djp-select",
-									value: quality,
-									onChange: (e) => setQuality(e.target.value),
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-											value: "draft",
-											children: "草稿（快、小）"
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-											value: "standard",
-											children: "标准"
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-											value: "high",
-											children: "高（慢、大）"
-										})
-									]
-								})]
-							}),
+							loadError,
+							" ",
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								className: "djp-export",
-								style: { alignSelf: "flex-end" },
-								onClick: () => void start(),
-								children: "开始导出"
+								className: "djp-btn",
+								onClick: () => void refresh(),
+								children: "重试"
 							})
 						]
+					}),
+					visible.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "djp-asset-empty",
+						children: loading ? "正在加载素材…" : loadError && assets.length === 0 ? "连接恢复后将显示素材" : assets.length === 0 ? "点「上传」添加视频、图片或音频" : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: ["没有匹配的素材", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: "djp-btn",
+							onClick: () => {
+								setQuery("");
+								setKind("all");
+								searchRef.current?.focus();
+							},
+							children: "清除筛选"
+						})] })
+					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", {
+						className: "djp-assets",
+						"aria-label": "项目素材",
+						children: visible.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", {
+							className: "djp-asset",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "djp-asset-row",
+								children: [
+									a.thumb ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
+										className: "djp-asset-thumb",
+										src: assetThumbUrl(a.name, sessionId),
+										alt: "",
+										loading: "lazy"
+									}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: `djp-asset-thumb djp-asset-${a.type}`,
+										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: a.type === "audio" ? "music" : a.type === "image" ? "image" : "film" })
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "djp-asset-info",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "djp-asset-name",
+											title: a.name,
+											children: a.name
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "djp-asset-meta",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [kinds[a.type], a.duration != null ? ` · ${fmtDur(a.duration)}` : ""] }), usage.has(a.name) && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+												className: "djp-asset-used",
+												children: ["已用 ", usage.get(a.name)]
+											})]
+										})]
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "djp-asset-acts",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+											className: "djp-iconbtn",
+											title: a.type === "audio" ? "添加到音频轨道" : `添加到${videoTarget}`,
+											"aria-label": `添加 ${a.name} 到${a.type === "audio" ? "音频轨道" : videoTarget}`,
+											disabled: deleting === a.name,
+											onClick: () => {
+												if (a.type === "audio") onAddAudio(a);
+												else onAddClip(a);
+												setNotice(`已添加 ${a.name} 到${a.type === "audio" ? "音频轨道" : videoTarget}`);
+											},
+											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" })
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+											className: "djp-iconbtn",
+											title: "素材详情与操作",
+											"data-asset-more": a.name,
+											"aria-label": `更多操作 ${a.name}`,
+											"aria-expanded": expanded === a.name,
+											"aria-controls": expanded === a.name ? detailsId : void 0,
+											onClick: () => {
+												setExpanded(expanded === a.name ? null : a.name);
+												setConfirming(null);
+											},
+											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "dots" })
+										})]
+									})
+								]
+							}), expanded === a.name && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "djp-asset-details",
+								id: detailsId,
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "djp-asset-filename",
+									children: a.name
+								}), confirming === a.name ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "djp-asset-confirm",
+									role: "group",
+									"aria-label": `确认删除 ${a.name}`,
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: usage.has(a.name) ? "此素材已被时间线使用，请先移除对应片段。" : "从项目中永久删除此素材？此操作无法撤销。" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										className: "djp-btn",
+										ref: cancelRef,
+										disabled: deleting !== null,
+										onClick: () => {
+											setConfirming(null);
+											restoreMoreFocus(a.name);
+										},
+										children: "取消"
+									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										className: "djp-btn djp-error",
+										disabled: busy || deleting !== null || usage.has(a.name),
+										onClick: () => void onDelete(a.name),
+										children: deleting === a.name ? "删除中…" : "确认删除"
+									})] })]
+								}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "djp-asset-detail-actions",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [fmtSize(a.size), usage.has(a.name) ? " · 请先移除时间线中的引用再删除" : ""] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										className: "djp-iconbtn",
+										title: usage.has(a.name) ? "素材正在时间线中使用" : "删除素材",
+										"aria-label": `删除素材 ${a.name}`,
+										disabled: busy || deleting !== null || usage.has(a.name),
+										onClick: () => setConfirming(a.name),
+										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "trash" })
+									})]
+								})]
+							})]
+						}, a.name))
 					})
 				]
 			});
 		};
 		//#endregion
+		//#region src/client/useExportJob.ts
+		function useExportJob(sessionId) {
+			const storageKey = `djian.export.${sessionId ?? "default"}`;
+			const [jobId, setJobId] = (0, react.useState)(() => {
+				try {
+					return sessionStorage.getItem(storageKey);
+				} catch {
+					return null;
+				}
+			});
+			const [status, setStatus] = (0, react.useState)({ status: "idle" });
+			const [starting, setStarting] = (0, react.useState)(false);
+			const [connectionError, setConnectionError] = (0, react.useState)("");
+			const [retry, setRetry] = (0, react.useState)(0);
+			const busy = (0, react.useRef)(false);
+			const alive = (0, react.useRef)(true);
+			(0, react.useEffect)(() => {
+				alive.current = true;
+				return () => {
+					alive.current = false;
+				};
+			}, []);
+			(0, react.useEffect)(() => {
+				if (!jobId) return;
+				let stopped = false, failures = 0;
+				let timer;
+				let controller;
+				const poll = async () => {
+					controller = new AbortController();
+					const timeout = setTimeout(() => controller?.abort(), 12e3);
+					try {
+						const next = await getExportStatus(jobId, controller.signal);
+						if (stopped) return;
+						failures = 0;
+						setConnectionError("");
+						if (next.status === "idle") {
+							setStatus({
+								status: "error",
+								error: "导出任务已结束或丢失，请重新导出"
+							});
+							return;
+						}
+						setStatus(next);
+						if (next.status !== "rendering") return;
+					} catch (error) {
+						if (stopped) return;
+						if (error instanceof ExportRequestError && error.status >= 400 && error.status < 500) {
+							setStatus({
+								status: "error",
+								error: error.message
+							});
+							setConnectionError("");
+							return;
+						}
+						failures++;
+						setConnectionError("暂时无法获取进度，正在重新连接。导出任务可能仍在运行。");
+					} finally {
+						clearTimeout(timeout);
+					}
+					if (!stopped) timer = setTimeout(poll, Math.min(1e4, 1e3 * 2 ** failures));
+				};
+				poll();
+				return () => {
+					stopped = true;
+					clearTimeout(timer);
+					controller?.abort();
+				};
+			}, [jobId, retry]);
+			const start = async (timeline, options) => {
+				if (busy.current || starting || jobId && status.status === "rendering") return;
+				busy.current = true;
+				setStarting(true);
+				setConnectionError("");
+				setJobId(null);
+				try {
+					const id = await startExportWith(timeline, {
+						...options,
+						sessionId
+					});
+					try {
+						sessionStorage.setItem(storageKey, id);
+					} catch {}
+					if (alive.current) {
+						setStatus({
+							status: "rendering",
+							progress: {
+								percent: 0,
+								stage: "preparing"
+							}
+						});
+						setJobId(id);
+					}
+				} catch (error) {
+					if (alive.current) setStatus({
+						status: "error",
+						error: error instanceof Error ? error.message : "无法开始导出"
+					});
+				} finally {
+					busy.current = false;
+					if (alive.current) setStarting(false);
+				}
+			};
+			return {
+				jobId,
+				status,
+				starting,
+				connectionError,
+				start,
+				reconnect: () => setRetry((n) => n + 1)
+			};
+		}
+		//#endregion
+		//#region src/client/ExportControl.tsx
+		const dimension = (size, scale) => scale === 1 ? size : Math.max(16, Math.round(size * scale / 2) * 2);
+		function ExportPopover({ onClose, children }) {
+			const dialog = useDialog(onClose);
+			(0, react.useEffect)(() => {
+				const outside = (event) => {
+					if (event.target instanceof Element && !event.target.closest(".djp-expwrap")) onClose();
+				};
+				document.addEventListener("pointerdown", outside);
+				return () => document.removeEventListener("pointerdown", outside);
+			}, [onClose]);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "djp-pop djp-exppop",
+				ref: dialog,
+				role: "dialog",
+				"aria-label": "导出视频",
+				tabIndex: -1,
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
+					className: "djp-export-head",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: "导出视频" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "djp-iconbtn",
+						"aria-label": "关闭导出面板",
+						onClick: onClose,
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "close" })
+					})]
+				}), children]
+			});
+		}
+		const ExportControl = ({ t, sessionId }) => {
+			const job = useExportJob(sessionId);
+			const [open, setOpen] = (0, react.useState)(false);
+			const [settings, setSettings] = (0, react.useState)(false);
+			const [scale, setScale] = (0, react.useState)(1);
+			const [quality, setQuality] = (0, react.useState)("standard");
+			const busy = job.starting || job.status.status === "rendering" || Boolean(job.jobId && job.status.status === "idle");
+			const done = job.status.status === "done" && !settings;
+			const percent = job.status.status === "rendering" ? Math.max(0, Math.min(99, Math.round(job.status.progress.percent) || 0)) : 0;
+			const stage = job.starting ? "正在提交导出…" : job.status.status === "idle" ? "正在恢复任务…" : job.status.status === "rendering" && job.status.progress.stage === "preparing" ? "正在准备素材…" : job.status.status === "rendering" && job.status.progress.stage === "muxing" ? "正在合成声音…" : job.status.status === "rendering" && job.status.progress.stage === "encoding" ? "正在编码视频…" : "正在生成视频…";
+			const duration = timelineDurationInFrames(t) / t.meta.fps;
+			const error = job.status.status === "error" ? job.status.error ?? "导出失败，请重试" : "";
+			const errorSummary = /permission denied/i.test(error) ? "编码器无法写入文件，导出未完成。请检查输出目录权限或安全软件的拦截记录。" : error.length > 240 ? "导出未完成，请查看错误详情后重试。" : error;
+			const hasContent = t.videoTracks.some((tr) => tr.clips.length) || t.audioTracks.some((tr) => tr.clips.length) || t.overlays.length > 0;
+			const start = () => {
+				setSettings(false);
+				job.start(t, {
+					scale,
+					quality
+				});
+			};
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+				className: "djp-expwrap",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					className: "djp-export",
+					"aria-haspopup": "dialog",
+					"aria-expanded": open,
+					onClick: () => setOpen((value) => !value),
+					children: busy ? job.connectionError ? "连接中…" : "导出 " + percent + "%" : done ? "导出完成" : job.status.status === "error" ? "导出失败" : "导出"
+				}), open && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ExportPopover, {
+					onClose: () => setOpen(false),
+					children: busy ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "djp-export-status",
+							role: "status",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: job.connectionError ? "等待连接" : stage }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [percent, "%"] })]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("progress", {
+							className: "djp-export-progress",
+							max: 100,
+							value: percent,
+							"aria-label": "视频导出进度"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+							className: "djp-export-note",
+							children: job.connectionError || "可以收起此面板继续剪辑，本次导出使用开始时的画面与声音。"
+						}),
+						job.connectionError && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: "djp-btn",
+							onClick: job.reconnect,
+							children: "立即重连"
+						})
+					] }) : done && job.status.status === "done" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "djp-export-result",
+							role: "status",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: "视频已就绪" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [(job.status.result.sizeBytes / 1048576).toFixed(1), " MB · MP4"] })]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "djp-export-filename",
+							title: job.status.result.fileName,
+							children: job.status.result.fileName
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("a", {
+							className: "djp-export",
+							href: exportDownloadUrl + "?jobId=" + encodeURIComponent(job.jobId ?? ""),
+							download: job.status.result.fileName,
+							children: "下载视频"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: "djp-btn",
+							onClick: () => setSettings(true),
+							children: "重新导出当前版本"
+						})
+					] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						error && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+							className: "djp-export-error",
+							role: "alert",
+							children: errorSummary
+						}),
+						error && error !== errorSummary && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
+							className: "djp-export-details",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "错误详情" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", { children: error })]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
+							className: "djp-export-note",
+							children: [
+								"MP4 · ",
+								Math.floor(duration / 60),
+								":",
+								String(Math.floor(duration % 60)).padStart(2, "0"),
+								" · ",
+								t.meta.fps,
+								" fps"
+							]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+							className: "djp-field",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "分辨率" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
+								className: "djp-select",
+								value: scale,
+								onChange: (e) => setScale(Number(e.target.value)),
+								children: [
+									1,
+									.5,
+									2
+								].map((value) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("option", {
+									value,
+									children: [
+										value === 1 ? "原始" : value * 100 + "%",
+										"（",
+										dimension(t.meta.width, value),
+										"×",
+										dimension(t.meta.height, value),
+										"）"
+									]
+								}, value))
+							})]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+							className: "djp-field",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "质量" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+								className: "djp-select",
+								value: quality,
+								onChange: (e) => setQuality(e.target.value),
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+										value: "draft",
+										children: "草稿 · 文件更小"
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+										value: "standard",
+										children: "标准 · 推荐"
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+										value: "high",
+										children: "高画质 · 文件更大"
+									})
+								]
+							})]
+						}),
+						!hasContent && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("p", {
+							className: "djp-export-note",
+							children: "添加画面、音频或字幕后即可导出。"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: "djp-export",
+							disabled: !hasContent,
+							onClick: start,
+							children: job.status.status === "error" ? "重试导出" : "开始导出"
+						})
+					] })
+				})]
+			});
+		};
+		//#endregion
 		//#region src/client/HistoryDialog.tsx
-		const HistoryDialog = ({ onClose, onRestored }) => {
-			const dialogRef = useDialog(onClose);
+		const HistoryDialog = ({ onClose, onRestored, beforeRestore }) => {
+			const sessionId = useProjectSession();
+			const restoring = (0, react.useRef)(false);
+			const close = () => {
+				if (!restoring.current) onClose();
+			};
+			const dialogRef = useDialog(close);
 			const [snaps, setSnaps] = (0, react.useState)([]);
 			const [busy, setBusy] = (0, react.useState)(null);
 			const [err, setErr] = (0, react.useState)("");
+			const [loading, setLoading] = (0, react.useState)(true);
+			const [attempt, setAttempt] = (0, react.useState)(0);
 			(0, react.useEffect)(() => {
-				apiFetch(`/api/history`).then((r) => r.json()).then((d) => setSnaps(d.snapshots ?? [])).catch(() => setErr("历史列表加载失败"));
-			}, []);
+				const controller = new AbortController();
+				setLoading(true);
+				setErr("");
+				const timeout = setTimeout(() => controller.abort(), 15e3);
+				let disposed = false;
+				apiFetch(scopedPath(`/api/history`, sessionId), { signal: controller.signal }).then(async (response) => {
+					if (!response.ok) throw new Error(`HTTP ${response.status}`);
+					const data = await response.json();
+					if (!Array.isArray(data.snapshots)) throw new Error("历史列表格式异常");
+					if (!controller.signal.aborted) setSnaps(data.snapshots);
+				}).catch(() => {
+					if (!disposed) setErr("历史列表加载失败或超时，请重试。");
+				}).finally(() => {
+					clearTimeout(timeout);
+					if (!disposed) setLoading(false);
+				});
+				return () => {
+					disposed = true;
+					clearTimeout(timeout);
+					controller.abort();
+				};
+			}, [sessionId, attempt]);
 			const restore = async (id) => {
+				if (restoring.current) return;
+				restoring.current = true;
 				setBusy(id);
 				setErr("");
 				try {
-					const r = await apiFetch(`/api/history/${encodeURIComponent(id)}`, { method: "POST" });
+					await beforeRestore();
+					const r = await apiFetch(scopedPath(`/api/history/${encodeURIComponent(id)}`, sessionId), {
+						method: "POST",
+						signal: AbortSignal.timeout(15e3)
+					});
 					const d = await r.json().catch(() => ({}));
 					if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
 					onRestored();
 					onClose();
 				} catch (e) {
-					setErr(e instanceof Error ? e.message : String(e));
+					setErr(e instanceof Error && e.name === "TimeoutError" ? "恢复请求超时，结果尚未确认。请关闭此窗口检查当前时间线，再决定是否重试。" : e instanceof Error ? e.message : String(e));
 				} finally {
+					restoring.current = false;
 					setBusy(null);
 				}
 			};
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "djp-mask",
-				onClick: onClose,
+				onClick: close,
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "djp-dialog",
+					className: "djp-dialog djp-history",
 					ref: dialogRef,
 					role: "dialog",
 					"aria-modal": "true",
 					"aria-label": "版本历史",
+					"aria-busy": busy !== null,
 					tabIndex: -1,
 					onClick: (e) => e.stopPropagation(),
 					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							className: "djp-dialog-title",
-							children: "版本历史"
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "djp-history-head",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "djp-dialog-title",
+								children: "版本历史"
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "djp-btn",
+								disabled: busy !== null,
+								onClick: close,
+								children: "关闭"
+							})]
 						}),
-						err && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						err && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "djp-error",
-							children: err
+							role: "alert",
+							children: [
+								err,
+								" ",
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: "djp-btn",
+									disabled: loading || busy !== null,
+									onClick: () => setAttempt((value) => value + 1),
+									children: "重新加载"
+								})
+							]
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "djp-hist-list",
-							children: [snaps.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "djp-hint",
-								children: "还没有快照——AI 每次修改时间线都会自动存档。"
-							}), snaps.map((s) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "djp-hist-row",
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-									className: "djp-hist-meta",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "djp-hist-time",
-										children: new Date(s.at).toLocaleTimeString()
-									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "djp-hist-label",
-										title: s.label,
-										children: s.label || "(无标注)"
+							children: [
+								loading && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "djp-hint",
+									role: "status",
+									children: "正在加载历史记录…"
+								}),
+								!loading && !err && snaps.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "djp-hint",
+									children: "还没有快照——AI 每次修改时间线都会自动存档。"
+								}),
+								snaps.map((s) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "djp-hist-row",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+										className: "djp-hist-meta",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "djp-hist-label",
+											title: s.label,
+											children: s.label || "(无标注)"
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("time", {
+											className: "djp-hist-time",
+											dateTime: s.at,
+											children: new Date(s.at).toLocaleString(void 0, {
+												year: "numeric",
+												month: "2-digit",
+												day: "2-digit",
+												hour: "2-digit",
+												minute: "2-digit",
+												second: "2-digit"
+											})
+										})]
+									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										className: "djp-btn",
+										"aria-label": `恢复 ${s.label || "无标注版本"}，${new Date(s.at).toLocaleString()}`,
+										disabled: loading || busy !== null,
+										onClick: () => restore(s.id),
+										children: busy === s.id ? "恢复中…" : "恢复"
 									})]
-								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									className: "djp-btn",
-									disabled: busy !== null,
-									onClick: () => restore(s.id),
-									children: busy === s.id ? "恢复中…" : "恢复"
-								})]
-							}, s.id))]
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							className: "djp-dialog-actions",
-							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								className: "djp-btn",
-								onClick: onClose,
-								children: "关闭"
-							})
+								}, s.id))
+							]
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 							className: "djp-hint",
@@ -22586,53 +24085,8 @@ Check that all your Remotion packages are on the same version. If your dependenc
 		//#region src/client/Panel.tsx
 		const fmtSec = (s) => `${s.toFixed(1)}s`;
 		const clipId = () => "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-		const ops = (mutate) => ({
-			addClip: () => mutate((t) => ({
-				...t,
-				videoTracks: t.videoTracks.map((tr, i) => i === 0 ? {
-					...tr,
-					clips: [...tr.clips, {
-						id: clipId(),
-						type: "video",
-						src: tr.clips[tr.clips.length - 1]?.src ?? "a.mp4",
-						inPoint: 0,
-						clipDuration: 3,
-						transition: "none",
-						volume: 1,
-						speed: 1
-					}]
-				} : tr)
-			})),
-			addPip: () => mutate((t) => {
-				const src = t.videoTracks[0]?.clips[t.videoTracks[0].clips.length - 1]?.src ?? "a.mp4";
-				const clip = {
-					id: clipId(),
-					type: "video",
-					src,
-					inPoint: 0,
-					clipDuration: 3,
-					transition: "none",
-					volume: 1,
-					speed: 1,
-					atSeconds: 0
-				};
-				if (t.videoTracks[1]) return {
-					...t,
-					videoTracks: t.videoTracks.map((tr, i) => i === 1 ? {
-						...tr,
-						clips: [...tr.clips, clip]
-					} : tr)
-				};
-				return {
-					...t,
-					videoTracks: [...t.videoTracks, {
-						id: "v2",
-						name: "画中画",
-						clips: [clip]
-					}]
-				};
-			}),
-			addAudio: (src, duration = 10) => mutate((t) => {
+		const ops = (mutate, currentFrame) => ({
+			addAudio: (src, duration, atSeconds) => mutate((t) => {
 				const clip = {
 					id: clipId(),
 					src,
@@ -22640,7 +24094,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					duration,
 					volume: 1,
 					speed: 1,
-					atSeconds: 0
+					atSeconds
 				};
 				if (t.audioTracks[0]) return {
 					...t,
@@ -22684,13 +24138,13 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					} : c)
 				}))
 			})),
-			updateAudioTrack: (id, patch) => mutate((t) => ({
+			updateAudioTrack: (id, patch, group) => mutate((t) => ({
 				...t,
 				audioTracks: t.audioTracks.map((tr) => tr.id === id ? {
 					...tr,
 					...patch
 				} : tr)
-			})),
+			}), group),
 			updateAudioClip: (id, patch) => mutate((t) => ({
 				...t,
 				audioTracks: t.audioTracks.map((tr) => ({
@@ -22710,8 +24164,8 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					let start = 0;
 					if (ti === 0) for (let i = 0; i < idx; i++) start += tr.clips[i].clipDuration;
 					else start = clip.atSeconds ?? 0;
-					const off = atSeconds - start;
-					if (!(off > .05) || off >= clip.clipDuration - .05) return t;
+					const off = splitOffset(start, clip.clipDuration, atSeconds, t.meta.fps);
+					if (off === null) return t;
 					const left = {
 						...clip,
 						clipDuration: off
@@ -22739,8 +24193,8 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					const idx = tr.clips.findIndex((c) => c.id === id);
 					if (idx === -1) continue;
 					const clip = tr.clips[idx];
-					const off = atSeconds - clip.atSeconds;
-					if (!(off > .05) || off >= clip.duration - .05) return t;
+					const off = splitOffset(clip.atSeconds, clip.duration, atSeconds, t.meta.fps);
+					if (off === null) return t;
 					const left = {
 						...clip,
 						duration: off
@@ -22782,8 +24236,8 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				...t,
 				overlays: [...t.overlays, {
 					text: "新字幕",
-					startSeconds: 0,
-					endSeconds: 3,
+					startSeconds: currentFrame() / t.meta.fps,
+					endSeconds: currentFrame() / t.meta.fps + 3,
 					position: "bottom",
 					fontSize: 48,
 					color: "#ffffff"
@@ -22793,6 +24247,28 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				...t,
 				overlays: t.overlays.filter((_, i) => i !== index)
 			})),
+			splitOverlay: (index, atSeconds) => mutate((t) => {
+				const overlay = t.overlays[index];
+				if (!overlay) return t;
+				const offset = splitOffset(overlay.startSeconds, overlay.endSeconds - overlay.startSeconds, atSeconds, t.meta.fps);
+				if (offset === null) return t;
+				const at = overlay.startSeconds + offset;
+				const left = {
+					...overlay,
+					endSeconds: at
+				};
+				const right = {
+					...overlay,
+					startSeconds: at,
+					animations: shiftAnimations(overlay.animations, at - overlay.startSeconds)
+				};
+				const overlays = [...t.overlays];
+				overlays.splice(index, 1, left, right);
+				return {
+					...t,
+					overlays
+				};
+			}),
 			updateOverlay: (index, patch) => mutate((t) => ({
 				...t,
 				overlays: t.overlays.map((o, i) => i === index ? {
@@ -22800,22 +24276,6 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					...patch
 				} : o)
 			}))
-		});
-		const NumberField = ({ label, value, step = .5, min = 0, onCommit }) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
-			className: "djp-field",
-			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: label }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-				type: "number",
-				defaultValue: value,
-				step,
-				min,
-				onBlur: (e) => {
-					const v = Number(e.target.value);
-					if (Number.isFinite(v) && v >= min && v !== value) onCommit(v);
-				},
-				onKeyDown: (e) => {
-					if (e.key === "Enter") e.target.blur();
-				}
-			}, value)]
 		});
 		const FILTER_PRESETS = [
 			{
@@ -22916,10 +24376,21 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				children: p.label
 			}, p.label))]
 		});
-		const Panel = ({ sessionId }) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(EditorPanel, { sessionId }, sessionId ?? "default");
+		const Panel = ({ sessionId }) => {
+			const player = (0, react.useMemo)(createPlayerBus, [sessionId]);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectSession.Provider, {
+				value: sessionId,
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PlayerBusContext.Provider, {
+					value: player,
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(EditorPanel, { sessionId }, sessionId ?? "default")
+				})
+			});
+		};
 		const EditorPanel = ({ sessionId }) => {
+			const playerBus = usePlayerBus();
+			const { seekToSeconds } = playerBus;
 			const rootRef = (0, react.useRef)(null);
-			const { timeline, mutate, reload, saveState, syncError, retrySave } = useTimelineSync(sessionId, rootRef);
+			const { timeline, mutate, reload, saveState, syncError, retrySave, hasConflict, resolveConflict, saveBeforeRestore } = useTimelineSync(sessionId, rootRef);
 			const hist = useHistory(timeline, mutate);
 			const prevSession = (0, react.useRef)(sessionId);
 			(0, react.useEffect)(() => {
@@ -22929,14 +24400,23 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					reload();
 				}
 			}, [sessionId]);
-			const o = ops(hist.commit);
+			const o = ops(hist.commit, () => playerBus.ref?.getCurrentFrame() ?? 0);
 			const [canvasOpen, setCanvasOpen] = (0, react.useState)(false);
 			const [histOpen, setHistOpen] = (0, react.useState)(false);
+			const [shortcutsOpen, setShortcutsOpen] = (0, react.useState)(false);
 			const [selected, setSelected] = (0, react.useState)(null);
 			const toggleItem = (id) => setSelected((current) => current === id ? null : id);
-			const [tab, setTab] = (0, react.useState)("clips");
+			const [trackMode, setTrackMode] = (0, react.useState)(() => readViewPreference(sessionId, "mode", "main", (value) => [
+				"main",
+				"audio",
+				"pip",
+				"subs"
+			].includes(value)));
+			(0, react.useEffect)(() => {
+				saveViewPreference(sessionId, "mode", trackMode);
+			}, [sessionId, trackMode]);
+			const [tab, setTab] = (0, react.useState)(trackMode === "main" ? "clips" : trackMode);
 			const [libraryOpen, setLibraryOpen] = (0, react.useState)(false);
-			const [trackMode, setTrackMode] = (0, react.useState)("main");
 			const switchTrackMode = (mode) => {
 				setTrackMode(mode);
 				setTab(mode === "main" ? "clips" : mode);
@@ -22944,6 +24424,8 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				setLibraryOpen(false);
 			};
 			const [uploadError, setUploadError] = (0, react.useState)("");
+			const [uploadingAudio, setUploadingAudio] = (0, react.useState)("");
+			const audioUploadPending = (0, react.useRef)(false);
 			const [fonts, setFonts] = (0, react.useState)([]);
 			const audioFileRef = (0, react.useRef)(null);
 			const playheadRef = (0, react.useRef)(0);
@@ -22960,7 +24442,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			(0, react.useEffect)(() => {
 				const onKey = (e) => {
 					const el = e.target;
-					if (!el || !rootRef.current?.contains(el) || canvasOpen || histOpen) return;
+					if (!el || !rootRef.current?.contains(el) || canvasOpen || histOpen || shortcutsOpen) return;
 					if (el.closest("button, a, [role=\"dialog\"]")) return;
 					if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
 					if (e.ctrlKey || e.metaKey) {
@@ -22993,7 +24475,10 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				hist.redo,
 				timeline?.meta.fps,
 				canvasOpen,
-				histOpen
+				histOpen,
+				shortcutsOpen,
+				playerBus,
+				seekToSeconds
 			]);
 			if (!timeline) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "djp-root",
@@ -23072,12 +24557,12 @@ Check that all your Remotion packages are on the same version. If your dependenc
 				}
 			];
 			const splitMainAtPlayhead = () => {
-				const at = Math.round(playheadRef.current * 100) / 100;
+				const at = playheadRef.current;
 				for (const tr0 of [t.videoTracks[0]]) {
 					if (!tr0) return;
 					let acc = 0;
 					for (const c of tr0.clips) {
-						if (at > acc + .05 && at < acc + c.clipDuration - .05) {
+						if (splitOffset(acc, c.clipDuration, at, t.meta.fps) !== null) {
 							o.splitClip(c.id, at);
 							return;
 						}
@@ -23094,42 +24579,75 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					...tr,
 					clips: tr.clips.map((c) => ({
 						...c,
-						src: assetUrl(c.src)
+						src: assetUrl(c.src, sessionId)
 					}))
 				})),
 				audioTracks: t.audioTracks.map((tr) => ({
 					...tr,
 					clips: tr.clips.map((c) => ({
 						...c,
-						src: assetUrl(c.src)
+						src: assetUrl(c.src, sessionId)
 					}))
 				}))
 			};
-			const addAssetClip = (a) => hist.commit((cur) => ({
-				...cur,
-				videoTracks: cur.videoTracks.map((tr, i) => i === 0 ? {
-					...tr,
-					clips: [...tr.clips, {
-						id: clipId(),
-						type: a.type === "image" ? "image" : "video",
-						src: a.name,
-						inPoint: 0,
-						clipDuration: a.type === "image" ? 3 : a.duration ?? 3,
-						transition: "none",
-						volume: 1,
-						speed: 1
-					}]
-				} : tr)
-			}));
-			const setBgm = (name) => hist.commit((cur) => {
+			const openPipAssets = () => {
+				setTrackMode("pip");
+				setTab("assets");
+				setLibraryOpen(true);
+			};
+			const addAssetClip = (asset) => hist.commit((cur) => {
 				const clip = {
 					id: clipId(),
-					src: name,
+					type: asset.type === "image" ? "image" : "video",
+					src: asset.name,
 					inPoint: 0,
-					duration: 10,
+					clipDuration: asset.type === "image" ? 3 : asset.duration != null && asset.duration > 0 ? asset.duration : 3,
+					transition: "none",
+					volume: 1,
+					speed: 1
+				};
+				const tracks = cur.videoTracks.length ? cur.videoTracks : [{
+					id: "v1",
+					name: "主轨道",
+					clips: []
+				}];
+				if (trackMode === "pip") {
+					clip.atSeconds = (playerBus.ref?.getCurrentFrame() ?? 0) / cur.meta.fps;
+					clip.box = {
+						x: .65,
+						y: .65,
+						w: .3,
+						h: .3
+					};
+					return {
+						...cur,
+						videoTracks: tracks[1] ? tracks.map((track, i) => i === 1 ? {
+							...track,
+							clips: [...track.clips, clip]
+						} : track) : [...tracks, {
+							id: "v2",
+							name: "画中画",
+							clips: [clip]
+						}]
+					};
+				}
+				return {
+					...cur,
+					videoTracks: tracks.map((track, i) => i === 0 ? {
+						...track,
+						clips: [...track.clips, clip]
+					} : track)
+				};
+			});
+			const addAssetAudio = (asset) => hist.commit((cur) => {
+				const clip = {
+					id: clipId(),
+					src: asset.name,
+					inPoint: 0,
+					duration: asset.duration != null && asset.duration > 0 ? asset.duration : 10,
 					volume: 1,
 					speed: 1,
-					atSeconds: 0
+					atSeconds: (playerBus.ref?.getCurrentFrame() ?? 0) / cur.meta.fps
 				};
 				if (cur.audioTracks[0]) return {
 					...cur,
@@ -23180,16 +24698,24 @@ Check that all your Remotion packages are on the same version. If your dependenc
 								sessionId,
 								meta: t.meta
 							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(MoreTools, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								className: "djp-btn",
-								disabled: saveState !== "saved",
-								onClick: () => setHistOpen(true),
-								children: "版本历史"
-							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								className: "djp-btn",
-								onClick: () => setLibraryOpen(true),
-								children: "片段列表"
-							})] }),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(MoreTools, { children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: "djp-btn",
+									disabled: saveState !== "saved",
+									onClick: () => setHistOpen(true),
+									children: "版本历史"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: "djp-btn",
+									onClick: () => setLibraryOpen(true),
+									children: "片段列表"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: "djp-btn",
+									onClick: () => setShortcutsOpen(true),
+									children: "操作与快捷键"
+								})
+							] }),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 								className: "djp-resolution",
 								title: "画布设置",
@@ -23200,18 +24726,34 @@ Check that all your Remotion packages are on the same version. If your dependenc
 									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "⌄" })
 								]
 							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ExportControl, { t })
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ExportControl, {
+								t,
+								sessionId
+							})
 						]
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "djp-save-status",
 						role: "status",
 						"aria-live": "polite",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: saveState === "saving" ? "正在保存…" : saveState === "pending" ? "有待保存的修改" : saveState === "error" ? "保存失败，修改已保留" : "已保存" }), saveState === "error" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: saveState === "saving" ? "正在保存…" : saveState === "pending" ? "有待保存的修改" : saveState === "error" ? "保存失败，修改已保留" : "已保存" }), saveState === "error" && !hasConflict && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 							className: "djp-btn",
 							onClick: () => void retrySave(),
 							children: "重试保存"
 						})]
+					}),
+					hasConflict && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "djp-conflict",
+						role: "alert",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "项目已有其他修改。本地草稿已保留，请选择要保存的版本。" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: "djp-btn",
+							onClick: () => void resolveConflict("local"),
+							children: "用本地覆盖"
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: "djp-btn",
+							onClick: () => void resolveConflict("remote"),
+							children: "放弃本地，采用最新"
+						})] })]
 					}),
 					syncError && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "djp-notice",
@@ -23221,25 +24763,13 @@ Check that all your Remotion packages are on the same version. If your dependenc
 					!hasContent ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "djp-empty",
 						children: "从下方「素材」添加画面，开始剪辑"
-					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "djp-stage",
-						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Player, {
-							ref: (r) => {
-								playerBus.ref = r;
-							},
-							component: PreviewVideo,
-							inputProps: { timeline: previewTimeline },
-							durationInFrames,
-							fps: t.meta.fps,
-							compositionWidth: t.meta.width,
-							compositionHeight: t.meta.height,
-							controls: false,
-							acknowledgeRemotionLicense: true,
-							style: {
-								width: "100%",
-								height: "100%"
-							}
-						}, `${t.meta.fps}-${t.meta.width}-${t.meta.height}`)
+					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PreviewStage, {
+						timeline: previewTimeline,
+						durationInFrames,
+						onOpenAssets: () => {
+							setTab("assets");
+							setLibraryOpen(true);
+						}
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(TransportBar, {
 						fps: t.meta.fps,
@@ -23264,7 +24794,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "djp-collection-head",
 							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: {
-								assets: "素材库",
+								assets: trackMode === "pip" ? "选择画中画素材" : "素材库",
 								clips: "剪辑",
 								pip: "画中画",
 								audio: "音频",
@@ -23279,8 +24809,10 @@ Check that all your Remotion packages are on the same version. If your dependenc
 							className: "djp-tabwrap",
 							children: [
 								tab === "assets" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AssetsSection, {
+									videoTarget: trackMode === "pip" ? "画中画" : "主轨道",
 									onAddClip: addAssetClip,
-									onSetBgm: setBgm
+									onAddAudio: addAssetAudio,
+									usedSources: [...t.videoTracks, ...t.audioTracks].flatMap((track) => track.clips.map((clip) => clip.src))
 								}),
 								tab === "clips" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 									className: "djp-section",
@@ -23302,13 +24834,17 @@ Check that all your Remotion packages are on the same version. If your dependenc
 													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 														className: "djp-btn",
 														title: "加画中画叠加轨",
-														onClick: o.addPip,
+														onClick: openPipAssets,
 														children: "画中画"
 													}),
 													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 														className: "djp-add",
 														title: "添加片段",
-														onClick: o.addClip,
+														onClick: () => {
+															setTrackMode("main");
+															setTab("assets");
+															setLibraryOpen(true);
+														},
 														children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" })
 													})
 												]
@@ -23316,7 +24852,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 										}),
 										mainClips.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 											className: "djp-hint",
-											children: "主轨道空"
+											children: "点击「+」选择视频或图片，添加到主轨道"
 										}),
 										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 											onDragOver,
@@ -23368,17 +24904,20 @@ Check that all your Remotion packages are on the same version. If your dependenc
 															/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
 																label: "时长",
 																value: c.clipDuration,
-																min: .1,
+																min: 1 / t.meta.fps,
+																step: 1 / t.meta.fps,
 																onCommit: (v) => o.updateClip(c.id, { clipDuration: v })
 															}),
 															/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
 																label: "音量",
+																max: 1,
 																value: c.volume,
 																step: .1,
 																onCommit: (v) => o.updateClip(c.id, { volume: Math.min(1, v) })
 															}),
 															/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
 																label: "速度",
+																max: 10,
 																value: c.speed ?? 1,
 																step: .25,
 																min: .1,
@@ -23407,81 +24946,118 @@ Check that all your Remotion packages are on the same version. If your dependenc
 											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "画中画" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 												className: "djp-add",
 												title: "添加画中画",
-												onClick: o.addPip,
+												onClick: openPipAssets,
 												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "plus" })
 											})]
 										}),
 										pipClips.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 											className: "djp-hint",
-											children: "无叠加片段——「片段」区点「画中画」或让 AI 加"
+											children: "点击「+」选择视频或图片，添加到当前播放位置"
 										}),
 										pipClips.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(InspectorRow, {
 											title: c.src,
 											summary: fmtSec(c.clipDuration),
 											open: selected === c.id,
 											onToggle: () => toggleItem(c.id),
-											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-												className: "djp-fields",
-												children: [
-													/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
-														className: "djp-select",
-														value: c.box ? JSON.stringify(c.box) : "",
-														onChange: (e) => {
-															const v = e.target.value;
-															if (!v) {
-																o.updateClip(c.id, { box: void 0 });
-																return;
-															}
-															const p = BOX_PRESETS.find((x) => JSON.stringify(x.box) === v);
-															if (p) o.updateClip(c.id, { box: p.box });
-														},
-														children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-															value: "",
-															children: "默认（右下 30%）"
-														}), BOX_PRESETS.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-															value: JSON.stringify(p.box),
-															children: p.label
-														}, p.label))]
-													}),
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
-														label: "从",
-														value: c.atSeconds ?? 0,
-														onCommit: (v) => o.updateClip(c.id, { atSeconds: Math.max(0, v) })
-													}),
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
-														label: "时长",
-														value: c.clipDuration,
-														min: .1,
-														onCommit: (v) => o.updateClip(c.id, { clipDuration: v })
-													}),
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
-														label: "速度",
-														value: c.speed ?? 1,
-														step: .25,
-														min: .1,
-														onCommit: (v) => o.updateClip(c.id, { speed: Math.min(10, Math.max(.1, v)) })
-													}),
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+											children: [
+												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+													className: "djp-fields",
+													children: [
+														/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+															className: "djp-select",
+															"aria-label": "画中画布局",
+															value: c.box ? JSON.stringify(c.box) : "",
+															onChange: (e) => {
+																const v = e.target.value;
+																if (!v) {
+																	o.updateClip(c.id, { box: void 0 });
+																	return;
+																}
+																const p = BOX_PRESETS.find((x) => JSON.stringify(x.box) === v);
+																if (p) o.updateClip(c.id, { box: p.box });
+															},
+															children: [
+																/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+																	value: "",
+																	children: "默认（右下 30%）"
+																}),
+																c.box && !BOX_PRESETS.some((preset) => JSON.stringify(preset.box) === JSON.stringify(c.box)) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+																	value: JSON.stringify(c.box),
+																	disabled: true,
+																	children: "自定义位置"
+																}),
+																BOX_PRESETS.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+																	value: JSON.stringify(p.box),
+																	children: p.label
+																}, p.label))
+															]
+														}),
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+															label: "从",
+															value: c.atSeconds ?? 0,
+															onCommit: (v) => o.updateClip(c.id, { atSeconds: Math.max(0, v) })
+														}),
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+															label: "时长",
+															value: c.clipDuration,
+															min: 1 / t.meta.fps,
+															step: 1 / t.meta.fps,
+															onCommit: (v) => o.updateClip(c.id, { clipDuration: v })
+														}),
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+															label: "速度",
+															value: c.speed ?? 1,
+															max: 10,
+															step: .25,
+															min: .1,
+															onCommit: (v) => o.updateClip(c.id, { speed: Math.min(10, Math.max(.1, v)) })
+														}),
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+															className: "djp-btn",
+															title: "在播放头处分割",
+															onClick: () => o.splitClip(c.id, playheadRef.current),
+															children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "split" })
+														}),
+														/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+															className: "djp-del",
+															title: "删除画中画",
+															onClick: () => o.removeClip(c.id),
+															children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "close" })
+														})
+													]
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(AdvancedSettings, {
+													label: "位置与尺寸",
+													children: [[
+														["x", "水平位置 %"],
+														["y", "垂直位置 %"],
+														["w", "宽度 %"],
+														["h", "高度 %"]
+													].map(([key, label]) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
+														label,
+														value: Math.round(clipBox(c)[key] * 1e4) / 100,
+														step: 1,
+														min: key === "w" || key === "h" ? 1 : 0,
+														max: 100,
+														onCommit: (value) => o.updateClip(c.id, { box: {
+															...clipBox(c),
+															[key]: value / 100
+														} })
+													}, key)), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 														className: "djp-btn",
-														title: "在播放头处分割",
-														onClick: () => o.splitClip(c.id, Math.round(playheadRef.current * 100) / 100),
-														children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "split" })
-													}),
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-														className: "djp-del",
-														title: "删除画中画",
-														onClick: () => o.removeClip(c.id),
-														children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "close" })
-													})
-												]
-											}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(AdvancedSettings, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(FilterSelect, {
-												value: c.filter,
-												onCommit: (f) => o.updateClip(c.id, { filter: f })
-											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnimSelect, {
-												duration: c.clipDuration,
-												anims: c.animations,
-												onCommit: (anims) => o.updateClip(c.id, { animations: anims })
-											})] })]
+														onClick: () => o.updateClip(c.id, { box: void 0 }),
+														children: "恢复默认位置"
+													})]
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)(AdvancedSettings, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(FilterSelect, {
+													value: c.filter,
+													onCommit: (f) => o.updateClip(c.id, { filter: f })
+												}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnimSelect, {
+													duration: c.clipDuration,
+													anims: c.animations,
+													onCommit: (anims) => o.updateClip(c.id, { animations: anims })
+												})] })
+											]
 										}, c.id))
 									]
 								}),
@@ -23503,21 +25079,30 @@ Check that all your Remotion packages are on the same version. If your dependenc
 													style: { display: "none" },
 													onChange: async (e) => {
 														const f = e.target.files?.[0];
-														if (!f) return;
+														if (!f || audioUploadPending.current) return;
+														audioUploadPending.current = true;
+														setUploadingAudio(f.name);
+														setUploadError("");
+														const insertionSeconds = (playerBus.ref?.getCurrentFrame() ?? 0) / t.meta.fps;
 														try {
-															const up = await uploadAsset(f);
-															o.addAudio(up.name, up.duration ?? 10);
+															const up = await uploadAsset(f, sessionId);
+															o.addAudio(up.name, up.duration ?? 10, insertionSeconds);
 															setUploadError("");
 														} catch (error) {
 															setUploadError(error instanceof Error ? error.message : "上传失败，请重试");
+														} finally {
+															audioUploadPending.current = false;
+															setUploadingAudio("");
+															if (audioFileRef.current) audioFileRef.current.value = "";
 														}
-														if (audioFileRef.current) audioFileRef.current.value = "";
 													}
 												}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 													className: "djp-btn",
+													disabled: !!uploadingAudio,
+													"aria-busy": !!uploadingAudio,
 													title: "上传音频并加入音频轨",
 													onClick: () => audioFileRef.current?.click(),
-													children: "上传"
+													children: uploadingAudio ? "上传中…" : "上传"
 												})]
 											})]
 										}),
@@ -23526,9 +25111,18 @@ Check that all your Remotion packages are on the same version. If your dependenc
 											role: "alert",
 											children: uploadError
 										}),
+										uploadingAudio && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "djp-hint",
+											role: "status",
+											children: [
+												"正在上传 ",
+												uploadingAudio,
+												"，完成后加入音频轨"
+											]
+										}),
 										t.audioTracks.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 											className: "djp-hint",
-											children: "无音频轨——素材库「♪配乐」、上方「上传」或让 AI 加"
+											children: "从素材库添加音频，或点击「上传」导入"
 										}),
 										t.audioTracks.map((tr) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 											className: "djp-audio-group",
@@ -23549,14 +25143,9 @@ Check that all your Remotion packages are on the same version. If your dependenc
 														className: "djp-track-settings",
 														children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "轨道音量" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
 															className: "djp-field",
-															children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "轨音量" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-																type: "range",
-																min: 0,
-																max: 1,
-																step: .05,
+															children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "轨音量" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(VolumeSlider, {
 																value: tr.volume,
-																onChange: (e) => o.updateAudioTrack(tr.id, { volume: Number(e.target.value) }),
-																style: { width: 70 }
+																onChange: (volume, group) => o.updateAudioTrack(tr.id, { volume }, group)
 															})]
 														})]
 													})
@@ -23577,18 +25166,21 @@ Check that all your Remotion packages are on the same version. If your dependenc
 														/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
 															label: "时长",
 															value: c.duration,
-															min: .1,
+															min: 1 / t.meta.fps,
+															step: 1 / t.meta.fps,
 															onCommit: (v) => o.updateAudioClip(c.id, { duration: v })
 														}),
 														/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
 															label: "音量",
 															value: c.volume,
+															max: 1,
 															step: .1,
 															onCommit: (v) => o.updateAudioClip(c.id, { volume: Math.min(1, Math.max(0, v)) })
 														}),
 														/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
 															label: "速度",
 															value: c.speed ?? 1,
+															max: 10,
 															step: .25,
 															min: .1,
 															onCommit: (v) => o.updateAudioClip(c.id, { speed: Math.min(10, Math.max(.1, v)) })
@@ -23596,7 +25188,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 														/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 															className: "djp-btn",
 															title: "在播放头处分割",
-															onClick: () => o.splitClip(c.id, Math.round(playheadRef.current * 100) / 100),
+															onClick: () => o.splitClip(c.id, playheadRef.current),
 															children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Icon, { name: "split" })
 														}),
 														/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
@@ -23636,17 +25228,10 @@ Check that all your Remotion packages are on the same version. If your dependenc
 											children: [
 												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 													className: "djp-card-head",
-													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-														className: "djp-sub-text",
-														type: "text",
-														defaultValue: ov.text,
-														onBlur: (e) => {
-															if (e.target.value !== ov.text) o.updateOverlay(i, { text: e.target.value });
-														},
-														onKeyDown: (e) => {
-															if (e.key === "Enter") e.target.blur();
-														}
-													}, ov.text + i), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SubtitleTextField, {
+														value: ov.text,
+														onCommit: (text) => o.updateOverlay(i, { text })
+													}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 														className: "djp-del",
 														title: "删除字幕",
 														onClick: () => o.removeOverlay(i),
@@ -23658,11 +25243,14 @@ Check that all your Remotion packages are on the same version. If your dependenc
 													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
 														label: "从",
 														value: ov.startSeconds,
+														max: ov.endSeconds - 1 / t.meta.fps,
+														step: 1 / t.meta.fps,
 														onCommit: (v) => o.updateOverlay(i, { startSeconds: v })
 													}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(NumberField, {
 														label: "到",
 														value: ov.endSeconds,
-														min: .1,
+														min: ov.startSeconds + 1 / t.meta.fps,
+														step: 1 / t.meta.fps,
 														onCommit: (v) => o.updateOverlay(i, { endSeconds: v })
 													})]
 												}),
@@ -23761,7 +25349,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 								setLibraryOpen(true);
 							},
 							onAdd: () => {
-								setTab(trackMode === "main" ? "assets" : trackMode);
+								setTab(trackMode === "main" || trackMode === "pip" ? "assets" : trackMode);
 								setLibraryOpen(true);
 							},
 							onSeekClip: (start, lane, id) => {
@@ -23824,6 +25412,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 							}, key);
 						})
 					}),
+					shortcutsOpen && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ShortcutsDialog, { onClose: () => setShortcutsOpen(false) }),
 					canvasOpen && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(CanvasDialog, {
 						t,
 						onApply: (meta) => hist.commit((cur) => ({
@@ -23836,6 +25425,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 						onClose: () => setCanvasOpen(false)
 					}),
 					histOpen && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HistoryDialog, {
+						beforeRestore: saveBeforeRestore,
 						onClose: () => setHistOpen(false),
 						onRestored: () => {
 							hist.clear();
@@ -23889,6 +25479,11 @@ Check that all your Remotion packages are on the same version. If your dependenc
 .djp-add:hover { background: var(--dsw-alias-interactive-bg-hover); }
 
 /* ---- 舞台与空态 ---- */
+.djp-stage { position:relative; }
+.djp-preview-error { position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:20px;background:#131313;color:#eee;text-align:center;font-size:12px;overflow:auto; }
+.djp-preview-error > span { overflow-wrap:anywhere;max-width:100%; }
+.djp-preview-error small { color:#aaa;line-height:1.5; }
+.djp-preview-error > div { display:flex;gap:8px;flex-wrap:wrap;justify-content:center; }
 .djp-stage { background: #090b10; overflow: hidden; flex: 0 0 auto; height: clamp(140px, 30vh, 300px); border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
 .djp-empty { padding: 36px 12px; text-align: center; color: var(--dsw-alias-label-tertiary); background: var(--dsw-alias-bg-layer-2); flex: 0 0 auto; }
 
@@ -23936,15 +25531,27 @@ Check that all your Remotion packages are on the same version. If your dependenc
 .djp-error { color: var(--dsw-alias-state-error-primary); font-size: 12px; margin-top: 6px; }
 
 /* ---- 版本历史 ---- */
+.djp-history-head { display:flex;align-items:center;justify-content:space-between;gap:12px; }
+.djp-history-head > button { flex-shrink:0; }
+.djp-history > :not(.djp-hist-list) { flex-shrink:0; }
 .djp-hist-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow: auto; margin-top: 8px; }
-.djp-hist-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 9px; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: 9px; }
-.djp-hist-meta { display: flex; gap: 8px; min-width: 0; align-items: center; }
+.djp-hist-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--dsw-alias-border-l4); }
+.djp-hist-row:last-child { border-bottom: 0; }
+.djp-hist-row > button { flex-shrink: 0; }
+.djp-hist-meta { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .djp-hist-time { font-size: 11px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
 .djp-hist-label { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- 对话框 ---- */
 .djp-mask { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; }
 .djp-dialog { width: 300px; background: var(--dsw-alias-bg-layer-1); border: 0.5px solid var(--dsw-alias-border-l3); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.djp-shortcuts-head { display:flex;align-items:center;justify-content:space-between;gap:12px; }
+.djp-shortcuts > * { flex-shrink:0; }
+.djp-shortcuts p { margin:0;font-size:12px;line-height:1.65;color:var(--dsw-alias-label-secondary); }
+.djp-shortcuts dl { margin:4px 0; }
+.djp-shortcuts dl > div { display:grid;grid-template-columns:minmax(100px,1fr) 1.3fr;gap:12px;padding:9px 0;border-bottom:1px solid var(--djp-line);font-size:12px; }
+.djp-shortcuts dt,.djp-shortcuts dd { margin:0; }
+.djp-shortcuts kbd { font:inherit;font-variant-numeric:tabular-nums; }
 .djp-dialog-title { font-weight: 600; font-size: 13px; }
 .djp-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .djp-preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
@@ -23953,18 +25560,44 @@ Check that all your Remotion packages are on the same version. If your dependenc
 .djp-preset.djp-on { border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-overlay); }
 
 /* ---- 素材库 ---- */
-.djp-assets { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
-.djp-asset { position:relative;border:1px solid var(--djp-line);border-radius:12px;overflow:hidden;background:var(--djp-surface);box-shadow:0 2px 6px rgb(0 0 0 / 4%);transition:border-color .16s,box-shadow .16s; }
-.djp-asset-thumb { width: 100%; aspect-ratio: 16/10; object-fit: cover; display: block; background: #000; }
-.djp-asset-audio { display: flex; align-items: center; justify-content: center; font-size: 22px; color: var(--dsw-alias-label-tertiary); }
-.djp-asset-name { font-size:11px;color:var(--dsw-alias-label-secondary);padding:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
-.djp-asset-acts { position: absolute; top: 4px; right: 4px; display: flex; gap: 4px; }
-.djp-asset:hover .djp-asset-acts, .djp-asset:focus-within .djp-asset-acts { display: flex; }
-.djp-asset-acts button { display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:26px;border:1px solid rgb(255 255 255 / 14%);border-radius:7px;padding:3px 7px;font-size:11px;cursor:pointer;background:rgb(12 17 25 / 82%);backdrop-filter:blur(8px);color:#fff; }
+.djp-asset-browser { min-width:0; }
+.djp-asset-toolbar { display:flex;align-items:center;gap:8px; }
+.djp-asset-search { display:flex;align-items:center;gap:8px;flex:1;min-width:0;height:32px;padding:0 10px;background:var(--dsw-alias-bg-layer-1);border-radius:6px;color:var(--dsw-alias-label-tertiary); }
+.djp-asset-search input { width:100%;min-width:0;border:0;background:transparent;color:var(--dsw-alias-label-primary);font-size:12px; }
+.djp-asset-search input::placeholder { color:var(--dsw-alias-label-tertiary); }
+.djp-asset-search:focus-within { outline:1px solid var(--dsw-alias-brand-primary); }
+.djp-asset-search input:focus-visible { outline:0; }
+.djp-asset-filters { display:flex;align-items:center;gap:4px;padding:8px 0; }
+.djp-asset-filters button { border:0;background:transparent;color:var(--dsw-alias-label-tertiary);font-size:11px;padding:5px 10px;border-radius:4px;cursor:pointer; }
+.djp-asset-filters button[aria-pressed=true] { color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover); }
+.djp-asset-filters > span { margin-left:auto;color:var(--dsw-alias-label-tertiary);font-size:10px;white-space:nowrap; }
+.djp-asset-browser > .djp-hint { padding:4px 0 8px;overflow-wrap:anywhere; }
+.djp-assets { display:flex;flex-direction:column;padding:0;margin:0;list-style:none; }
+.djp-asset { min-width:0;border-bottom:1px solid var(--djp-line); }
+.djp-asset:last-child { border-bottom:0; }
+.djp-asset-row { display:flex;align-items:center;gap:10px;padding:9px 0;min-width:0; }
+.djp-asset-thumb { width:52px;height:38px;flex:none;object-fit:cover;display:flex;align-items:center;justify-content:center;border-radius:4px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-tertiary); }
+.djp-asset-audio { color:#46aaa9;background:color-mix(in srgb,#46aaa9 10%,var(--dsw-alias-bg-layer-1)); }
+.djp-asset-info { flex:1;min-width:0; }
+.djp-asset-name { font-size:12px;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+.djp-asset-meta { display:flex;align-items:center;gap:8px;margin-top:4px;font-size:10px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums; }
+.djp-asset-used { color:var(--dsw-alias-label-secondary); }
+.djp-asset-acts { display:flex;gap:2px;flex:none; }
+.djp-asset-acts .djp-iconbtn { width:32px;height:32px; }
+.djp-asset-acts [aria-expanded=true] { background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary); }
+.djp-asset-details { padding:2px 0 10px 62px;font-size:11px;color:var(--dsw-alias-label-tertiary); }
+.djp-asset-filename { display:block;overflow-wrap:anywhere;line-height:1.5;color:var(--dsw-alias-label-secondary); }
+.djp-asset-detail-actions { display:flex;align-items:center;justify-content:space-between;gap:8px; }
+.djp-asset-detail-actions .djp-iconbtn:not(:disabled):hover { color:var(--dsw-alias-state-error-primary); }
+.djp-asset-confirm { display:flex;flex-direction:column;gap:8px;margin-top:6px;line-height:1.5; }
+.djp-asset-confirm > div { display:flex;justify-content:flex-end;gap:8px; }
+.djp-asset-empty { display:flex;align-items:center;flex-direction:column;gap:12px;padding:24px 8px;color:var(--dsw-alias-label-tertiary);font-size:12px;text-align:center; }
 
 /* ---- 音量滑杆 ---- */
 .djp-card-head label.djp-field input[type='range'] { accent-color: var(--dsw-alias-brand-primary); width: 70px; }
 
+.djp-conflict { flex:none;padding:10px 12px;background:#382a1c;color:#f1d5b2;font-size:12px;line-height:1.5; }
+.djp-conflict > div { display:flex;flex-wrap:wrap;gap:8px;margin-top:8px; }
 .djp-save-status { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 12px 8px; font-size: 11px; color: var(--dsw-alias-label-tertiary); flex: none; }
 .djp-notice { padding: 8px 12px; color: var(--dsw-alias-state-error-primary); font-size: 12px; flex: none; overflow-wrap: anywhere; }
 .djp-dialog { max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow: auto; }
@@ -23975,7 +25608,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 .djp-export:hover:not(:disabled) { filter:brightness(1.08);box-shadow:inset 0 1px 0 rgb(255 255 255 / 16%),0 3px 10px rgb(0 0 0 / 16%); }
 .djp-btn:active:not(:disabled),.djp-export:active:not(:disabled),.djp-add:active { transform:translateY(1px); }
 .djp-del:hover { background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent); }
-.djp-card:hover,.djp-asset:hover { border-color:var(--dsw-alias-border-l4); }
+.djp-card:hover { border-color:var(--dsw-alias-border-l4); }
 .djp-card:focus-within { border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 50%,var(--djp-line));box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-brand-primary) 7%,transparent); }
 .djp-field input:focus-visible,.djp-select:focus-visible { outline:none;border-color:var(--dsw-alias-brand-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-brand-primary) 13%,transparent); }
 .djp-projbar { padding-top:12px;gap:8px; }
@@ -23989,6 +25622,22 @@ Check that all your Remotion packages are on the same version. If your dependenc
 .djp-dialog-title { font-size:15px;margin-bottom:6px; }
 .djp-mask { backdrop-filter:blur(4px); }
 .djp-exppop { top:38px; }
+.djp-exppop { width:min(290px,calc(100vw - 32px));min-width:0;box-sizing:border-box;gap:14px;max-height:calc(100dvh - 90px);overflow-y:auto; }
+.djp-export-details { font-size:11px;color:var(--dsw-alias-label-tertiary); }
+.djp-export-details summary { cursor:pointer; }
+.djp-export-details pre { white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto;line-height:1.5; }
+.djp-export-head,.djp-export-status { display:flex;align-items:center;justify-content:space-between;gap:12px; }
+.djp-export-head strong { font-size:14px; }
+.djp-export-status { font-size:12px;font-variant-numeric:tabular-nums; }
+.djp-export-note,.djp-export-error { margin:0;line-height:1.65;font-size:11px;white-space:normal;overflow-wrap:anywhere; }
+.djp-export-note,.djp-export-filename { color:var(--dsw-alias-label-tertiary); }
+.djp-export-error { color:var(--dsw-alias-state-error-primary); }
+.djp-export-progress { width:100%;height:5px;accent-color:#fa2858;border:0;border-radius:3px;overflow:hidden; }
+.djp-export-progress::-webkit-progress-bar { background:#353535; }
+.djp-export-progress::-webkit-progress-value { background:#fa2858;transition:width .2s; }
+.djp-export-result { display:flex;flex-direction:column;gap:6px;font-size:12px; }
+.djp-export-result strong { font-size:17px; }
+.djp-export-filename { overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px; }
 .djp-root * { scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l4) transparent; }
 @container (max-width:360px) { .djp-proj-tag { display:none; } .djp-card { padding:11px; } .djp-tabs { gap:1px; } .djp-tab { padding-inline:6px; } }
 
@@ -24031,7 +25680,6 @@ Check that all your Remotion packages are on the same version. If your dependenc
 .djp-drawer-head strong { font-size:13px;font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis; }
 .djp-drawer-body { padding:16px;overflow-y:auto;min-height:0; }
 .djp-drawer-footer { display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px;border-top:1px solid var(--djp-line);flex:none;font-size:11px;color:var(--dsw-alias-label-tertiary); }
-.djp-item-open > .djp-item-trigger .djp-chevron { transform:none; }
 .djp-more { position:relative;flex:none; }
 .djp-more > summary { list-style:none; }
 .djp-more > summary::-webkit-details-marker { display:none; }
@@ -24055,16 +25703,41 @@ Check that all your Remotion packages are on the same version. If your dependenc
 .djp-transport { display:flex;align-items:center;position:relative;flex:none;height:50px;padding:0 14px;background:#131313; }
 .djp-transport-time { font:11px ui-sans-serif,system-ui,sans-serif;font-variant-numeric:tabular-nums;white-space:nowrap; }
 .djp-transport-time span { color:#777; }
+.djp-time-trigger { display:inline-flex;align-items:center;gap:3px;padding:6px 0;border:0;border-bottom:1px dotted #555;background:transparent;color:inherit;font:inherit;cursor:pointer; }
+.djp-time-trigger:disabled,.djp-play-toggle:disabled { opacity:.4;cursor:default; }
+.djp-time-trigger:hover:not(:disabled) { border-bottom-color:#aaa; }
+.djp-time-jump { position:absolute;z-index:36;bottom:calc(100% + 6px);left:12px;width:min(268px,calc(100% - 24px));display:flex;flex-direction:column;gap:10px;padding:14px;background:#232323;border:1px solid #3a3a3a;border-radius:10px;box-shadow:0 12px 32px #0006;white-space:normal;color:#ddd;overflow:auto; }
+.djp-jump-head { display:flex;align-items:center;justify-content:space-between; }
+.djp-jump-head strong { font-size:12px;font-weight:500; }
+.djp-jump-modes { display:flex;gap:4px;padding:3px;background:#191919;border-radius:6px; }
+.djp-jump-modes button { flex:1;border:0;border-radius:4px;padding:5px;background:transparent;color:#999;cursor:pointer;font-size:11px; }
+.djp-jump-modes button[aria-pressed=true] { background:#373737;color:#eee; }
+.djp-time-jump label { color:#aaa;font-size:11px; }
+.djp-time-jump input { width:100%;min-width:0;height:34px;padding:0 9px;border:1px solid #555;border-radius:5px;background:#181818;color:#eee;font:13px ui-monospace,monospace; }
+.djp-time-jump input[aria-invalid=true] { border-color:#ff858c; }
+.djp-time-jump > * { flex-shrink:0; }
+.djp-time-jump p { margin:0;color:#999;line-height:1.5;font-size:10px;overflow-wrap:anywhere; }
+.djp-time-jump p.djp-jump-error { color:#ff858c; }
+.djp-jump-actions { display:flex;justify-content:flex-end;gap:8px; }
 .djp-play-toggle { position:absolute;left:50%;transform:translateX(-50%);display:grid;place-items:center;width:40px;height:40px;padding:0;border:0;background:transparent;color:#eee;cursor:pointer; }
 .djp-play-toggle .djp-icon { width:24px;height:24px; }
 .djp-transport-actions { margin-left:auto;display:flex;gap:6px; }
-.djp-transport-actions .djp-iconbtn { width:28px;height:32px; }
+.djp-transport-actions .djp-iconbtn { width:32px;height:32px; }
 .djp-transport-actions .djp-icon { width:19px;height:19px; }
 .djp-tdock { display:flex;flex-direction:column;flex:1 1 0;min-height:180px;max-height:none;padding:0;border:0;background:#1d1d1d;overflow:hidden; }
 .djp-editor-timeline { position:relative;display:flex;flex-direction:column;flex:1;min-height:0; }
+.djp-editor-timeline:focus { outline:none; }
+.djp-clip-actions { position:absolute;left:8px;right:8px;bottom:4px;z-index:10;display:flex;align-items:center;gap:5px;min-height:44px;padding:5px 6px;background:#252525f5;border:1px solid #3a3a3a;border-radius:7px;box-shadow:0 3px 12px #0003; }
+.djp-timeline-tools[hidden] { display:none; }
+.djp-selected-label { display:flex;flex-direction:column;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;color:#ddd; }
+.djp-selected-label small { color:#929292;font-size:9px; }
+.djp-clip-action { display:flex;align-items:center;justify-content:center;gap:5px;min-height:30px;padding:4px 7px;border:0;border-radius:5px;background:transparent;color:#ddd;font-size:10px;cursor:pointer; }
+.djp-clip-action .djp-icon { width:14px;height:14px; }
+.djp-clip-action:hover:not(:disabled) { background:#363636; }
+.djp-clip-action:disabled { opacity:.3;cursor:default; }
 .djp-timeline-tools { position:absolute;right:8px;bottom:4px;z-index:9;display:flex;align-items:center;gap:6px;height:28px;padding:0 4px;background:#1d1d1deb;border-radius:4px; }
-.djp-timeline-tools .djp-iconbtn { width:24px;height:24px;color:#8a8a8a; }
-.djp-timeline-tools .djp-icon { width:13px;height:13px; }
+.djp-timeline-tools .djp-iconbtn { width:28px;height:28px;color:#a0a0a0; }
+.djp-timeline-tools .djp-icon { width:15px;height:15px; }
 .djp-snap[aria-pressed=true] { color:#dadada; }
 .djp-zoom { display:flex;align-items:center;gap:6px;font-size:12px;color:#777; }
 .djp-zoom input { width:52px;height:12px;accent-color:#adadad; }
@@ -24081,8 +25754,8 @@ Check that all your Remotion packages are on the same version. If your dependenc
 .djp-lane-audio .djp-track { height:56px; }
 .djp-lane-subs .djp-track { height:44px; }
 .djp-track-overview { display:flex;flex-direction:column;flex:none;margin-top:16px; }
-.djp-track-summary { position:relative;width:100%;height:10px;padding:0;border:0;background:transparent;cursor:pointer;flex:none; }
-.djp-track-summary > span { position:absolute;top:3px;height:3px;border-radius:2px;pointer-events:none;background:var(--djp-summary-color);opacity:.7; }
+.djp-track-summary { position:relative;width:100%;height:var(--djp-summary-height,16px);padding:0;border:0;background:transparent;cursor:pointer;flex:none; }
+.djp-track-summary > span { position:absolute;top:6px;height:3px;border-radius:2px;pointer-events:none;background:var(--djp-summary-color);opacity:.7; }
 .djp-track-summary:hover > span,.djp-track-summary:focus-visible > span { opacity:1;height:4px; }
 .djp-summary-main { --djp-summary-color:#a4a4a4; }
 .djp-summary-audio { --djp-summary-color:#15989e; }
@@ -24092,10 +25765,10 @@ Check that all your Remotion packages are on the same version. If your dependenc
 .djp-lane-muted .djp-track { opacity:.35; }
 .djp-ruler-row { position:sticky;top:0;z-index:5;margin-inline:0; }
 .djp-ruler { position:relative;flex:1;height:32px;overflow:visible;cursor:ew-resize;touch-action:none;background:#1d1d1d; }
-.djp-tick { position:absolute;top:0;bottom:0;padding-left:0;font:10px/30px ui-sans-serif,system-ui,sans-serif;color:#808080;white-space:nowrap;pointer-events:none;transform:translateX(-50%); }
+.djp-tick { position:absolute;top:0;bottom:0;padding-left:0;font:11px/30px ui-sans-serif,system-ui,sans-serif;color:#a0a0a0;white-space:nowrap;pointer-events:none;transform:translateX(-50%); }
 .djp-tick::after { content:'·';position:absolute;left:calc(var(--djp-grid-step) / 2);top:0;color:#676767; }
 .djp-center-playhead { position:absolute;left:50%;top:38px;bottom:34px;width:2px;border-radius:2px;background:#f6f6f6;box-shadow:0 0 3px #0004;pointer-events:none;z-index:7; }
-.djp-timeline-add { position:absolute;right:12px;top:calc(76px + var(--djp-summary-count) * 10px);z-index:8;display:grid;place-items:center;width:34px;height:34px;padding:0;border:0;border-radius:6px;background:#f3f3f3;color:#292929;box-shadow:0 1px 5px #0005;cursor:pointer; }
+.djp-timeline-add { position:absolute;right:12px;top:calc(54px + var(--djp-summary-count) * var(--djp-summary-height,16px));z-index:8;display:grid;place-items:center;width:34px;height:34px;padding:0;border:0;border-radius:6px;background:#f3f3f3;color:#292929;box-shadow:0 1px 5px #0005;cursor:pointer; }
 .djp-timeline-add .djp-icon { width:23px;height:23px; }
 .djp-track-block { position:absolute;top:4px;bottom:4px;display:flex;flex-direction:column;min-width:0;overflow:hidden;border:1px solid #242424;border-radius:2px;background:#323232;cursor:grab;touch-action:none;user-select:none; }
 .djp-main-block { border-radius:0; }
@@ -24116,6 +25789,8 @@ Check that all your Remotion packages are on the same version. If your dependenc
 .djp-subs-block .djp-clip-caption > span:first-child { display:grid;place-items:center;width:16px;height:16px;border:1px solid #f9dfcd8c;border-radius:2px;font-size:10px;flex:none; }
 .djp-track-block.djp-clip-selected,.djp-track-block.djp-dragging { border-color:#fff;box-shadow:inset 0 0 0 1px #fff;z-index:2; }
 .djp-dragging { opacity:.85;cursor:grabbing!important; }
+.djp-snap-guide { position:absolute;top:32px;bottom:48px;width:1px;background:#38d6ca;z-index:4;pointer-events:none; }
+.djp-snap-guide::before { content:'';position:absolute;top:0;left:-3px;width:7px;height:7px;border-radius:50%;background:inherit; }
 .djp-handle { position:absolute;top:0;bottom:0;width:8px;z-index:3;cursor:ew-resize;touch-action:none; }
 .djp-hl { left:0; }.djp-hr { right:0; }
 .djp-clip-selected .djp-handle,.djp-handle:hover { background:#f8f8f8; }
@@ -24126,7 +25801,7 @@ Check that all your Remotion packages are on the same version. If your dependenc
 .djp-empty-audio { display:flex;align-items:center;gap:6px;margin:12px 8px;padding:0;border:0;background:transparent;color:#777;font-size:10px;cursor:pointer;white-space:nowrap; }
 .djp-empty-audio .djp-icon { width:12px;height:12px; }
 .djp-tool-dock { flex:none;display:flex;justify-content:space-around;gap:4px;padding:17px 8px 20px;background:#202020; }
-.djp-tool-dock > button { flex:1;display:flex;align-items:center;flex-direction:column;gap:9px;padding:3px 0;border:0;background:transparent;color:#bebebe;font-size:11px;cursor:pointer; }
+.djp-tool-dock > button { min-height:44px;flex:1;display:flex;align-items:center;flex-direction:column;gap:9px;padding:3px 0;border:0;background:transparent;color:#bebebe;font-size:11px;cursor:pointer; }
 .djp-tool-dock .djp-icon { width:25px;height:25px;stroke-width:1.4; }
 .djp-tool-dock > button:hover,.djp-tool-dock > .djp-tool-active { color:#fff; }
 .djp-tool-active::after { content:'';height:2px;width:14px;background:#fb416a;border-radius:1px;margin-top:-5px; }
@@ -24169,20 +25844,21 @@ Check that all your Remotion packages are on the same version. If your dependenc
 			ctx.effect(() => ctx.sidebarRightTabs.register({
 				id: "djian.timeline",
 				kind: "djian.timeline",
+				keepMounted: true,
 				priority: "builtin",
 				title: () => "剪辑面板",
 				guide: [{
+					id: "djian.timeline.open",
 					order: 10,
 					title: () => "剪辑面板",
 					description: () => "预览 · 片段 · 字幕 · 导出",
 					icon: FilmGlyph
 				}]
 			}), "djian-timeline: tab type");
-			ctx.slots.inject("sidebar.right.pane.tab", () => ctx.slots.register({
+			ctx.effect(() => ctx.slots.inject("sidebar.right.pane.tab", () => ctx.slots.register({
 				name: "sidebar.right.pane.tab",
-				key: "djian.timeline",
-				inject: (sessionId) => ({ sessionId })
-			}, Panel));
+				key: "djian.timeline"
+			}, Panel)), "djian-timeline: tab body");
 		}
 		//#endregion
 		exports.apply = apply;

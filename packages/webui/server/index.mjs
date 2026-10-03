@@ -2,6 +2,10 @@
 // agent 通过 MCP 工具 apply_timeline_ops 改时间线 → 本服务收集 → run 结束后随响应下发给前端执行。
 // 密钥：运行时读 /my/pro/api/.env 的 GLM 上游注入 DJIAN_LLM_KEY（不落库不打印）。
 import http from "node:http";
+import { atomicWriteJson } from "./storage.mjs";
+import { serveMedia } from "./media.mjs";
+import { activeTextLayers, bottomRegionStats } from './frame-analysis.mjs';
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,6 +85,7 @@ async function getHarness() {
 // ---- MCP 工具回传收集 ----
 let pendingOps = []; // run 期间由 MCP server POST 进来，run 结束后 drain
 let lastTimeline = null; // 前端随 /api/chat 上报的最近时间线（供 get_timeline 工具读）
+const exportJobs = new Map(); // Recent exports remain addressable by their own ID.
 let exportJob = null; // 导出任务：{ status: rendering|done|error, progress, outFile, result?, error? }
 
 // 帧画面分析：ffmpeg 缩到 96×54 抽原始 RGB，算亮度/黑场/主色/底部字幕区亮像素占比——
@@ -136,6 +141,7 @@ function analyzeFrame(pngPath) {
     darkPercent, // 接近黑像素(lum<16)的占比
     dominantColors: dominant, // 前 3 主色及占比
     bottomThirdBrightPercent: bottomBrightPercent, // 底部 1/3 区域亮像素(>200)占比，有白字幕时通常 1%~15%
+    ...bottomRegionStats(raw, W, H),
   };
 }
 
@@ -305,7 +311,7 @@ function normalizeOps(rawOps) {
           }
         } else {
           op = { ...op, op: name };
-          delete op.type;
+          if (op.type === name) delete op.type;
         }
         if (typeof name === "string" && VALID_OPS.has(name)) {
           if (OPS_NEEDING_ID.has(name) && typeof op.id !== "string") throw new Error("缺少 id");
@@ -333,7 +339,7 @@ function normalizeOps(rawOps) {
 
 // ---- 项目制持久化（~/.djian/projects/<id>/ 是唯一事实源）+ 服务端直接应用 ops ----
 // Windows 原生 HOME 常未设：fallback "/root" 会被解析成盘根 C:\root\.djian——改随 DJIAN（profile 根）落盘
-const DJIAN_HOME = process.env.HOME ? path.join(process.env.HOME, ".djian") : path.join(DJIAN, ".djian");
+const DJIAN_HOME = process.env.DJIAN_DATA_DIR || (process.env.HOME ? path.join(process.env.HOME, ".djian") : path.join(DJIAN, ".djian"));
 const PROJECTS_DIR = path.join(DJIAN_HOME, "projects");
 const CURRENT_FILE = path.join(DJIAN_HOME, "current");
 const SESSIONS_FILE = path.join(DJIAN_HOME, "sessions.json"); // dsh sessionId -> djian projectId（会话=项目）
@@ -346,8 +352,8 @@ const projectDir = (id) => path.join(PROJECTS_DIR, id);
 const timelinePath = (id) => path.join(projectDir(id), "timeline.json");
 const assetsPath = (id) => path.join(projectDir(id), "assets");
 // 时间线引用了当前项目素材库中不存在的 src 时，渲染会以误导性的「Format error」失败——收集出来供报错提示
-const collectMissingAssets = (timeline) => {
-  const dir = assetsPath(currentProjectId());
+const collectMissingAssets = (timeline, projectId = currentProjectId()) => {
+  const dir = assetsPath(projectId);
   const srcs = new Set();
   for (const tr of timeline.videoTracks ?? []) for (const c of tr.clips) if (c.src) srcs.add(c.src);
   for (const tr of timeline.audioTracks ?? []) for (const c of tr.clips) if (c.src) srcs.add(c.src);
@@ -470,24 +476,21 @@ function loadTimelineFor(id) {
     return parseTimeline(JSON.parse(fs.readFileSync(timelinePath(id), "utf8")));
   } catch { return null; }
 }
-function persistTimeline(t) {
-  try {
-    fs.mkdirSync(path.dirname(timelinePath(currentProjectId())), { recursive: true });
-    fs.writeFileSync(timelinePath(currentProjectId()), JSON.stringify(t, null, 2));
-  } catch (e) { console.warn("timeline 持久化失败:", e.message); }
+function persistTimeline(t, projectId = currentProjectId()) {
+  atomicWriteJson(timelinePath(projectId), t);
 }
 
 // ---- 版本历史：项目目录 history/ 下快照，AI ops 前自动存 ----
-function historyDir() {
-  return path.join(projectDir(currentProjectId()), "history");
+function historyDir(projectId = currentProjectId()) {
+  return path.join(projectDir(projectId), "history");
 }
 
-function saveSnapshot(label) {
-  if (!lastTimeline) return null;
-  const dir = historyDir();
+function saveSnapshot(label, projectId = currentProjectId(), timeline = lastTimeline) {
+  if (!timeline) return null;
+  const dir = historyDir(projectId);
   fs.mkdirSync(dir, { recursive: true });
   const id = `v${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
-  const snap = { id, at: new Date().toISOString(), label: String(label ?? "").slice(0, 60), timeline: lastTimeline };
+  const snap = { id, at: new Date().toISOString(), label: String(label ?? "").slice(0, 60), timeline };
   fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(snap, null, 2));
   // 最多留 40 份，超出删最旧
   const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
@@ -495,9 +498,9 @@ function saveSnapshot(label) {
   return id;
 }
 
-function listSnapshots() {
+function listSnapshots(projectId = currentProjectId()) {
   try {
-    const dir = historyDir();
+    const dir = historyDir(projectId);
     return fs
       .readdirSync(dir)
       .filter((f) => f.endsWith(".json"))
@@ -523,8 +526,9 @@ const clampNum = (v, fb, min = -Infinity, max = Infinity) =>
 
 // 与 webui store 的剪辑原语同语义，直接落在 lastTimeline 上并持久化
 function applyOpsToTimeline(ops) {
-  const t = lastTimeline ?? structuredClone(EMPTY_TIMELINE);
+  const t = structuredClone(lastTimeline ?? EMPTY_TIMELINE);
   const ignored = []; // 格式合法但没产生效果的操作（id 不存在、index 越界、切点太靠边）——上报给模型，防止它以为改成功了
+  const receipts = [];
   const mainTrack = () => t.videoTracks[0];
   const findVideoClip = (id) => {
     for (const tr of t.videoTracks) {
@@ -534,13 +538,17 @@ function applyOpsToTimeline(ops) {
     return null;
   };
   for (const op of ops) {
+    const oldIds = new Set([...t.videoTracks, ...t.audioTracks].flatMap(tr => tr.clips.map(c => c.id)));
+    const oldOverlayCount = t.overlays.length;
+    const oldIgnoredCount = ignored.length;
+    const before = JSON.stringify(t);
     switch (op.op) {
       case "addClip": {
         // track: "main"（默认）主轨道串行；track: "overlay"/"pip" 叠加轨（需 atSeconds）
         const isOverlay = typeof op.track === "string" && /^(overlay|pip|v\d+)$/i.test(op.track) && op.track.toLowerCase() !== "main";
         const clip = {
           id: newClipId(),
-          type: op.type === "image" ? "image" : "video",
+          type: op.type === "image" || /\.(png|jpe?g|webp|gif)$/i.test(op.src ?? '') ? "image" : "video",
           src: typeof op.src === "string" ? op.src : "a.mp4",
           inPoint: clampNum(op.inPoint, 0, 0),
           clipDuration: clampNum(op.clipDuration, 3, 0.1),
@@ -614,7 +622,7 @@ function applyOpsToTimeline(ops) {
         const tr = mainTrack();
         const map = new Map(tr.clips.map((c) => [c.id, c]));
         const unknown = op.order.filter((id) => !map.has(id));
-        if (unknown.length) ignored.push({ op: "reorderClips", id: unknown.join(","), reason: `order 含不存在的 id：${unknown.join("、")}` });
+          if (unknown.length) ignored.push({ op: "reorderClips", id: unknown.join(","), reason: `order 含不存在的 id：${unknown.join("、")}` });
         const next = op.order.map((id) => map.get(id)).filter(Boolean);
         tr.clips = [...next, ...tr.clips.filter((c) => !op.order.includes(c.id))];
         break;
@@ -788,13 +796,23 @@ function applyOpsToTimeline(ops) {
         Object.assign(t.meta, sanitizeMetaPatch(op.patch ?? op));
         break;
     }
+    const warnings = ignored.slice(oldIgnoredCount);
+    const ids = [...t.videoTracks, ...t.audioTracks].flatMap(tr => tr.clips.map(c => c.id)).filter(id => !oldIds.has(id));
+    receipts.push({ acceptedIndex: receipts.length, op: op.op,
+      status: warnings.length ? (before === JSON.stringify(t) ? 'ignored' : 'partial') : 'applied',
+      ...(ids.length ? { ids, ...(ids.length === 1 ? { id: ids[0] } : {}) } : op.id ? { id: op.id } : {}),
+      ...(op.op === 'addOverlay' ? { overlayIndex: oldOverlayCount } : Number.isInteger(op.index) ? { overlayIndex: op.index } : {}),
+      ...(warnings.length ? { warnings } : {}),
+    });
   }
-  lastTimeline = t;
   persistTimeline(t);
-  return ignored;
+  lastTimeline = t;
+  return { ignored, receipts };
 }
 
-const server = http.createServer(async (req, res) => {
+const pendingFrames = new Map();
+const server = http.createServer((req, res) => {
+  void (async () => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
   // CORS：供官方 dsh web（5190/反代 5191）里的剪辑面板插件跨域读写；本机 + 服务器公网 IP 来源
   const origin = req.headers.origin ?? "";
@@ -805,8 +823,8 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
       ...(res._aco ? { "Access-Control-Allow-Origin": res._aco } : {}),
-      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Methods": "GET,HEAD,POST,PATCH,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Range,If-Range",
     });
     return res.end();
   }
@@ -827,13 +845,14 @@ const server = http.createServer(async (req, res) => {
     const { accepted, rejected } = normalizeOps(body.ops);
     pendingOps.push(...accepted);
     let ignored = [];
+    let receipts = [];
     if (accepted.length) {
       // AI 改时间线前自动快照（历史/ 可回溯）
       saveSnapshot(`AI: ${accepted.map((o) => o.op).join(", ")}`);
-      ignored = applyOpsToTimeline(accepted); // 服务端直接落时间线（事实源）；返回没生效的操作
+      ({ ignored, receipts } = applyOpsToTimeline(accepted));
     }
     const pid = currentProjectId();
-    return json(res, 200, { accepted: accepted.length, ignored, rejected, project: { id: pid, name: listProjects().find((p) => p.id === pid)?.name } });
+    return json(res, 200, { accepted: accepted.length, receipts, ignored, rejected, project: { id: pid, name: listProjects().find((p) => p.id === pid)?.name } });
   }
 
   // 动画预设列表（面板下拉用）
@@ -846,20 +865,24 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { fonts: FONTS.map(({ id, label, weights }) => ({ id, label, variable: weights.includes(" ") })) });
   }
 
+  const requestProject = () => url.searchParams.get("session")
+    ? ensureSessionProject(url.searchParams.get("session"), { switchCurrent: false }) : currentProjectId();
+
   // 版本历史：列表 / 恢复（恢复前对当前状态保底快照，可来回切）
   if (url.pathname === "/api/history" && req.method === "GET") {
-    return json(res, 200, { snapshots: listSnapshots() });
+    return json(res, 200, { snapshots: listSnapshots(requestProject()) });
   }
   if (url.pathname?.startsWith("/api/history/") && req.method === "POST") {
     const id = decodeURIComponent(url.pathname.slice("/api/history/".length));
-    const file = path.join(historyDir(), `${id}.json`);
+    const projectId = requestProject();
+    const file = path.join(historyDir(projectId), `${id}.json`);
     if (!/^v[\w]+$/.test(id) || !fs.existsSync(file)) return json(res, 404, { error: "快照不存在" });
     try {
       const snap = JSON.parse(fs.readFileSync(file, "utf8"));
       const norm = parseTimeline(snap.timeline);
-      saveSnapshot("恢复前自动快照");
-      lastTimeline = norm;
-      persistTimeline(norm);
+      saveSnapshot("恢复前自动快照", projectId, loadTimelineFor(projectId));
+      persistTimeline(norm, projectId);
+      if (projectId === currentProjectId()) lastTimeline = norm;
       return json(res, 200, { ok: true, restored: snap.id, label: snap.label });
     } catch (e) {
       return json(res, 400, { error: `快照恢复失败：${e.message}` });
@@ -881,19 +904,29 @@ const server = http.createServer(async (req, res) => {
 
   // 剪辑面板（官方壳插件）写回整份时间线：v1/v2 都收，归一化成 v2 存储
   if (url.pathname === "/api/internal/timeline" && req.method === "POST") {
+    const fallbackProject = currentProjectId();
     const body = JSON.parse(await readBody(req));
-    if (body?.sessionId) ensureSessionProject(body.sessionId);
+    const projectId = body?.sessionId ? ensureSessionProject(body.sessionId, { switchCurrent: false }) : fallbackProject;
     const t = body?.timeline ?? body;
     if (!t?.meta || !(Array.isArray(t.videoTracks) || Array.isArray(t.clips)) || !Array.isArray(t.overlays ?? [])) {
       return json(res, 400, { error: "时间线格式不正确" });
     }
+    let norm;
     try {
-      const norm = parseTimeline(t);
-      lastTimeline = norm;
-      persistTimeline(norm);
+      norm = parseTimeline(t);
     } catch (e) {
       return json(res, 400, { error: `时间线校验失败：${e.message}` });
     }
+    // Compare and write synchronously: another request cannot interleave between them.
+    if (Object.hasOwn(body, 'baseTimeline')) {
+      const stored = JSON.stringify(parseTimeline(loadTimelineFor(projectId) ?? EMPTY_TIMELINE));
+      if (body.baseTimeline !== stored && JSON.stringify(norm) !== stored) {
+        return json(res, 409, { error: '时间线已有其他修改，请选择保留本地修改或采用最新版本', code: 'TIMELINE_CONFLICT' });
+      }
+    }
+    try { persistTimeline(norm, projectId); }
+    catch (e) { return json(res, 500, { error: `保存失败，修改尚未写入磁盘：${e.message}` }); }
+    if (projectId === currentProjectId()) lastTimeline = norm;
     return json(res, 200, { ok: true });
   }
 
@@ -974,7 +1007,11 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ---- 素材库（当前项目 assets/）----
-  const ASSET_EXT = { video: /\.(mp4|mov|webm|mkv|avi)$/i, image: /\.(png|jpe?g|webp|gif)$/i, audio: /\.(mp3|wav|aac|ogg|m4a)$/i };
+  // Capture once, before awaiting upload bytes or a remote download.
+  const explicitAssetProject = url.searchParams.get('projectId');
+  if (explicitAssetProject && !listProjects().some(p => p.id === explicitAssetProject)) return json(res, 404, { error: '项目不存在' });
+  const assetProjectId = explicitAssetProject || requestProject();
+  const ASSET_EXT = { video: /\.(mp4|mov|webm|mkv|avi)$/i, image: /\.(png|jpe?g|webp|gif)$/i, audio: /\.(mp3|wav|aac|ogg|m4a|flac)$/i };
   const assetType = (name) => (ASSET_EXT.video.test(name) ? "video" : ASSET_EXT.image.test(name) ? "image" : ASSET_EXT.audio.test(name) ? "audio" : null);
   const sanitizeAssetName = (s) => path.basename(String(s ?? "")).replace(/[^a-zA-Z0-9._\-一-鿿]/g, "_").slice(0, 80);
   const probeDuration = (file) => {
@@ -984,11 +1021,11 @@ const server = http.createServer(async (req, res) => {
       return Number.isFinite(d) && d > 0 ? Math.round(d * 100) / 100 : null;
     } catch { return null; }
   };
-  const assetMetaFile = (name) => path.join(thumbsPath(currentProjectId()), name + ".json");
+  const assetMetaFile = (name) => path.join(thumbsPath(assetProjectId), name + ".json");
   const readAssetMeta = (name) => { try { return JSON.parse(fs.readFileSync(assetMetaFile(name), "utf8")); } catch { return {}; } };
 
   if (url.pathname === "/api/assets" && req.method === "GET") {
-    const dir = assetsPath(currentProjectId());
+    const dir = assetsPath(assetProjectId);
     let names = [];
     try { names = fs.readdirSync(dir).filter((f) => assetType(f)); } catch {}
     const items = names.map((name) => {
@@ -998,7 +1035,7 @@ const server = http.createServer(async (req, res) => {
       if (duration == null && assetType(name) !== "image") {
         duration = probeDuration(full);
         if (duration != null) {
-          try { fs.mkdirSync(thumbsPath(currentProjectId()), { recursive: true }); fs.writeFileSync(assetMetaFile(name), JSON.stringify({ duration })); } catch {}
+          try { fs.mkdirSync(thumbsPath(assetProjectId), { recursive: true }); fs.writeFileSync(assetMetaFile(name), JSON.stringify({ duration })); } catch {}
         }
       }
       return {
@@ -1009,14 +1046,14 @@ const server = http.createServer(async (req, res) => {
         thumb: assetType(name) === "audio" ? null : `/api/assets/${encodeURIComponent(name)}/thumb`,
       };
     }).sort((a, b) => a.name.localeCompare(b.name));
-    return json(res, 200, { assets: items });
+    return json(res, 200, { projectId: assetProjectId, assetsDir: path.resolve(dir), assets: items });
   }
   if (url.pathname === "/api/assets" && req.method === "POST") {
     const raw = await readBodyRaw(req);
     if (!raw.length) return json(res, 400, { error: "空文件" });
     let name = sanitizeAssetName(url.searchParams.get("name"));
     if (!name || !assetType(name)) return json(res, 400, { error: "文件名或格式不支持（视频/图片/音频）" });
-    const dir = assetsPath(currentProjectId());
+    const dir = assetsPath(assetProjectId);
     fs.mkdirSync(dir, { recursive: true });
     // 重名自动加 -1 -2 后缀
     const ext = path.extname(name), stem = name.slice(0, -ext.length);
@@ -1026,18 +1063,18 @@ const server = http.createServer(async (req, res) => {
     const duration = assetType(finalName) === "image" ? null : probeDuration(path.join(dir, finalName));
     invalidateBundle(); // 素材目录内容变了，下次渲染重新 bundle（否则新素材 404）
     if (duration != null) {
-      try { fs.mkdirSync(thumbsPath(currentProjectId()), { recursive: true }); fs.writeFileSync(assetMetaFile(finalName), JSON.stringify({ duration })); } catch {}
+      try { fs.mkdirSync(thumbsPath(assetProjectId), { recursive: true }); fs.writeFileSync(assetMetaFile(finalName), JSON.stringify({ duration })); } catch {}
     }
     return json(res, 200, { ok: true, name: finalName, type: assetType(finalName), duration });
   }
   const assetMatch = url.pathname.match(/^\/api\/assets\/([^/]+)$/);
   if (assetMatch && req.method === "DELETE") {
     const name = sanitizeAssetName(decodeURIComponent(assetMatch[1]));
-    const full = path.join(assetsPath(currentProjectId()), name);
+    const full = path.join(assetsPath(assetProjectId), name);
     if (!fs.existsSync(full)) return json(res, 404, { error: "素材不存在" });
     fs.rmSync(full, { force: true });
     invalidateBundle(); // 素材目录内容变了，下次渲染重新 bundle
-    fs.rm(path.join(thumbsPath(currentProjectId()), name + ".jpg"), { force: true }, () => {});
+    fs.rm(path.join(thumbsPath(assetProjectId), name + ".jpg"), { force: true }, () => {});
     fs.rm(assetMetaFile(name), { force: true }, () => {});
     return json(res, 200, { ok: true });
   }
@@ -1094,7 +1131,7 @@ const server = http.createServer(async (req, res) => {
       const buf = Buffer.from(await r.arrayBuffer());
       if (!buf.length) return json(res, 502, { error: "下载到空文件" });
       if (buf.length > 200 * 1024 * 1024) return json(res, 413, { error: "文件超过 200MB 上限" });
-      const dir = assetsPath(currentProjectId());
+      const dir = assetsPath(assetProjectId);
       fs.mkdirSync(dir, { recursive: true });
       const ext = path.extname(name), stem = name.slice(0, -ext.length);
       let n = 0, finalName = name;
@@ -1103,7 +1140,7 @@ const server = http.createServer(async (req, res) => {
       invalidateBundle(); // 素材目录变了，下次渲染重新 bundle
       const duration = assetType(finalName) === "image" ? null : probeDuration(path.join(dir, finalName));
       if (duration != null) {
-        try { fs.mkdirSync(thumbsPath(currentProjectId()), { recursive: true }); fs.writeFileSync(assetMetaFile(finalName), JSON.stringify({ duration })); } catch {}
+        try { fs.mkdirSync(thumbsPath(assetProjectId), { recursive: true }); fs.writeFileSync(assetMetaFile(finalName), JSON.stringify({ duration })); } catch {}
       }
       return json(res, 200, { ok: true, name: finalName, type: assetType(finalName), duration });
     } catch (e) {
@@ -1112,9 +1149,9 @@ const server = http.createServer(async (req, res) => {
   }
   if (thumbMatch && req.method === "GET") {
     const name = sanitizeAssetName(decodeURIComponent(thumbMatch[1]));
-    const full = path.join(assetsPath(currentProjectId()), name);
+    const full = path.join(assetsPath(assetProjectId), name);
     if (!fs.existsSync(full) || assetType(name) === "audio") return json(res, 404, { error: "无缩略图" });
-    const tdir = thumbsPath(currentProjectId());
+    const tdir = thumbsPath(assetProjectId);
     const thumb = path.join(tdir, name + ".jpg");
     if (!fs.existsSync(thumb)) {
       try {
@@ -1129,17 +1166,10 @@ const server = http.createServer(async (req, res) => {
     return fs.createReadStream(thumb).pipe(res);
   }
   // 素材文件本体（供官方壳里的预览播放器跨域拉流）
-  if (url.pathname.startsWith("/project-assets/") && req.method === "GET") {
+  if (url.pathname.startsWith("/project-assets/") && (req.method === "GET" || req.method === "HEAD")) {
     const name = sanitizeAssetName(decodeURIComponent(url.pathname.slice("/project-assets/".length)));
-    const full = path.join(assetsPath(currentProjectId()), name);
-    if (!fs.existsSync(full)) { res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }).end("not found"); return; }
-    res.writeHead(200, {
-      "Content-Type": MIME[path.extname(full)] || "application/octet-stream",
-      "Content-Length": fs.statSync(full).size,
-      "Cache-Control": "no-cache",
-      ...(res._aco ? { "Access-Control-Allow-Origin": res._aco } : {}),
-    });
-    return fs.createReadStream(full).pipe(res);
+    const full = path.join(assetsPath(assetProjectId), name);
+    return serveMedia(req, res, full, MIME[path.extname(full).toLowerCase()] || "application/octet-stream");
   }
 
   // MCP server 取合成后单帧（供 get_frame 工具；PNG base64 回传）
@@ -1147,7 +1177,7 @@ const server = http.createServer(async (req, res) => {
     const body = JSON.parse(await readBody(req));
     let timeline;
     try {
-      timeline = parseTimeline(body?.timeline ?? lastTimeline);
+      timeline = parseTimeline(body?.timeline ?? loadTimelineFor(assetProjectId) ?? EMPTY_TIMELINE);
     } catch (e) {
       return json(res, 400, { error: `时间线校验失败：${e.message}` });
     }
@@ -1155,21 +1185,25 @@ const server = http.createServer(async (req, res) => {
     const hasContent = timeline.videoTracks.some((tr) => tr.clips.length > 0) || timeline.audioTracks.some((tr) => tr.clips.length > 0) || (timeline.overlays?.length ?? 0) > 0;
     if (!hasContent) return json(res, 400, { error: "时间线为空" });
     if (!Number.isFinite(seconds) || seconds < 0) return json(res, 400, { error: "seconds 必须是非负数字" });
-    const outFile = path.join(DJIAN, "out", "frames", `frame-${Date.now()}.png`);
+    const frameKey = JSON.stringify([assetProjectId, timeline, seconds]);
     try {
-      const r = await renderFrame({ timeline, timeSeconds: seconds, outFile, assetsDir: assetsPath(currentProjectId()) });
-      const png = fs.readFileSync(outFile);
-      const stats = analyzeFrame(outFile);
-      fs.rm(outFile, { force: true }, () => {});
-      return json(res, 200, {
-        frame: r.frame,
-        width: r.width,
-        height: r.height,
-        pngBase64: png.toString("base64"),
-        stats,
-      });
+      let task = pendingFrames.get(frameKey);
+      if (!task) {
+        if (pendingFrames.size >= 4) return json(res, 429, { error: '取帧正在预热或渲染，请稍后重试相同时间点。' });
+        task = (async () => {
+          const outFile = path.join(DJIAN, 'out', 'frames', `frame-${randomUUID()}.png`);
+          try {
+            const r = await renderFrame({ timeline, timeSeconds: seconds, outFile, assetsDir: assetsPath(assetProjectId) });
+            return { frame: r.frame, width: r.width, height: r.height, pngBase64: fs.readFileSync(outFile).toString('base64'),
+              stats: analyzeFrame(outFile), activeTextLayers: activeTextLayers(timeline, r.frame) };
+          } finally { fs.rmSync(outFile, { force: true }); }
+        })();
+        pendingFrames.set(frameKey, task);
+        void task.then(() => pendingFrames.delete(frameKey), () => pendingFrames.delete(frameKey));
+      }
+      return json(res, 200, await task);
     } catch (e) {
-      const missing = collectMissingAssets(timeline);
+      const missing = collectMissingAssets(timeline, assetProjectId);
       return json(res, 500, { error: `取帧失败：${e.message}${missing.length ? `。时间线引用了当前项目素材库中不存在的文件：${missing.join("、")}（素材按项目隔离）——用 removeClip/removeAudio 删掉引用，或重新下载素材后再 addClip` : ""}` });
     }
   }
@@ -1178,6 +1212,7 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/api/export" && req.method === "POST") {
     if (exportJob?.status === "rendering") return json(res, 409, { error: "已有导出任务进行中，请稍候" });
     const body = JSON.parse(await readBody(req));
+    if (exportJob?.status === "rendering") return json(res, 409, { error: "已有导出任务进行中，请稍候" });
     if (!body?.timeline) return json(res, 400, { error: "缺少 timeline" });
     // v1/v2 都收：先归一化成 v2，再应用导出参数
     let timelineOut;
@@ -1201,53 +1236,58 @@ const server = http.createServer(async (req, res) => {
       };
     }
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    const outFile = path.join(DJIAN, "out", `djian-${stamp}.mp4`);
-    exportJob = { status: "rendering", progress: { rendered: 0, total: 0, percent: 0, stage: "preparing" }, outFile };
-    const renderAssets = assetsPath(currentProjectId());
+    const jobId = randomUUID();
+    const outFile = path.join(DJIAN, "out", `djian-${stamp}-${jobId.slice(0, 8)}.mp4`);
+    const projectId = body.sessionId ? ensureSessionProject(body.sessionId, { switchCurrent: false }) : currentProjectId();
+    const renderAssets = assetsPath(projectId);
     fs.mkdirSync(renderAssets, { recursive: true });
-    renderVideo({
+    const job = { jobId, status: "rendering", progress: { rendered: 0, total: 0, percent: 0, stage: "preparing" }, outFile };
+    exportJob = job;
+    exportJobs.set(jobId, job);
+    while (exportJobs.size > 20) exportJobs.delete(exportJobs.keys().next().value);
+    Promise.resolve().then(() => renderVideo({
       timeline: timelineOut,
       outFile,
       // 素材根 = 当前项目 assets/（与预览同源）
       assetsDir: renderAssets,
       ...(crf != null ? { crf } : {}),
       onProgress: (p) => {
-        if (exportJob?.status !== "rendering") return;
-        exportJob.progress = {
+        if (job.status !== "rendering") return;
+        job.progress = {
           rendered: p.rendered,
           total: p.total,
           percent: p.total > 0 ? Math.round((p.rendered / p.total) * 100) : 0,
           stage: p.stage,
         };
       },
-    })
+    }))
       .then((r) => {
-        exportJob = {
-          ...exportJob,
-          status: "done",
-          result: { ...r, sizeBytes: fs.statSync(outFile).size, fileName: path.basename(outFile) },
-        };
+        job.result = { ...r, sizeBytes: fs.statSync(outFile).size, fileName: path.basename(outFile) };
+        job.status = "done";
       })
-      .catch((e) => {
-        exportJob = { ...exportJob, status: "error", error: e.message };
-      });
-    return json(res, 202, { started: true });
+      .catch((e) => { job.status = "error"; job.error = e.message; });
+    return json(res, 202, { started: true, jobId });
   }
 
   if (url.pathname === "/api/export/status") {
-    return json(res, 200, exportJob ?? { status: "idle" });
+    const job = url.searchParams.has("jobId") ? exportJobs.get(url.searchParams.get("jobId")) : exportJob;
+    if (!job && url.searchParams.has("jobId")) return json(res, 404, { error: "导出任务已过期或引擎已重启，请重新导出" });
+    if (!job) return json(res, 200, { status: "idle" });
+    const { outFile, ...status } = job;
+    return json(res, 200, status);
   }
 
   if (url.pathname === "/api/export/download") {
-    if (exportJob?.status !== "done" || !fs.existsSync(exportJob.outFile)) {
+    const job = url.searchParams.has("jobId") ? exportJobs.get(url.searchParams.get("jobId")) : exportJob;
+    if (job?.status !== "done" || !fs.existsSync(job.outFile)) {
       return json(res, 404, { error: "暂无已完成的导出" });
     }
     res.writeHead(200, {
       "Content-Type": "video/mp4",
-      "Content-Length": fs.statSync(exportJob.outFile).size,
-      "Content-Disposition": `attachment; filename="${exportJob.result.fileName}"`,
+      "Content-Length": fs.statSync(job.outFile).size,
+      "Content-Disposition": `attachment; filename="${job.result.fileName}"`,
     });
-    fs.createReadStream(exportJob.outFile).pipe(res);
+    fs.createReadStream(job.outFile).pipe(res);
     return;
   }
 
@@ -1281,20 +1321,20 @@ const server = http.createServer(async (req, res) => {
   // 独立 UI 已下线（太难看，产品形态改为官方 dsh web 壳里的剪辑面板）——本服务只留引擎 API。
   // 带扩展名的路径仍查一次当前项目素材目录（时间线 src 裸文件名兼容，供官方壳里的预览播放器拉流）。
   const hasExt = path.extname(url.pathname) !== "";
-  if (hasExt) {
-    const inAssets = path.join(assetsPath(currentProjectId()), path.basename(url.pathname));
+  if (hasExt && (req.method === "GET" || req.method === "HEAD")) {
+    const inAssets = path.join(assetsPath(assetProjectId), sanitizeAssetName(decodeURIComponent(path.basename(url.pathname))));
     if (fs.existsSync(inAssets) && !fs.statSync(inAssets).isDirectory()) {
-      res.writeHead(200, {
-        "Content-Type": MIME[path.extname(inAssets)] || "application/octet-stream",
-        "Cache-Control": "no-cache",
-        ...(res._aco ? { "Access-Control-Allow-Origin": res._aco } : {}),
-      });
-      fs.createReadStream(inAssets).pipe(res);
-      return;
+      return serveMedia(req, res, inAssets, MIME[path.extname(inAssets).toLowerCase()] || "application/octet-stream");
     }
   }
   res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" })
     .end("D剪引擎 API 服务（独立界面已下线，请从 dsh web 面板访问）");
+  })().catch((error) => {
+    console.warn("[request]", error.message);
+    if (res.writableEnded || res.destroyed) return;
+    if (res.headersSent) { res.destroy(); return; }
+    json(res, error instanceof SyntaxError ? 400 : 500, { error: error instanceof SyntaxError ? "请求内容格式不正确" : "操作未完成，请重试。" });
+  });
 });
 
 // 不主动掐空闲 keep-alive 连接（默认 5s）：MCP 客户端在模型思考间隙复用连接时，

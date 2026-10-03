@@ -3,6 +3,7 @@
 import readline from "node:readline";
 import fs from "node:fs";
 import path from "node:path";
+import { importAsset } from './import-asset.mjs';
 
 // 后端端口发现链（启动器 portAutoBump 后实际端口可能不是 5180）：
 // 显式 DJIAN_WEBUI_URL → 启动器注入的 DSHL_SERVICE_PORTS JSON → profile 根
@@ -149,7 +150,7 @@ const TOOLS = [
           type: "array",
           items: {
             oneOf: [
-              opSchema("addClip", { src: { type: "string" }, inPoint: NUM, clipDuration: { type: "number", exclusiveMinimum: 0 }, transition: { enum: ["none", "fade"] }, volume: { type: "number", minimum: 0, maximum: 1 }, track: { type: "string" }, atSeconds: NUM, box: { type: "object" }, speed: { type: "number", minimum: 0.1, maximum: 10, description: "恒定变速：2=快放一倍；clipDuration 仍是成片占时" }, filter: { type: "object", description: "基础滤镜 {brightness,contrast,saturate,blur,grayscale,sepia,hueRotate}" }, animations: { type: "object", description: "关键帧 {x,y,scale,opacity,rotation,volume}: [{t,v}]，t=clip 内相对秒，线性插值" } }),
+              opSchema("addClip", { type: { enum: ["video", "image"] }, src: { type: "string" }, inPoint: NUM, clipDuration: { type: "number", exclusiveMinimum: 0 }, transition: { enum: ["none", "fade"] }, volume: { type: "number", minimum: 0, maximum: 1 }, track: { type: "string" }, atSeconds: NUM, box: { type: "object" }, speed: { type: "number", minimum: 0.1, maximum: 10, description: "恒定变速：2=快放一倍；clipDuration 仍是成片占时" }, filter: { type: "object", description: "基础滤镜 {brightness,contrast,saturate,blur,grayscale,sepia,hueRotate}" }, animations: { type: "object", description: "关键帧 {x,y,scale,opacity,rotation,volume}: [{t,v}]，t=clip 内相对秒，线性插值" } }),
               opSchema("removeClip", { id: { type: "string" } }, ["id"]),
               opSchema("updateClip", { id: { type: "string" }, patch: PATCH }, ["id", "patch"]),
               opSchema("reorderClips", { order: { type: "array", items: { type: "string" } } }, ["order"]),
@@ -170,7 +171,7 @@ const TOOLS = [
   },
   {
     name: "get_timeline",
-    description: "读取当前状态：返回 { project（当前项目 id/名称）, availableAssets（当前项目素材库文件清单——addClip/addAudio 只能引用这里有的文件名）, timeline（v2 多轨 JSON：videoTracks[0] 主轨串行、叠加轨 PiP、audioTracks、overlays） }。修改前后、新会话开始时都应调用以对齐状态；id/index/素材名一律以此返回为准，历史消息里的引用可能已过期。",
+    description: "读取当前状态：返回 project、canvas（width/height/fps，生成素材前先读取）、assetsDir 绝对路径、availableAssets（addClip/addAudio 引用这里的文件名）、timeline（v2 多轨 JSON）。本地生成文件先 import_asset 入库。修改前后、新会话开始时调用；id/index/素材名以返回为准。",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -179,8 +180,13 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "import_asset",
+    description: "把本地生成的视频/图片/音频直接放进当前项目素材库，无需查找或写入项目目录。提供本地绝对路径 path；小文件也可用 base64 + name。最大 512MB（base64 32MB），重名自动改名。返回实际 name/type/duration/projectId/assetsDir；再用 name 执行 addClip/addAudio。优先用本工具，不要递归全盘搜索或 Copy-Item 到素材目录。",
+    inputSchema: { type: "object", properties: { path: { type: "string", description: "本地文件绝对路径，推荐" }, base64: { type: "string", description: "标准 base64，小文件备用" }, name: { type: "string", description: "保存文件名，base64 时必填；必须带媒体扩展名" } }, anyOf: [{ required: ["path"] }, { required: ["base64", "name"] }] },
+  },
+  {
     name: "asset_list",
-    description: "列出当前项目素材库里的素材（文件名/类型/大小/时长）。addClip 的 src 用素材文件名。",
+    description: "返回当前项目 projectId、assetsDir 绝对路径和 assets（文件名/类型/大小/时长）。本地生成素材用 import_asset 入库，addClip 的 src 用返回文件名。",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -189,7 +195,7 @@ const TOOLS = [
       "查看时间线在第 N 秒处合成后的实际画面（与成片一致，含字幕/淡入等效果）。" +
       "返回该帧 PNG 图片 + 画面数据统计（平均亮度/黑场占比/主色/底部字幕区亮像素占比）。" +
       "若你无法接收图像，请依据 stats 数据判断：avgBrightness<16 是黑场、contrast<10 接近纯色、" +
-      "bottomThirdBrightPercent 在 1~15 通常表示底部有白色字幕。秒数越界会自动钳到有效范围。",
+      "bottomThirdBrightPercent 只统计亮度>200像素；bottomThirdColoredPercent 统计显著彩色像素，背景也会贡献。任一指标为0不证明没有字幕。activeTextLayers 列出该帧时间范围命中的字幕（含颜色/动画），不保证像素可见。冷启动可能需要数分钟；秒数越界自动钳到有效范围。",
     inputSchema: {
       type: "object",
       properties: { seconds: { type: "number", minimum: 0, description: "要看的时间点（秒）" } },
@@ -263,12 +269,16 @@ async function apiJson(pathname, body) {
 }
 
 async function fetchFrame(seconds) {
-  const res = await fetch(`${await webui()}/api/internal/frame`, {
+  let res;
+  try { res = await fetch(`${await webui()}/api/internal/frame`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ seconds }),
-    signal: AbortSignal.timeout(120_000), // 首次取帧要拉浏览器，留足时间
-  });
+    signal: AbortSignal.timeout(300_000), // 首次取帧可能编译与预热浏览器
+  }); } catch (error) {
+    if (error.name === 'TimeoutError') throw new Error('取帧仍可能在编译或预热，请稍后重试相同时间点；引擎会复用尚未完成的同一次取帧。');
+    throw error;
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `webui HTTP ${res.status}`);
   return data;
@@ -305,12 +315,17 @@ rl.on("line", async (line) => {
       case "tools/call": {
         const name = params?.name;
         const args = params?.arguments ?? {};
+        if (name === "import_asset") {
+          return reply({ content: [{ type: "text", text: JSON.stringify(await importAsset(args, await webui())) }] });
+        }
         if (name === "apply_timeline_ops") {
           const ops = Array.isArray(args.ops) ? args.ops : [];
           const r = await forwardOps(ops);
           const rejected = r.rejected ?? [];
           const ignored = r.ignored ?? [];
-          const applied = Math.max(0, (r.accepted ?? ops.length) - ignored.length);
+          const applied = Array.isArray(r.receipts)
+            ? r.receipts.filter(receipt => receipt.status === 'applied' || receipt.status === 'partial').length
+            : Math.max(0, (r.accepted ?? ops.length) - ignored.length);
           const detail = [
             ignored.length ? `忽略 ${ignored.length} 个（${ignored.map((x) => `${x.op}${x.id ? ` ${x.id}` : x.index !== undefined ? ` #${x.index}` : ""}：${x.reason}`).join("；")}）` : "",
             rejected.length ? `拒绝 ${rejected.length} 个（${rejected.map((x) => `#${x.index} ${x.reason}`).join("；")}）` : "",
@@ -322,7 +337,7 @@ rl.on("line", async (line) => {
             });
           }
           return reply({
-            content: [{ type: "text", text: `已应用 ${applied} 个操作${detail ? `（${detail}）` : ""}。项目：${r.project?.name ?? r.project?.id ?? "?"}。` }],
+            content: [{ type: "text", text: JSON.stringify({ applied, project: r.project, receipts: r.receipts ?? [], ignored, rejected }) }],
           });
         }
         if (name === "get_timeline") {
@@ -337,6 +352,8 @@ rl.on("line", async (line) => {
               type: "text",
               text: JSON.stringify({
                 project: cur ? { id: cur.id, name: cur.name } : null,
+                canvas: t.meta,
+                assetsDir: assets.assetsDir,
                 availableAssets: (assets.assets ?? []).map((a) => `${a.name}${a.duration ? `(${a.duration}s)` : ""}`),
                 timeline: t,
               }),
@@ -350,7 +367,7 @@ rl.on("line", async (line) => {
         }
         if (name === "asset_list") {
           const r = await apiJson("/api/assets");
-          return reply({ content: [{ type: "text", text: JSON.stringify(r.assets ?? []) }] });
+          return reply({ content: [{ type: "text", text: JSON.stringify(r) }] });
         }
         if (name === "get_frame") {
           const seconds = Number(args.seconds);
@@ -367,8 +384,9 @@ rl.on("line", async (line) => {
                 text:
                   `第 ${seconds}s 处的合成帧（第 ${r.frame} 帧，${r.width}×${r.height}）。\n` +
                   `画面数据统计：${JSON.stringify(r.stats)}\n` +
+                  `本帧时间范围命中的文字层：${JSON.stringify(r.activeTextLayers ?? [])}（不是像素可见性证明，透明度/动画/遮挡仍须看图）。\n` +
                   `判读参考：avgBrightness<16=黑场；contrast<10=接近纯色；` +
-                  `bottomThirdBrightPercent 1~15=底部大概率有白色字幕；darkPercent 高=画面整体偏暗。`,
+                  `bottomThirdBrightPercent=亮度>200的底部像素占比；bottomThirdColoredPercent=显著彩色像素占比。背景也会贡献，指标为0不能排除字幕。darkPercent 高=整体偏暗。`,
               },
             ],
           });

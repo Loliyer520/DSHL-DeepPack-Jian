@@ -92,26 +92,35 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
 void ensureEngineBase();
 
 // 浏览器里预览用的素材绝对地址（src 相对 webui public/dist 根）
-export const assetUrl = (src: string) =>
-  /^(?:[a-z]+:)?\/\//i.test(src) ? src : `${API_BASE}/${src.replace(/^\/+/, '')}`;
+export const scopedPath = (path: string, sessionId?: string) => sessionId
+  ? `${path}${path.includes('?') ? '&' : '?'}session=${encodeURIComponent(sessionId)}` : path;
+export const assetUrl = (src: string, sessionId?: string) =>
+  /^(?:[a-z]+:)?\/\//i.test(src) ? src : `${API_BASE}${scopedPath(`/project-assets/${encodeURIComponent(src.split(/[\\/]/).pop() ?? src)}`, sessionId)}`;
 
 // peek=1：隐藏面板的窥探轮询——服务端只读本会话项目，不翻动全局 current（防多会话串项目）
 export async function getTimeline<T>(sessionId?: string, peek = false): Promise<T> {
   const q = sessionId
     ? `?session=${encodeURIComponent(sessionId)}${peek ? '&peek=1' : ''}`
     : '';
-  const r = await apiFetch(`/api/internal/timeline${q}`);
+  const r = await apiFetch(`/api/internal/timeline${q}`, { signal: AbortSignal.timeout(15_000) });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
-export async function putTimeline(t: unknown, sessionId?: string): Promise<void> {
+export class TimelineConflictError extends Error {}
+
+export async function putTimeline(t: unknown, sessionId?: string, baseTimeline?: string | null): Promise<void> {
   const r = await apiFetch(`/api/internal/timeline`, {
+    signal: AbortSignal.timeout(15_000),
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(sessionId ? { timeline: t, sessionId } : t),
+    body: JSON.stringify({ timeline: t, sessionId, ...(baseTimeline === undefined ? {} : { baseTimeline }) }),
   });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 409 && data.code === 'TIMELINE_CONFLICT') throw new TimelineConflictError(data.error);
+    throw new Error(data.error ?? `HTTP ${r.status}`);
+  }
 }
 
 export type ExportStatus =
@@ -132,22 +141,33 @@ export async function startExport(timeline: unknown): Promise<void> {
   }
 }
 
-export async function getExportStatus(): Promise<ExportStatus> {
-  const r = await apiFetch(`/api/export/status`);
+export class ExportRequestError extends Error {
+  constructor(message: string, public status: number) { super(message); }
+}
+
+export async function getExportStatus(jobId?: string, signal?: AbortSignal): Promise<ExportStatus> {
+  const r = await apiFetch(`/api/export/status${jobId ? `?jobId=${encodeURIComponent(jobId)}` : ''}`, { signal });
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    throw new ExportRequestError(data.error ?? `HTTP ${r.status}`, r.status);
+  }
   return r.json();
 }
 
 // ---- 导出参数版 ----
-export async function startExportWith(timeline: unknown, opts: { scale?: number; quality?: string }): Promise<void> {
+export async function startExportWith(timeline: unknown, opts: { scale?: number; quality?: string; sessionId?: string }): Promise<string> {
   const r = await apiFetch(`/api/export`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ timeline, scale: opts.scale ?? 1, quality: opts.quality ?? 'standard' }),
+    body: JSON.stringify({ timeline, scale: opts.scale ?? 1, quality: opts.quality ?? 'standard', sessionId: opts.sessionId }),
   });
   if (r.status !== 202) {
     const d = (await r.json().catch(() => ({}))) as { error?: string };
     throw new Error(d.error ?? `HTTP ${r.status}`);
   }
+  const data = await r.json();
+  if (typeof data.jobId !== 'string' || !data.jobId) throw new Error('导出服务未返回任务编号，请更新整合包后重试');
+  return data.jobId;
 }
 
 // ---- 项目管理 ----
@@ -225,14 +245,14 @@ export interface AssetInfo {
   thumb: string | null;
 }
 
-export async function listAssets(): Promise<AssetInfo[]> {
-  const r = await apiFetch(`/api/assets`);
+export async function listAssets(sessionId?: string, signal?: AbortSignal): Promise<AssetInfo[]> {
+  const r = await apiFetch(scopedPath(`/api/assets`, sessionId), { signal });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return (await r.json()).assets ?? [];
 }
 
-export async function uploadAsset(file: File): Promise<AssetInfo> {
-  const r = await apiFetch(`/api/assets?name=${encodeURIComponent(file.name)}`, {
+export async function uploadAsset(file: File, sessionId?: string): Promise<AssetInfo> {
+  const r = await apiFetch(scopedPath(`/api/assets?name=${encodeURIComponent(file.name)}`, sessionId), {
     method: 'POST',
     headers: { 'Content-Type': 'application/octet-stream' },
     body: file,
@@ -242,11 +262,11 @@ export async function uploadAsset(file: File): Promise<AssetInfo> {
   return d as AssetInfo;
 }
 
-export async function deleteAsset(name: string): Promise<void> {
-  const r = await apiFetch(`/api/assets/${encodeURIComponent(name)}`, { method: 'DELETE' });
+export async function deleteAsset(name: string, sessionId?: string): Promise<void> {
+  const r = await apiFetch(scopedPath(`/api/assets/${encodeURIComponent(name)}`, sessionId), { method: 'DELETE' });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
 }
 
-export const assetThumbUrl = (name: string) => `${API_BASE}/api/assets/${encodeURIComponent(name)}/thumb`;
+export const assetThumbUrl = (name: string, sessionId?: string) => `${API_BASE}${scopedPath(`/api/assets/${encodeURIComponent(name)}/thumb`, sessionId)}`;
 // 素材本体地址（预览播放器用）
-export const assetMediaUrl = (name: string) => `${API_BASE}/project-assets/${encodeURIComponent(name)}`;
+export const assetMediaUrl = (name: string, sessionId?: string) => assetUrl(name, sessionId);

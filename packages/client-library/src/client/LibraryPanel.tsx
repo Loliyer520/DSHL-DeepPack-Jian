@@ -11,7 +11,9 @@ const fmtDur = (s: number | null) => {
 type ImportState = 'idle' | 'busy' | 'done' | 'err';
 
 // 资源库面板：在线 CC 素材（Openverse 聚合，免 key）搜索 → 预览/试听 → 一键导入当前项目素材库
-export const LibraryPanel: React.FC = () => {
+export const LibraryPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => <LibraryContents key={sessionId ?? 'default'} sessionId={sessionId} />;
+
+const LibraryContents: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
   const [q, setQ] = useState('');
   const [kind, setKind] = useState<LibraryKind>('image');
   const [page, setPage] = useState(1);
@@ -49,7 +51,7 @@ export const LibraryPanel: React.FC = () => {
     setImports((m) => ({ ...m, [it.id]: { st: 'busy' } }));
     try {
       const safe = it.title.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 60);
-      const r = await importLibrary(it.url, safe || undefined, it.kind);
+      const r = await importLibrary(it.url, safe || undefined, it.kind, sessionId);
       setImports((m) => ({ ...m, [it.id]: { st: 'done', name: r.name } }));
     } catch (e) {
       setImports((m) => ({ ...m, [it.id]: { st: 'err', err: e instanceof Error ? e.message : String(e) } }));

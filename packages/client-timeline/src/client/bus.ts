@@ -1,8 +1,24 @@
 import type { PlayerRef } from '@remotion/player';
+import { createContext, useContext } from 'react';
 
-// Preview 与轨道条共享的 Player 引用总线（Panel 挂载时注册）
-export const playerBus: { ref: PlayerRef | null } = { ref: null };
+export interface PlayerBus {
+  ref: PlayerRef | null;
+  seekToSeconds: (seconds: number, fps: number) => void;
+}
 
-export const seekToSeconds = (seconds: number, fps: number) => {
-  playerBus.ref?.seekTo(Math.round(seconds * fps));
-};
+// Each mounted editor owns its controls. Hidden sibling panels must not replace
+// another project's player reference or reset it during unmount.
+export function createPlayerBus(): PlayerBus {
+  const bus: PlayerBus = {
+    ref: null,
+    seekToSeconds: (seconds, fps) => bus.ref?.seekTo(Math.round(seconds * fps)),
+  };
+  return bus;
+}
+
+export const PlayerBusContext = createContext<PlayerBus | null>(null);
+export function usePlayerBus(): PlayerBus {
+  const bus = useContext(PlayerBusContext);
+  if (!bus) throw new Error('Player controls must be inside an editor panel');
+  return bus;
+}

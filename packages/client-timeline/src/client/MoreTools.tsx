@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { Icon } from './Icon';
 
 export function MoreTools({ children }: { children: React.ReactNode }) {
   const ref = useRef<HTMLDetailsElement>(null);
@@ -9,12 +10,17 @@ export function MoreTools({ children }: { children: React.ReactNode }) {
     document.addEventListener('pointerdown', dismiss);
     return () => document.removeEventListener('pointerdown', dismiss);
   }, []);
-  return <details className="djp-more" ref={ref} onKeyDown={(event) => {
+  return <details className="djp-more" ref={ref} onBlur={(event) => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) event.currentTarget.open = false;
+  }} onKeyDown={(event) => {
     if (event.key === 'Escape' && ref.current?.open) { event.stopPropagation(); ref.current.open = false; ref.current.querySelector('summary')?.focus(); }
   }} onClick={(event) => {
-    if ((event.target as HTMLElement).closest('button') && ref.current) ref.current.open = false;
+    if ((event.target as HTMLElement).closest('button') && ref.current) {
+      ref.current.open = false;
+      ref.current.querySelector('summary')?.focus();
+    }
   }}>
-    <summary className="djp-iconbtn" aria-label="更多工具" title="更多工具"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="13" cy="8" r="1.3"/></svg></summary>
+    <summary className="djp-iconbtn" aria-label="更多工具" title="更多工具"><Icon name="dots" /></summary>
     <div className="djp-more-content">{children}</div>
   </details>;
 }

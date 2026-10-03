@@ -33,10 +33,12 @@ export function apply(ctx: any) {
       ctx.sidebarRightTabs.register({
         id: 'djian.library',
         kind: 'djian.library',
+        keepMounted: true,
         priority: 'builtin',
         title: () => '资源库',
         guide: [
           {
+            id: 'djian.library.open',
             order: 20,
             title: () => '资源库',
             description: () => '在线 CC 素材 · 搜索 · 试听 · 导入',
@@ -47,10 +49,10 @@ export function apply(ctx: any) {
     'djian-library: tab type',
   );
 
-  ctx.slots.inject('sidebar.right.pane.tab', () =>
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () =>
     ctx.slots.register(
       { name: 'sidebar.right.pane.tab', key: 'djian.library' },
       LibraryPanel,
     ),
-  );
+  ), 'djian-library: tab body');
 }

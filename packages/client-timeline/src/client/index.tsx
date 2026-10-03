@@ -30,10 +30,12 @@ export function apply(ctx: any) {
       ctx.sidebarRightTabs.register({
         id: 'djian.timeline',
         kind: 'djian.timeline',
+        keepMounted: true,
         priority: 'builtin',
         title: () => '剪辑面板',
         guide: [
           {
+            id: 'djian.timeline.open',
             order: 10,
             title: () => '剪辑面板',
             description: () => '预览 · 片段 · 字幕 · 导出',
@@ -44,15 +46,14 @@ export function apply(ctx: any) {
     'djian-timeline: tab type',
   );
 
-  ctx.slots.inject('sidebar.right.pane.tab', () =>
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () =>
     ctx.slots.register(
       {
         name: 'sidebar.right.pane.tab',
         key: 'djian.timeline',
-        // 会话作用域槽位：注入工厂收 sessionId，会话=项目绑定的客户端侧入口
-        inject: (sessionId: string) => ({ sessionId }),
+        // 0.2.0 的会话标准 props 已提供 sessionId，注册 inject 只用于业务能力。
       },
       Panel,
     ),
-  );
+  ), 'djian-timeline: tab body');
 }

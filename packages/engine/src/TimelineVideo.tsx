@@ -17,6 +17,7 @@ import { fontById, injectFontFaceStyle, overlayFontFamily } from "./fonts";
 
 const SEC = (fps: number, s: number) => Math.round(s * fps);
 const AssetResolver = React.createContext<(src: string) => string>(staticFile);
+const MediaErrorHandler = React.createContext<((src: string) => void) | undefined>(undefined);
 const directAsset = (src: string) => src;
 
 // v3：CSS filter 字符串（省略的通道不出现）
@@ -67,6 +68,8 @@ const FadeIn: React.FC<{ fade: boolean; children: React.ReactNode }> = ({ fade, 
 // v3 变速：成片占时不变（外层序列已定），素材消耗 = 占时 × speed，播放速率 playbackRate 同步
 const ClipSegment: React.FC<{ clip: Clip; pip?: boolean }> = ({ clip }) => {
   const resolveAsset = React.useContext(AssetResolver);
+  const reportError = React.useContext(MediaErrorHandler);
+  const onError = reportError ? () => reportError(clip.src) : undefined;
   const { fps } = useVideoConfig();
   const fade = clip.transition === "fade";
   const speed = clip.speed ?? 1;
@@ -74,16 +77,18 @@ const ClipSegment: React.FC<{ clip: Clip; pip?: boolean }> = ({ clip }) => {
   const anim = animStyle(clip.animations, local);
 
   const inner = clip.type === "image"
-    ? <Img src={resolveAsset(clip.src)} style={{ width: "100%", height: "100%", objectFit: "cover", filter: filterCss(clip.filter), ...anim }} />
+    ? <Img src={resolveAsset(clip.src)} onError={onError} style={{ width: "100%", height: "100%", objectFit: "cover", filter: filterCss(clip.filter), ...anim }} />
     : (
       // <Video> 而非 <OffthreadVideo>：OffthreadVideo 走 Rust 合成器抽帧，在这台 4GB 小机上
       // 随机报 "No frame found at position"（2026-09-23 实测，ffmpeg 同点抽帧全 OK，
       // 密集关键帧/缓存调优均无效）。渲染时浏览器自己 seek 解码，慢一点但稳定。
       <Video
+        onError={onError}
         src={resolveAsset(clip.src)}
         startFrom={SEC(fps, clip.inPoint)}
-        // endAt 是素材源帧绝对位置：占时 × speed 换算成素材消耗（2x 快放 3s → 吃 6s）
-        endAt={SEC(fps, clip.inPoint + clip.clipDuration * speed)}
+        // The enclosing sequence owns duration. Combining endAt with startFrom
+        // and playbackRate applies another duration calculation inside Html5Video
+        // and can unmount fast clips early (e.g. inPoint=1, speed=2, duration=1).
         playbackRate={speed}
         volume={clip.volume * (evalKeyframes(clip.animations?.volume, local) ?? 1)}
         style={{ width: "100%", height: "100%", objectFit: "cover", filter: filterCss(clip.filter), ...anim }}
@@ -132,7 +137,6 @@ const AudioSegment: React.FC<{ clip: AudioClip; trackVolume: number; muted: bool
       <AudioVolumeEnv
         src={resolveAsset(clip.src)}
         startFrom={SEC(fps, clip.inPoint)}
-        endAt={SEC(fps, clip.inPoint + clip.duration * speed)}
         playbackRate={speed}
         baseVolume={trackVolume * clip.volume}
         env={env}
@@ -146,20 +150,32 @@ const AudioSegment: React.FC<{ clip: AudioClip; trackVolume: number; muted: bool
 const AudioVolumeEnv: React.FC<{
   src: string;
   startFrom: number;
-  endAt: number;
   playbackRate: number;
   baseVolume: number;
   env: { t: number; v: number }[] | undefined;
   fps: number;
-}> = ({ src, startFrom, endAt, playbackRate, baseVolume, env, fps }) => {
+}> = ({ src, startFrom, playbackRate, baseVolume, env, fps }) => {
+  const reportError = React.useContext(MediaErrorHandler);
+  const audioRef = React.useRef<HTMLAudioElement>(null);
+  // Remotion's preview audio pool does not forward onError in this version.
+  // Subscribe to the actual element, including errors before the effect runs.
+  React.useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !reportError) return;
+    const failed = () => reportError(src);
+    audio.addEventListener('error', failed);
+    if (audio.error && audio.src === src) failed();
+    return () => audio.removeEventListener('error', failed);
+  }, [src, reportError]);
   const frame = useCurrentFrame();
   const local = frame / fps;
   const envV = evalKeyframes(env, local);
   return (
     <Audio
+      ref={audioRef}
+      onError={reportError ? () => reportError(src) : undefined}
       src={src}
       startFrom={startFrom}
-      endAt={endAt}
       playbackRate={playbackRate}
       volume={baseVolume * (envV ?? 1)}
     />
@@ -210,12 +226,12 @@ const OverlayView: React.FC<{ ov: Overlay }> = ({ ov }) => {
 };
 
 // 主组件：吃时间线 JSON（v2，v1 已在 parseTimeline 归一化），出整片
-export const TimelineVideo: React.FC<{ timeline: Timeline; directSources?: boolean; fontsBase?: string }> = ({ timeline, directSources = false, fontsBase }) => {
+export const TimelineVideo: React.FC<{ timeline: Timeline; directSources?: boolean; fontsBase?: string; onMediaError?: (src: string) => void }> = ({ timeline, directSources = false, fontsBase, onMediaError }) => {
   const { fps } = useVideoConfig();
   const [mainTrack, ...overlayTracks] = timeline.videoTracks;
 
   return (
-    <AssetResolver.Provider value={directSources ? directAsset : staticFile}>
+    <MediaErrorHandler.Provider value={onMediaError}><AssetResolver.Provider value={directSources ? directAsset : staticFile}>
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
       <FontGate timeline={timeline} fontsBase={fontsBase} />
       {/* 主轨道：串行 */}
@@ -251,6 +267,6 @@ export const TimelineVideo: React.FC<{ timeline: Timeline; directSources?: boole
         );
       })}
     </AbsoluteFill>
-    </AssetResolver.Provider>
+    </AssetResolver.Provider></MediaErrorHandler.Provider>
   );
 };

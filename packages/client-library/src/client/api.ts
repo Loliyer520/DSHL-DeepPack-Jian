@@ -114,8 +114,8 @@ export async function searchLibrary(q: string, kind: LibraryKind, page: number):
   return d as LibrarySearchResult;
 }
 
-export async function importLibrary(url: string, name: string | undefined, kind: LibraryKind): Promise<{ name: string; type: string; duration: number | null }> {
-  const r = await apiFetch(`/api/library/import`, {
+export async function importLibrary(url: string, name: string | undefined, kind: LibraryKind, sessionId?: string): Promise<{ name: string; type: string; duration: number | null }> {
+  const r = await apiFetch(`/api/library/import${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ''}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url, name, kind }),

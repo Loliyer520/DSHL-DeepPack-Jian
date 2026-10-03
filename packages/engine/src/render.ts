@@ -6,6 +6,8 @@ import crypto from "node:crypto";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { parseTimeline, timelineDurationInFrames, type Timeline } from "./schema.js";
+import { resolveRenderBrowser } from "./browser.js";
+import { muxNativeAudio, resolveRenderBinaries, useNativeAudio } from "./nativeRuntime.js";
 
 export interface RenderOptions {
   // 时间线 JSON（对象 / 字符串 / 文件路径均可，见 renderVideo）
@@ -101,6 +103,9 @@ async function getBundle(assetsDir: string, onLog?: (m: string) => void): Promis
 
 // 渲染主 API：JSON 时间线进 → mp4 出。返回输出路径与时长帧数。
 export async function renderVideo(opts: RenderOptions): Promise<{ outFile: string; durationInFrames: number; fps: number }> {
+  const browserExecutable = resolveRenderBrowser();
+  const binariesDirectory = await resolveRenderBinaries();
+  const separateAudio = binariesDirectory ? await useNativeAudio(binariesDirectory) : false;
   const timeline: Timeline = parseTimeline(opts.timeline);
   const durationInFrames = Math.max(1, timelineDurationInFrames(timeline));
   const assetsDir = path.resolve(opts.assetsDir);
@@ -109,6 +114,8 @@ export async function renderVideo(opts: RenderOptions): Promise<{ outFile: strin
   const serveUrl = await getBundle(assetsDir);
 
   const composition = await selectComposition({
+    binariesDirectory,
+    browserExecutable,
     serveUrl,
     id: "TimelineVideo",
     inputProps: { timeline },
@@ -117,31 +124,47 @@ export async function renderVideo(opts: RenderOptions): Promise<{ outFile: strin
 
   const concurrency = opts.concurrency ?? Math.max(1, Math.floor(os.cpus().length / 2));
   fs.mkdirSync(path.dirname(opts.outFile), { recursive: true });
-
-  await renderMedia({
-    composition,
-    serveUrl,
-    codec: "h264",
-    outputLocation: opts.outFile,
-    inputProps: { timeline },
-    concurrency,
-    // OffthreadVideo 帧缓存：Remotion 默认按 2GB 跑，4GB 小机上会把可用内存挤爆，
-    // 合成器抽帧时帧已被逐出 → "No frame found at position" 随机失败（2026-09-23 实测）。
-    // 按当时可用内存给保守值：freemem/3，鑎在 256–600MB。
-    offthreadVideoCacheSizeInBytes:
-      opts.offthreadVideoCacheMb != null
-        ? opts.offthreadVideoCacheMb * 1024 * 1024
-        : Math.min(600 * 1024 * 1024, Math.max(256 * 1024 * 1024, Math.floor(os.freemem() / 3))),
-    ...(opts.crf != null ? { crf: opts.crf } : {}),
-    chromiumOptions,
-    onProgress: (p) => {
-      opts.onProgress?.({
-        rendered: p.renderedFrames,
-        total: durationInFrames,
-        stage: p.stitchStage,
-      });
-    },
-  });
+  const outputDir = path.dirname(path.resolve(opts.outFile));
+  const scratch = separateAudio ? fs.mkdtempSync(path.join(outputDir, '.djian-render-')) : null;
+  // Remotion's AAC path requires libfdk_aac, which many system builds omit.
+  // Mix to lossless PCM first, then encode native AAC once and copy the video.
+  try {
+    await renderMedia({
+      binariesDirectory,
+      browserExecutable,
+      composition,
+      serveUrl,
+      codec: "h264",
+      outputLocation: scratch ? path.join(scratch, 'video.mp4') : opts.outFile,
+      ...(scratch ? { audioCodec: 'pcm-16' as const, separateAudioTo: path.join(scratch, 'audio.wav') } : {}),
+      inputProps: { timeline },
+      concurrency,
+      // OffthreadVideo 帧缓存：Remotion 默认按 2GB 跑，4GB 小机上会把可用内存挤爆，
+      // 合成器抽帧时帧已被逐出 → "No frame found at position" 随机失败（2026-09-23 实测）。
+      // 按当时可用内存给保守值：freemem/3，鑎在 256–600MB。
+      offthreadVideoCacheSizeInBytes:
+        opts.offthreadVideoCacheMb != null
+          ? opts.offthreadVideoCacheMb * 1024 * 1024
+          : Math.min(600 * 1024 * 1024, Math.max(256 * 1024 * 1024, Math.floor(os.freemem() / 3))),
+      ...(opts.crf != null ? { crf: opts.crf } : {}),
+      chromiumOptions,
+      onProgress: (p) => {
+        opts.onProgress?.({
+          rendered: p.renderedFrames,
+          total: durationInFrames,
+          stage: p.stitchStage,
+        });
+      },
+    });
+    if (scratch && binariesDirectory) {
+      opts.onProgress?.({ rendered: durationInFrames, total: durationInFrames, stage: 'muxing' });
+      const completed = path.join(scratch, 'completed.mp4');
+      await muxNativeAudio(binariesDirectory, path.join(scratch, 'video.mp4'), path.join(scratch, 'audio.wav'), completed, durationInFrames / timeline.meta.fps);
+      fs.renameSync(completed, path.resolve(opts.outFile));
+    }
+  } finally {
+    if (scratch && path.dirname(path.resolve(scratch)) === outputDir) fs.rmSync(scratch, { recursive: true, force: true });
+  }
 
   return { outFile: opts.outFile, durationInFrames, fps: timeline.meta.fps };
 }
@@ -154,6 +177,8 @@ export async function renderFrame(opts: {
   outFile: string; // PNG 绝对路径
   assetsDir?: string;
 }): Promise<{ outFile: string; frame: number; width: number; height: number }> {
+  const browserExecutable = resolveRenderBrowser();
+  const binariesDirectory = await resolveRenderBinaries();
   const timeline: Timeline = parseTimeline(opts.timeline);
   const durationInFrames = Math.max(1, timelineDurationInFrames(timeline));
   const fps = timeline.meta.fps;
@@ -163,6 +188,8 @@ export async function renderFrame(opts: {
     opts.assetsDir ?? process.env.DJIAN_ASSETS_DIR ?? path.resolve(engineDir, "../../webui/public");
   const serveUrl = await getBundle(assetsDir);
   const composition = await selectComposition({
+    binariesDirectory,
+    browserExecutable,
     serveUrl,
     id: "TimelineVideo",
     inputProps: { timeline },
@@ -171,6 +198,8 @@ export async function renderFrame(opts: {
 
   fs.mkdirSync(path.dirname(opts.outFile), { recursive: true });
   await renderStill({
+    binariesDirectory,
+    browserExecutable,
     composition,
     serveUrl,
     output: opts.outFile,

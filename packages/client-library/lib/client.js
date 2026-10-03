@@ -104,8 +104,8 @@ window.__ModuleLoader__.load({
 			if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
 			return d;
 		}
-		async function importLibrary(url, name, kind) {
-			const r = await apiFetch(`/api/library/import`, {
+		async function importLibrary(url, name, kind, sessionId) {
+			const r = await apiFetch(`/api/library/import${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ""}`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
@@ -126,7 +126,8 @@ window.__ModuleLoader__.load({
 			const sec = Math.round(s % 60);
 			return m > 0 ? `${m}:${String(sec).padStart(2, "0")}` : `0:${String(sec).padStart(2, "0")}`;
 		};
-		const LibraryPanel = () => {
+		const LibraryPanel = ({ sessionId }) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LibraryContents, { sessionId }, sessionId ?? "default");
+		const LibraryContents = ({ sessionId }) => {
 			const [q, setQ] = (0, react.useState)("");
 			const [kind, setKind] = (0, react.useState)("image");
 			const [page, setPage] = (0, react.useState)(1);
@@ -162,7 +163,7 @@ window.__ModuleLoader__.load({
 				}));
 				try {
 					const safe = it.title.replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 60);
-					const r = await importLibrary(it.url, safe || void 0, it.kind);
+					const r = await importLibrary(it.url, safe || void 0, it.kind, sessionId);
 					setImports((m) => ({
 						...m,
 						[it.id]: {
@@ -363,19 +364,21 @@ window.__ModuleLoader__.load({
 			ctx.effect(() => ctx.sidebarRightTabs.register({
 				id: "djian.library",
 				kind: "djian.library",
+				keepMounted: true,
 				priority: "builtin",
 				title: () => "资源库",
 				guide: [{
+					id: "djian.library.open",
 					order: 20,
 					title: () => "资源库",
 					description: () => "在线 CC 素材 · 搜索 · 试听 · 导入",
 					icon: LibraryGlyph
 				}]
 			}), "djian-library: tab type");
-			ctx.slots.inject("sidebar.right.pane.tab", () => ctx.slots.register({
+			ctx.effect(() => ctx.slots.inject("sidebar.right.pane.tab", () => ctx.slots.register({
 				name: "sidebar.right.pane.tab",
 				key: "djian.library"
-			}, LibraryPanel));
+			}, LibraryPanel)), "djian-library: tab body");
 		}
 		//#endregion
 		exports.apply = apply;

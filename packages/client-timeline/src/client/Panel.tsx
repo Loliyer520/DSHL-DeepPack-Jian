@@ -1,12 +1,18 @@
+import { readViewPreference, saveViewPreference } from './viewPreferences';
+import { ShortcutsDialog } from './ShortcutsDialog';
+import { VolumeSlider } from './VolumeSlider';
+import { SubtitleTextField } from './SubtitleTextField';
+import { splitOffset } from './splitPosition';
+import { NumberField } from './NumberField';
 import { TransportBar } from './TransportBar';
 import { TrackStrip, type TrackMode } from './TrackStrip';
 import { MoreTools } from './MoreTools';
 import { InspectorRow, AdvancedSettings } from './InspectorRow';
 import { Icon } from './Icon';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Player, type PlayerRef } from '@remotion/player';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   timelineDurationInFrames,
+  clipBox,
   shiftAnimations,
   type AudioClip,
   type Clip,
@@ -14,8 +20,8 @@ import {
   type Timeline,
 } from '../../../engine/src/schema';
 import { ANIMATION_PRESETS, expandAnimationPreset } from '../../../engine/src/presets';
-import { PreviewVideo } from './PreviewVideo';
-import { playerBus, seekToSeconds } from './bus';
+import { PreviewStage } from './PreviewStage';
+import { createPlayerBus, PlayerBusContext, usePlayerBus } from './bus';
 import { assetUrl, listFonts, uploadAsset, type AssetInfo, type DjianFontInfo } from './api';
 import { useHistory } from './useHistory';
 import { useTimelineSync } from './useTimelineSync';
@@ -24,63 +30,19 @@ import { CanvasDialog } from './CanvasDialog';
 import { AssetsSection } from './AssetsSection';
 import { ExportControl } from './ExportControl';
 import { HistoryDialog } from './HistoryDialog';
+import { ProjectSession } from './ProjectSession';
 
 const fmtSec = (s: number) => `${s.toFixed(1)}s`;
 
 // ---------- 剪辑原语（语义与 webui store / 服务端 ops 一致） ----------
 const clipId = () => 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
-type Mutate = (fn: (t: Timeline) => Timeline) => void;
+type Mutate = (fn: (t: Timeline) => Timeline, group?: symbol) => void;
 
-const ops = (mutate: Mutate) => ({
-  addClip: () =>
-    mutate((t) => ({
-      ...t,
-      videoTracks: t.videoTracks.map((tr, i) =>
-        i === 0
-          ? {
-              ...tr,
-              clips: [
-                ...tr.clips,
-                {
-                  id: clipId(),
-                  type: 'video' as const,
-                  // 默认沿用末片段素材，空时间线退回 a.mp4
-                  src: tr.clips[tr.clips.length - 1]?.src ?? 'a.mp4',
-                  inPoint: 0,
-                  clipDuration: 3,
-                  transition: 'none' as const,
-                  volume: 1, speed: 1,
-                },
-              ],
-            }
-          : tr,
-      ),
-    })),
-  addPip: () =>
+const ops = (mutate: Mutate, currentFrame: () => number) => ({
+  addAudio: (src: string, duration: number, atSeconds: number) =>
     mutate((t) => {
-      const src = t.videoTracks[0]?.clips[t.videoTracks[0].clips.length - 1]?.src ?? 'a.mp4';
-      const clip = {
-        id: clipId(),
-        type: 'video' as const,
-        src,
-        inPoint: 0,
-        clipDuration: 3,
-        transition: 'none' as const,
-        volume: 1, speed: 1,
-        atSeconds: 0,
-      };
-      if (t.videoTracks[1]) {
-        return {
-          ...t,
-          videoTracks: t.videoTracks.map((tr, i) => (i === 1 ? { ...tr, clips: [...tr.clips, clip] } : tr)),
-        };
-      }
-      return { ...t, videoTracks: [...t.videoTracks, { id: 'v2', name: '画中画', clips: [clip] }] };
-    }),
-  addAudio: (src: string, duration = 10) =>
-    mutate((t) => {
-      const clip = { id: clipId(), src, inPoint: 0, duration, volume: 1, speed: 1, atSeconds: 0 };
+      const clip = { id: clipId(), src, inPoint: 0, duration, volume: 1, speed: 1, atSeconds };
       if (t.audioTracks[0]) {
         return {
           ...t,
@@ -111,11 +73,11 @@ const ops = (mutate: Mutate) => ({
         clips: tr.clips.map((c) => (c.id === id ? { ...c, ...patch } : c)),
       })),
     })),
-  updateAudioTrack: (id: string, patch: { volume?: number; muted?: boolean }) =>
+  updateAudioTrack: (id: string, patch: { volume?: number; muted?: boolean }, group?: symbol) =>
     mutate((t) => ({
       ...t,
       audioTracks: t.audioTracks.map((tr) => (tr.id === id ? { ...tr, ...patch } : tr)),
-    })),
+    }), group),
   updateAudioClip: (id: string, patch: Partial<AudioClip>) =>
     mutate((t) => ({
       ...t,
@@ -135,8 +97,8 @@ const ops = (mutate: Mutate) => ({
         let start = 0;
         if (ti === 0) for (let i = 0; i < idx; i++) start += tr.clips[i].clipDuration;
         else start = clip.atSeconds ?? 0;
-        const off = atSeconds - start;
-        if (!(off > 0.05) || off >= clip.clipDuration - 0.05) return t;
+        const off = splitOffset(start, clip.clipDuration, atSeconds, t.meta.fps);
+        if (off === null) return t;
         const left = { ...clip, clipDuration: off };
         const right: Clip = { ...clip, id: clipId(), inPoint: clip.inPoint + off * (clip.speed ?? 1), clipDuration: clip.clipDuration - off, animations: shiftAnimations(clip.animations, off) };
         if (clip.atSeconds !== undefined) right.atSeconds = clip.atSeconds + off;
@@ -149,8 +111,8 @@ const ops = (mutate: Mutate) => ({
         const idx = tr.clips.findIndex((c) => c.id === id);
         if (idx === -1) continue;
         const clip = tr.clips[idx];
-        const off = atSeconds - clip.atSeconds;
-        if (!(off > 0.05) || off >= clip.duration - 0.05) return t;
+        const off = splitOffset(clip.atSeconds, clip.duration, atSeconds, t.meta.fps);
+        if (off === null) return t;
         const left = { ...clip, duration: off };
         const right = { ...clip, id: clipId(), inPoint: clip.inPoint + off * (clip.speed ?? 1), duration: clip.duration - off, atSeconds: clip.atSeconds + off, animations: shiftAnimations(clip.animations, off) };
         const clips = [...tr.clips];
@@ -172,42 +134,29 @@ const ops = (mutate: Mutate) => ({
       ...t,
       overlays: [
         ...t.overlays,
-        { text: '新字幕', startSeconds: 0, endSeconds: 3, position: 'bottom', fontSize: 48, color: '#ffffff' },
+        { text: '新字幕', startSeconds: currentFrame() / t.meta.fps, endSeconds: currentFrame() / t.meta.fps + 3, position: 'bottom', fontSize: 48, color: '#ffffff' },
       ],
     })),
   removeOverlay: (index: number) =>
     mutate((t) => ({ ...t, overlays: t.overlays.filter((_, i) => i !== index) })),
+  splitOverlay: (index: number, atSeconds: number) =>
+    mutate((t) => {
+      const overlay = t.overlays[index];
+      if (!overlay) return t;
+      const offset = splitOffset(overlay.startSeconds, overlay.endSeconds - overlay.startSeconds, atSeconds, t.meta.fps);
+      if (offset === null) return t;
+      const at = overlay.startSeconds + offset;
+      const left = { ...overlay, endSeconds: at };
+      const right = { ...overlay, startSeconds: at, animations: shiftAnimations(overlay.animations, at - overlay.startSeconds) };
+      const overlays = [...t.overlays];
+      overlays.splice(index, 1, left, right);
+      return { ...t, overlays };
+    }),
   updateOverlay: (index: number, patch: Partial<Overlay>) =>
     mutate((t) => ({ ...t, overlays: t.overlays.map((o, i) => (i === index ? { ...o, ...patch } : o)) })),
 });
 
 // ---------- 小组件 ----------
-const NumberField: React.FC<{
-  label: string;
-  value: number;
-  step?: number;
-  min?: number;
-  onCommit: (v: number) => void;
-}> = ({ label, value, step = 0.5, min = 0, onCommit }) => (
-  <label className="djp-field">
-    <span>{label}</span>
-    <input
-      type="number"
-      defaultValue={value}
-      key={value}
-      step={step}
-      min={min}
-      onBlur={(e) => {
-        const v = Number(e.target.value);
-        if (Number.isFinite(v) && v >= min && v !== value) onCommit(v);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-      }}
-    />
-  </label>
-);
-
 // 滤镜预设（v3）：选即应用，选「无滤镜」清空
 const FILTER_PRESETS: { label: string; filter: Exclude<Clip['filter'], undefined> }[] = [
   { label: '提亮', filter: { brightness: 1.15 } },
@@ -281,13 +230,16 @@ const FilterSelect: React.FC<{ value: Clip['filter']; onCommit: (f: Clip['filter
 );
 
 // ---------- 主面板 ----------
-export const Panel: React.FC<{ sessionId?: string }> = ({ sessionId }) => (
-  <EditorPanel key={sessionId ?? "default"} sessionId={sessionId} />
-);
+export const Panel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
+  const player = useMemo(createPlayerBus, [sessionId]);
+  return <ProjectSession.Provider value={sessionId}><PlayerBusContext.Provider value={player}><EditorPanel key={sessionId ?? "default"} sessionId={sessionId} /></PlayerBusContext.Provider></ProjectSession.Provider>;
+};
 
 const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
+  const playerBus = usePlayerBus();
+  const { seekToSeconds } = playerBus;
   const rootRef = useRef<HTMLDivElement>(null);
-  const { timeline, mutate, reload, saveState, syncError, retrySave } = useTimelineSync(sessionId, rootRef);
+  const { timeline, mutate, reload, saveState, syncError, retrySave, hasConflict, resolveConflict, saveBeforeRestore } = useTimelineSync(sessionId, rootRef);
   const hist = useHistory(timeline, mutate);
   const prevSession = useRef(sessionId);
   useEffect(() => {
@@ -298,14 +250,16 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
       void reload();
     }
   }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
-  const o = ops(hist.commit);
+  const o = ops(hist.commit, () => playerBus.ref?.getCurrentFrame() ?? 0);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [histOpen, setHistOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const toggleItem = (id: string) => setSelected((current) => current === id ? null : id);
-  const [tab, setTab] = useState<'assets' | 'clips' | 'pip' | 'audio' | 'subs'>('clips');
+  const [trackMode, setTrackMode] = useState<TrackMode>(() => readViewPreference(sessionId, 'mode', 'main', (value) => ['main', 'audio', 'pip', 'subs'].includes(value as string)));
+  useEffect(() => { saveViewPreference(sessionId, 'mode', trackMode); }, [sessionId, trackMode]);
+  const [tab, setTab] = useState<'assets' | 'clips' | 'pip' | 'audio' | 'subs'>(trackMode === 'main' ? 'clips' : trackMode);
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const [trackMode, setTrackMode] = useState<TrackMode>('main');
   const switchTrackMode = (mode: TrackMode) => {
     setTrackMode(mode);
     setTab(mode === 'main' ? 'clips' : mode);
@@ -313,6 +267,8 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
     setLibraryOpen(false);
   };
   const [uploadError, setUploadError] = useState('');
+  const [uploadingAudio, setUploadingAudio] = useState('');
+  const audioUploadPending = useRef(false);
   const [fonts, setFonts] = useState<DjianFontInfo[]>([]);
   const audioFileRef = useRef<HTMLInputElement>(null);
   const playheadRef = useRef(0);
@@ -335,7 +291,7 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
-      if (!el || !rootRef.current?.contains(el) || canvasOpen || histOpen) return;
+      if (!el || !rootRef.current?.contains(el) || canvasOpen || histOpen || shortcutsOpen) return;
       if (el.closest('button, a, [role="dialog"]')) return;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
       if (e.ctrlKey || e.metaKey) {
@@ -358,7 +314,7 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [hist.undo, hist.redo, timeline?.meta.fps, canvasOpen, histOpen]);
+  }, [hist.undo, hist.redo, timeline?.meta.fps, canvasOpen, histOpen, shortcutsOpen, playerBus, seekToSeconds]);
 
   if (!timeline) {
     return <div className="djp-root" ref={rootRef}><div className="djp-empty" role="status">{syncError || '正在连接剪辑引擎…'}{syncError && <p><button className="djp-btn" onClick={() => void reload()}>重新连接</button></p>}</div></div>;
@@ -381,12 +337,12 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
 
   // 主轨上被播放头穿过的 clip → 在播放头处分割
   const splitMainAtPlayhead = () => {
-    const at = Math.round(playheadRef.current * 100) / 100;
+    const at = playheadRef.current;
     for (const tr0 of [t.videoTracks[0]]) {
       if (!tr0) return;
       let acc = 0;
       for (const c of tr0.clips) {
-        if (at > acc + 0.05 && at < acc + c.clipDuration - 0.05) {
+        if (splitOffset(acc, c.clipDuration, at, t.meta.fps) !== null) {
           o.splitClip(c.id, at);
           return;
         }
@@ -401,41 +357,43 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
     ...t,
     videoTracks: t.videoTracks.map((tr) => ({
       ...tr,
-      clips: tr.clips.map((c) => ({ ...c, src: assetUrl(c.src) })),
+      clips: tr.clips.map((c) => ({ ...c, src: assetUrl(c.src, sessionId) })),
     })),
     audioTracks: t.audioTracks.map((tr) => ({
       ...tr,
-      clips: tr.clips.map((c) => ({ ...c, src: assetUrl(c.src) })),
+      clips: tr.clips.map((c) => ({ ...c, src: assetUrl(c.src, sessionId) })),
     })),
   };
 
-  // 素材库动作：视频/图片加主轨，长按/二次点击进画中画；音频进音频轨
-  const addAssetClip = (a: AssetInfo) =>
-    hist.commit((cur) => ({
-      ...cur,
-      videoTracks: cur.videoTracks.map((tr, i) =>
-        i === 0
-          ? {
-              ...tr,
-              clips: [
-                ...tr.clips,
-                {
-                  id: clipId(),
-                  type: a.type === 'image' ? ('image' as const) : ('video' as const),
-                  src: a.name,
-                  inPoint: 0,
-                  clipDuration: a.type === 'image' ? 3 : a.duration ?? 3,
-                  transition: 'none' as const,
-                  volume: 1, speed: 1,
-                },
-              ],
-            }
-          : tr,
-      ),
-    }));
-  const setBgm = (name: string) =>
+  const openPipAssets = () => { setTrackMode('pip'); setTab('assets'); setLibraryOpen(true); };
+
+  // 素材库按当前模式添加画面，音频保留源时长。
+  const addAssetClip = (asset: AssetInfo) =>
     hist.commit((cur) => {
-      const clip = { id: clipId(), src: name, inPoint: 0, duration: 10, volume: 1, speed: 1, atSeconds: 0 };
+      const clip: Clip = {
+        id: clipId(),
+        type: asset.type === 'image' ? 'image' : 'video',
+        src: asset.name,
+        inPoint: 0,
+        clipDuration: asset.type === 'image' ? 3 : (asset.duration != null && asset.duration > 0 ? asset.duration : 3),
+        transition: 'none', volume: 1, speed: 1,
+      };
+      const tracks = cur.videoTracks.length ? cur.videoTracks : [{ id: 'v1', name: '主轨道', clips: [] }];
+      if (trackMode === 'pip') {
+        clip.atSeconds = (playerBus.ref?.getCurrentFrame() ?? 0) / cur.meta.fps;
+        clip.box = { x: 0.65, y: 0.65, w: 0.3, h: 0.3 };
+        return {
+          ...cur,
+          videoTracks: tracks[1]
+            ? tracks.map((track, i) => i === 1 ? { ...track, clips: [...track.clips, clip] } : track)
+            : [...tracks, { id: 'v2', name: '画中画', clips: [clip] }],
+        };
+      }
+      return { ...cur, videoTracks: tracks.map((track, i) => i === 0 ? { ...track, clips: [...track.clips, clip] } : track) };
+    });
+  const addAssetAudio = (asset: AssetInfo) =>
+    hist.commit((cur) => {
+      const clip = { id: clipId(), src: asset.name, inPoint: 0, duration: asset.duration != null && asset.duration > 0 ? asset.duration : 10, volume: 1, speed: 1, atSeconds: (playerBus.ref?.getCurrentFrame() ?? 0) / cur.meta.fps };
       if (cur.audioTracks[0]) {
         return {
           ...cur,
@@ -473,36 +431,25 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
         <MoreTools>
           <button className="djp-btn" disabled={saveState !== 'saved'} onClick={() => setHistOpen(true)}>版本历史</button>
           <button className="djp-btn" onClick={() => setLibraryOpen(true)}>片段列表</button>
+          <button className="djp-btn" onClick={() => setShortcutsOpen(true)}>操作与快捷键</button>
         </MoreTools>
         <button className="djp-resolution" title="画布设置" onClick={() => setCanvasOpen(true)}>{Math.min(t.meta.width, t.meta.height)}P <span>⌄</span></button>
-        <ExportControl t={t} />
+        <ExportControl t={t} sessionId={sessionId} />
       </div>
       <div className="djp-save-status" role="status" aria-live="polite">
         <span>{saveState === 'saving' ? '正在保存…' : saveState === 'pending' ? '有待保存的修改' : saveState === 'error' ? '保存失败，修改已保留' : '已保存'}</span>
-        {saveState === 'error' && <button className="djp-btn" onClick={() => void retrySave()}>重试保存</button>}
+        {saveState === 'error' && !hasConflict && <button className="djp-btn" onClick={() => void retrySave()}>重试保存</button>}
       </div>
+      {hasConflict && <div className="djp-conflict" role="alert">
+        <span>项目已有其他修改。本地草稿已保留，请选择要保存的版本。</span>
+        <div><button className="djp-btn" onClick={() => void resolveConflict('local')}>用本地覆盖</button><button className="djp-btn" onClick={() => void resolveConflict('remote')}>放弃本地，采用最新</button></div>
+      </div>}
       {syncError && <div className="djp-notice" role="alert">{syncError}</div>}
 
       {!hasContent ? (
         <div className="djp-empty">从下方「素材」添加画面，开始剪辑</div>
       ) : (
-        <div className="djp-stage">
-          <Player
-            key={`${t.meta.fps}-${t.meta.width}-${t.meta.height}`}
-            ref={(r: PlayerRef | null) => {
-              playerBus.ref = r;
-            }}
-            component={PreviewVideo}
-            inputProps={{ timeline: previewTimeline }}
-            durationInFrames={durationInFrames}
-            fps={t.meta.fps}
-            compositionWidth={t.meta.width}
-            compositionHeight={t.meta.height}
-            controls={false}
-            acknowledgeRemotionLicense
-            style={{ width: '100%', height: '100%' }}
-          />
-        </div>
+        <PreviewStage timeline={previewTimeline} durationInFrames={durationInFrames} onOpenAssets={() => { setTab('assets'); setLibraryOpen(true); }} />
       )}
 
       <TransportBar fps={t.meta.fps} duration={totalSec} undo={hist.undo} redo={hist.redo} canUndo={hist.canUndo} canRedo={hist.canRedo} />
@@ -510,9 +457,9 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
       <div className="djp-collection" hidden={!libraryOpen} role="region" aria-label="编辑工具" onKeyDown={(e) => {
         if (e.key === 'Escape') { e.stopPropagation(); setLibraryOpen(false); rootRef.current?.querySelector<HTMLElement>('.djp-tool-active')?.focus(); }
       }}>
-      <div className="djp-collection-head"><strong>{{ assets: '素材库', clips: '剪辑', pip: '画中画', audio: '音频', subs: '文本' }[tab]}</strong><button className="djp-iconbtn" aria-label="收起编辑工具" onClick={() => setLibraryOpen(false)}><Icon name="close" /></button></div>
+      <div className="djp-collection-head"><strong>{{ assets: trackMode === 'pip' ? '选择画中画素材' : '素材库', clips: '剪辑', pip: '画中画', audio: '音频', subs: '文本' }[tab]}</strong><button className="djp-iconbtn" aria-label="收起编辑工具" onClick={() => setLibraryOpen(false)}><Icon name="close" /></button></div>
       <div className="djp-tabwrap">
-        {tab === 'assets' && <AssetsSection onAddClip={addAssetClip} onSetBgm={setBgm} />}
+        {tab === 'assets' && <AssetsSection videoTarget={trackMode === 'pip' ? '画中画' : '主轨道'} onAddClip={addAssetClip} onAddAudio={addAssetAudio} usedSources={[...t.videoTracks, ...t.audioTracks].flatMap(track => track.clips.map(clip => clip.src))} />}
 
         {tab === 'clips' && (
       <div className="djp-section">
@@ -520,11 +467,11 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
           <span>片段（主轨道）</span>
           <span style={{ display: 'flex', gap: 6 }}>
             <button className="djp-btn" title="在播放头处分割主轨片段" onClick={splitMainAtPlayhead}><Icon name="split" />分割</button>
-            <button className="djp-btn" title="加画中画叠加轨" onClick={o.addPip}>画中画</button>
-            <button className="djp-add" title="添加片段" onClick={o.addClip}><Icon name="plus" /></button>
+            <button className="djp-btn" title="加画中画叠加轨" onClick={openPipAssets}>画中画</button>
+            <button className="djp-add" title="添加片段" onClick={() => { setTrackMode('main'); setTab('assets'); setLibraryOpen(true); }}><Icon name="plus" /></button>
           </span>
         </div>
-        {mainClips.length === 0 && <div className="djp-hint">主轨道空</div>}
+        {mainClips.length === 0 && <div className="djp-hint">点击「+」选择视频或图片，添加到主轨道</div>}
         <div onDragOver={onDragOver} onDrop={onDrop} className="djp-item-list">
           {mainClips.map((c, i) => (
             <InspectorRow
@@ -548,17 +495,20 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
                 <NumberField
                   label="时长"
                   value={c.clipDuration}
-                  min={0.1}
+                  min={1 / t.meta.fps}
+                  step={1 / t.meta.fps}
                   onCommit={(v) => o.updateClip(c.id, { clipDuration: v })}
                 />
                 <NumberField
                   label="音量"
+                  max={1}
                   value={c.volume}
                   step={0.1}
                   onCommit={(v) => o.updateClip(c.id, { volume: Math.min(1, v) })}
                 />
                 <NumberField
                   label="速度"
+                  max={10}
                   value={c.speed ?? 1}
                   step={0.25}
                   min={0.1}
@@ -579,14 +529,15 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
       <div className="djp-section">
         <div className="djp-section-head">
           <span>画中画</span>
-          <button className="djp-add" title="添加画中画" onClick={o.addPip}><Icon name="plus" /></button>
+          <button className="djp-add" title="添加画中画" onClick={openPipAssets}><Icon name="plus" /></button>
         </div>
-        {pipClips.length === 0 && <div className="djp-hint">无叠加片段——「片段」区点「画中画」或让 AI 加</div>}
+        {pipClips.length === 0 && <div className="djp-hint">点击「+」选择视频或图片，添加到当前播放位置</div>}
         {pipClips.map((c) => (
           <InspectorRow key={c.id} title={c.src} summary={fmtSec(c.clipDuration)} open={selected === c.id} onToggle={() => toggleItem(c.id)}>
             <div className="djp-fields">
             <select
               className="djp-select"
+              aria-label="画中画布局"
               value={c.box ? JSON.stringify(c.box) : ''}
               onChange={(e) => {
                 const v = e.target.value;
@@ -599,17 +550,25 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
               }}
             >
               <option value="">默认（右下 30%）</option>
+              {c.box && !BOX_PRESETS.some((preset) => JSON.stringify(preset.box) === JSON.stringify(c.box)) && <option value={JSON.stringify(c.box)} disabled>自定义位置</option>}
               {BOX_PRESETS.map((p) => (
                 <option key={p.label} value={JSON.stringify(p.box)}>{p.label}</option>
               ))}
             </select>
             <NumberField label="从" value={c.atSeconds ?? 0} onCommit={(v) => o.updateClip(c.id, { atSeconds: Math.max(0, v) })} />
-            <NumberField label="时长" value={c.clipDuration} min={0.1} onCommit={(v) => o.updateClip(c.id, { clipDuration: v })} />
-            <NumberField label="速度" value={c.speed ?? 1} step={0.25} min={0.1} onCommit={(v) => o.updateClip(c.id, { speed: Math.min(10, Math.max(0.1, v)) })} />
+            <NumberField label="时长" value={c.clipDuration} min={1 / t.meta.fps} step={1 / t.meta.fps} onCommit={(v) => o.updateClip(c.id, { clipDuration: v })} />
+            <NumberField label="速度" value={c.speed ?? 1} max={10} step={0.25} min={0.1} onCommit={(v) => o.updateClip(c.id, { speed: Math.min(10, Math.max(0.1, v)) })} />
 
-            <button className="djp-btn" title="在播放头处分割" onClick={() => o.splitClip(c.id, Math.round(playheadRef.current * 100) / 100)}><Icon name="split" /></button>
+            <button className="djp-btn" title="在播放头处分割" onClick={() => o.splitClip(c.id, playheadRef.current)}><Icon name="split" /></button>
             <button className="djp-del" title="删除画中画" onClick={() => o.removeClip(c.id)}><Icon name="close" /></button>
             </div>
+            <AdvancedSettings label="位置与尺寸">
+              {([['x', '水平位置 %'], ['y', '垂直位置 %'], ['w', '宽度 %'], ['h', '高度 %']] as const).map(([key, label]) => (
+                <NumberField key={key} label={label} value={Math.round(clipBox(c)[key] * 10000) / 100} step={1} min={key === 'w' || key === 'h' ? 1 : 0} max={100}
+                  onCommit={(value) => o.updateClip(c.id, { box: { ...clipBox(c), [key]: value / 100 } })} />
+              ))}
+              <button className="djp-btn" onClick={() => o.updateClip(c.id, { box: undefined })}>恢复默认位置</button>
+            </AdvancedSettings>
             <AdvancedSettings>
               <FilterSelect value={c.filter} onCommit={(f) => o.updateClip(c.id, { filter: f })} />
               <AnimSelect duration={c.clipDuration} anims={c.animations} onCommit={(anims) => o.updateClip(c.id, { animations: anims })} />
@@ -631,22 +590,31 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
               style={{ display: 'none' }}
               onChange={async (e) => {
                 const f = e.target.files?.[0];
-                if (!f) return;
+                if (!f || audioUploadPending.current) return;
+                audioUploadPending.current = true;
+                setUploadingAudio(f.name);
+                setUploadError('');
+                // Capture timeline time before the upload: frame rate and playhead may change while awaiting it.
+                const insertionSeconds = (playerBus.ref?.getCurrentFrame() ?? 0) / t.meta.fps;
                 try {
-                  const up = await uploadAsset(f);
-                  o.addAudio(up.name, up.duration ?? 10);
+                  const up = await uploadAsset(f, sessionId);
+                  o.addAudio(up.name, up.duration ?? 10, insertionSeconds);
                   setUploadError('');
                 } catch (error) {
                   setUploadError(error instanceof Error ? error.message : '上传失败，请重试');
+                } finally {
+                  audioUploadPending.current = false;
+                  setUploadingAudio('');
+                  if (audioFileRef.current) audioFileRef.current.value = '';
                 }
-                if (audioFileRef.current) audioFileRef.current.value = '';
               }}
             />
-            <button className="djp-btn" title="上传音频并加入音频轨" onClick={() => audioFileRef.current?.click()}>上传</button>
+            <button className="djp-btn" disabled={!!uploadingAudio} aria-busy={!!uploadingAudio} title="上传音频并加入音频轨" onClick={() => audioFileRef.current?.click()}>{uploadingAudio ? '上传中…' : '上传'}</button>
           </span>
         </div>
         {uploadError && <div className="djp-notice" role="alert">{uploadError}</div>}
-        {t.audioTracks.length === 0 && <div className="djp-hint">无音频轨——素材库「♪配乐」、上方「上传」或让 AI 加</div>}
+        {uploadingAudio && <div className="djp-hint" role="status">正在上传 {uploadingAudio}，完成后加入音频轨</div>}
+        {t.audioTracks.length === 0 && <div className="djp-hint">从素材库添加音频，或点击「上传」导入</div>}
         {t.audioTracks.map((tr) => (
           <div className="djp-audio-group" key={tr.id}>
             <div className="djp-card-head">
@@ -660,21 +628,16 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
               </button>
               <details className="djp-track-settings"><summary>轨道音量</summary><label className="djp-field">
                 <span>轨音量</span>
-                <input
-                  type="range" min={0} max={1} step={0.05}
-                  value={tr.volume}
-                  onChange={(e) => o.updateAudioTrack(tr.id, { volume: Number(e.target.value) })}
-                  style={{ width: 70 }}
-                />
+                <VolumeSlider value={tr.volume} onChange={(volume, group) => o.updateAudioTrack(tr.id, { volume }, group)} />
               </label></details>
             </div>
             {tr.clips.map((c) => (
 <InspectorRow key={c.id} title={c.src} summary={fmtSec(c.duration)} open={selected === c.id} onToggle={() => toggleItem(c.id)}><div className="djp-fields">
                 <NumberField label="从" value={c.atSeconds} onCommit={(v) => o.updateAudioClip(c.id, { atSeconds: Math.max(0, v) })} />
-                <NumberField label="时长" value={c.duration} min={0.1} onCommit={(v) => o.updateAudioClip(c.id, { duration: v })} />
-                <NumberField label="音量" value={c.volume} step={0.1} onCommit={(v) => o.updateAudioClip(c.id, { volume: Math.min(1, Math.max(0, v)) })} />
-                <NumberField label="速度" value={c.speed ?? 1} step={0.25} min={0.1} onCommit={(v) => o.updateAudioClip(c.id, { speed: Math.min(10, Math.max(0.1, v)) })} />
-                <button className="djp-btn" title="在播放头处分割" onClick={() => o.splitClip(c.id, Math.round(playheadRef.current * 100) / 100)}><Icon name="split" /></button>
+                <NumberField label="时长" value={c.duration} min={1 / t.meta.fps} step={1 / t.meta.fps} onCommit={(v) => o.updateAudioClip(c.id, { duration: v })} />
+                <NumberField label="音量" value={c.volume} max={1} step={0.1} onCommit={(v) => o.updateAudioClip(c.id, { volume: Math.min(1, Math.max(0, v)) })} />
+                <NumberField label="速度" value={c.speed ?? 1} max={10} step={0.25} min={0.1} onCommit={(v) => o.updateAudioClip(c.id, { speed: Math.min(10, Math.max(0.1, v)) })} />
+                <button className="djp-btn" title="在播放头处分割" onClick={() => o.splitClip(c.id, playheadRef.current)}><Icon name="split" /></button>
                 <button className="djp-del" title="删除音频片段" onClick={() => o.removeAudioClip(c.id)}><Icon name="close" /></button>
               </div></InspectorRow>
             ))}
@@ -693,23 +656,12 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
         {t.overlays.map((ov, i) => (
           <InspectorRow key={i} index={i} title={ov.text || '未填写字幕'} summary={fmtSec(ov.startSeconds) + '–' + fmtSec(ov.endSeconds)} open={selected === 'sub-' + i} onToggle={() => toggleItem('sub-' + i)}>
             <div className="djp-card-head">
-              <input
-                className="djp-sub-text"
-                type="text"
-                defaultValue={ov.text}
-                key={ov.text + i}
-                onBlur={(e) => {
-                  if (e.target.value !== ov.text) o.updateOverlay(i, { text: e.target.value });
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                }}
-              />
+              <SubtitleTextField value={ov.text} onCommit={(text) => o.updateOverlay(i, { text })} />
               <button className="djp-del" title="删除字幕" onClick={() => o.removeOverlay(i)}><Icon name="close" /></button>
             </div>
             <div className="djp-fields">
-              <NumberField label="从" value={ov.startSeconds} onCommit={(v) => o.updateOverlay(i, { startSeconds: v })} />
-              <NumberField label="到" value={ov.endSeconds} min={0.1} onCommit={(v) => o.updateOverlay(i, { endSeconds: v })} />
+              <NumberField label="从" value={ov.startSeconds} max={ov.endSeconds - 1 / t.meta.fps} step={1 / t.meta.fps} onCommit={(v) => o.updateOverlay(i, { startSeconds: v })} />
+              <NumberField label="到" value={ov.endSeconds} min={ov.startSeconds + 1 / t.meta.fps} step={1 / t.meta.fps} onCommit={(v) => o.updateOverlay(i, { endSeconds: v })} />
             </div><AdvancedSettings label="文字样式与动画">
               <NumberField label="字号" value={ov.fontSize} min={8} onCommit={(v) => o.updateOverlay(i, { fontSize: v })} />
               <select
@@ -774,7 +726,7 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
           mode={trackMode}
           onModeChange={switchTrackMode}
           onAudio={() => { setTrackMode('audio'); setTab('audio'); setLibraryOpen(true); }}
-          onAdd={() => { setTab(trackMode === 'main' ? 'assets' : trackMode); setLibraryOpen(true); }}
+          onAdd={() => { setTab(trackMode === 'main' || trackMode === 'pip' ? 'assets' : trackMode); setLibraryOpen(true); }}
           onSeekClip={(start, lane, id) => {
             if (id) setSelected(id);
             setLibraryOpen(false);
@@ -803,6 +755,7 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
         })}
       </nav>
 
+      {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
       {canvasOpen && (
         <CanvasDialog
           t={t}
@@ -813,6 +766,7 @@ const EditorPanel: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
 
       {histOpen && (
         <HistoryDialog
+          beforeRestore={saveBeforeRestore}
           onClose={() => setHistOpen(false)}
           onRestored={() => {
             hist.clear();

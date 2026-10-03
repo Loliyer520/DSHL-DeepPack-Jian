@@ -10,6 +10,9 @@
     "build:engine": "npm run build -w @djian/engine",
     "check:timeline": "tsc -p packages/client-timeline/tsconfig.json --noEmit",
     "test": "npm run build:engine && node --test tests/*.test.mjs",
+    "test:render": "npm run build:engine && node tests/integration/render-smoke.mjs",
+    "test:sessions": "npm run build:engine && node tests/integration/session-isolation.mjs",
+    "test:seek": "npm run build:engine && node tests/integration/media-seek.mjs",
     "pack": "node packages/pack/scripts/build-dspack.mjs"
   },
   "license": "MIT"

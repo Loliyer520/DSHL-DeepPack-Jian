@@ -51,7 +51,7 @@ export function InspectorRow({ title, summary, index, open, onToggle, onDragStar
         {index !== undefined && <span className="djp-item-number">{String(index + 1).padStart(2, '0')}</span>}
         <span className="djp-item-name" title={title}>{title}</span>
         <span className="djp-item-summary">{summary}</span>
-        <svg className="djp-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m6 4 4 4-4 4" /></svg>
+        <Icon name="chevron" className="djp-chevron" />
       </button>
       {open && container && <InspectorDrawer title={title} summary={summary} id={id} onClose={onToggle} container={container}>{children}</InspectorDrawer>}
     </div>

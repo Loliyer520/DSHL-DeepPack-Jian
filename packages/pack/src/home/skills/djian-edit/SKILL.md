@@ -10,6 +10,7 @@ description: 视频剪辑操作时使用——剪段、拼接、画中画、加�
 ## 工作流
 
 1. 看用户消息里附带的时间线，或 `get_timeline` 拉最新；素材清单用 `asset_list`。
+   生成视频前读取 canvas 的 width/height/fps。本地生成文件直接 `import_asset(path=绝对路径)`，不要搜索素材目录；按返回 name 引用。
 2. 把需求拆成一批 ops 一次 `apply_timeline_ops` 提交（ops 按顺序执行；格式错误整批被拒，按返回原因修正重试）。
 3. 关键修改后 `get_frame <秒>` 抽帧确认画面再交付。
 
@@ -39,4 +40,7 @@ description: 视频剪辑操作时使用——剪段、拼接、画中画、加�
 
 - `get_frame`(seconds)：看合成后那一帧，验证字幕位置/黑场/衔接/动画。
 - `get_timeline` / `asset_list`：最新时间线 / 素材库。
+- `import_asset`：本地绝对路径入库（最多 512MB），或 base64 + name（最多 32MB）；重名自动改名，使用返回的实际 name。失败且结果不明确时先查 asset_list，不盲目重复上传。
+- `apply_timeline_ops` 成功也返回 receipts：新 clip 的 id、字幕 overlayIndex，以及 applied/ignored/partial 状态。索引对应操作执行时状态，后续删除或重排可能改变索引。
+- `get_frame` 的 activeTextLayers 列出本帧时间范围命中的文字/颜色/动画；不保证实际可见。bottomThirdBrightPercent 仅统计亮度>200，bottomThirdColoredPercent 统计显著彩色像素，背景也会贡献；0 不能排除字幕。首帧预热可花数分钟，超时后重试同一时间点会复用未完成请求。
 - `search_media` + `download_media`（media-library）：Openverse CC 图片/音频搜索与入库，英文关键词更准；下载后按返回的文件名 addClip/addAudio 引用。

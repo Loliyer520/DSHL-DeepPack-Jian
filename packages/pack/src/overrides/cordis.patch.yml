@@ -1,28 +1,45 @@
 # D剪 dsh profile 补丁：GLM 上游 + 剪辑人格
 # 用法：dsh --profile sdk --patch <本文件>（patch 按 id 整行覆盖 config，需完整重述）
 
-# GLM coding 端点搭 deepseek-official 路由（适配器原生支持 OpenAI 兼容网关）
+# 0.2.0 的 DeepSeek 官方适配器使用 Messages；GLM 改走通用 OpenAI 协议。
+# 保留原路由名以兼容已有会话 provider 引用。
 - id: llm-deepseek
-  name: '@deepseek-ai/dsh-llm-deepseek'
+  name: '@deepseek-ai/dsh-llm-deepseek-api-key'
+  disabled: true
+
+- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
   config:
-    apiKeyEnv: DJIAN_LLM_KEY
-    baseURL: https://open.bigmodel.cn/api/coding/paas/v4
-    thinking: disabled
-    reasoningEffort: off
-    maxTokens: 8192
-    # 双模型（2026-09-23 实测）：5.3-flash 原生多模态（喂图答「红色」✓，get_frame 截图靠它）；5.3 纯文本强模型（1210 实测只收 text）
-    # inputModalities 必须显式声明（适配器按此门控图像输入，未声明会抛 does not accept image input）
-    models:
-      - id: glm-5.3-flash
-        name: GLM-5.3 Flash（多模态·快）
-        contextWindow: 128000
-        inputModalities: [text, image]
-        imagePixelBudget: 4194304
-        imageMaxBytes: 5242880
-      - id: glm-5.3
-        name: GLM-5.3（纯文本·更强）
-        contextWindow: 128000
-        inputModalities: [text]
+    providers:
+      deepseek-official:
+        displayName: GLM Coding
+        api: openai-completions
+        apiKeyEnv: DJIAN_LLM_KEY
+        baseURL: https://open.bigmodel.cn/api/coding/paas/v4
+        defaultMaxTokens: 8192
+        compat:
+          supportsDeveloperRole: false
+          maxTokensField: max_tokens
+          thinkingFormat: zai
+        models:
+          - id: glm-5.3-flash
+            name: GLM-5.3 Flash（多模态·快）
+            contextWindow: 128000
+            maxTokens: 8192
+            input: [text, image]
+            reasoningEfforts: false
+          - id: glm-5.3
+            name: GLM-5.3（纯文本·更强）
+            contextWindow: 128000
+            maxTokens: 8192
+            input: [text]
+            reasoningEfforts: false
+
+- id: agent-default-model
+  name: '@deepseek-ai/dsh-agent-default-model'
+  config:
+    provider: deepseek-official
+    model: glm-5.3-flash
 
 # 关掉 DeepSeek 生态遥测字段（dsh_plugin_packages 会遍历活跃插件包做身份解析，
 # 在我们的 GLM 上游上无用，且其 prepare 抛错导致 REQUEST_EXTENSION 整轮失败）
@@ -36,8 +53,8 @@
   disabled: true
 
 # 名册默认钉 standard（整行覆盖 dsh-web-app 的同名行，config 需完整重述）
-- id: agent-presets
-  name: '@deepseek-ai/dsh-agent-presets'
+- id: agent-preset-registry
+  name: '@deepseek-ai/dsh-agent-preset-registry'
   config:
     default: standard
 
@@ -72,6 +89,10 @@
       纯讨论/答疑时直接回复即可。
       素材不够时主动找：用 search_media 搜在线 CC 资源库（Openverse 聚合，图片/音频，可商用），
       用 download_media 下载进素材库后按返回的文件名 addClip 引用；英文关键词搜得更准。
+      本地生成的视频/图片/音频用 import_asset(path=本地绝对路径) 直接入库，再用返回的 name 添加。
+      生成前先看 get_timeline.canvas 的尺寸与帧率；不要递归扫描宽工作区寻找素材目录，不要手写项目素材目录。
+      apply_timeline_ops 成功回执 receipts 包含新 id/字幕索引；非视觉模型可查 get_frame.activeTextLayers。
+      文字层时间命中不等同于实际可见；底部亮度/彩色像素统计受背景影响，0 不能证明没有字幕。
       回复保持简短中文，说明你做了什么。
       【剪辑审美硬规则】
       1. 节奏：短视频片段默认切 1.5–3 秒；超过 5 秒的单镜头主动提出切短；快切 3 段后插一个较长镜头喘息。
@@ -100,8 +121,8 @@
         args: ['./node_modules/@djian/agent/mcp-server.mjs']
         # 不写死 DJIAN_WEBUI_URL：端口由发现链解析（DSHL_SERVICE_PORTS env →
         # .djian/engine-port.json → 5180），启动器 portAutoBump 后也能连对
-        # 工具调用超时（默认 60s=-32001）：get_frame 冷打包 ~20s+浏览器，留 180s 余量
-        toolCallTimeoutMs: 180000
+        # get_frame 冷编译与浏览器预热：内部 300s，宿主留 330s；进行中相同取帧复用
+        toolCallTimeoutMs: 330000
 
 # 剪辑面板 web 客户端插件（官方壳右侧栏 tab）
 - insert:
@@ -129,3 +150,17 @@
 - insert:
     - id: djian-library-ui
       name: '@djian/client-ui-library'
+
+# Default palette belongs to live Config in DSH 0.2, not manifest.settings.
+- id: ui-theme
+  name: '@deepseek-ai/dsh-client-ui-theme'
+  config:
+    preference: dark
+    fontSize: 14
+
+# Keep configuration persistence independent of launcher dependency reinstalls.
+- id: config-editor
+  disabled: true
+- insert:
+    - id: djian-config-editor
+      name: '@djian/config-editor-compat'

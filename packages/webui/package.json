@@ -3,9 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "files": ["dist", "server", "patch", "public"],
+  "files": [
+    "dist",
+    "server",
+    "patch",
+    "public"
+  ],
   "dependencies": {
-    "@deepseek-ai/dsh-sdk-client": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-sdk-client": "0.2.0-rc.2",
     "@djian/engine": "0.1.0",
     "@remotion/bundler": "4.0.526",
     "@remotion/player": "4.0.526",
@@ -13,7 +18,7 @@
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "remotion": "4.0.526",
-    "zod": "3.23.8"
+    "zod": "3.25.76"
   },
   "scripts": {
     "dev": "vite",
