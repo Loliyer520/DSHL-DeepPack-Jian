@@ -3,7 +3,7 @@ export function activeTextLayers(timeline, frame) {
   return timeline.overlays.flatMap((layer, index) => {
     const start = Math.round(layer.startSeconds * fps);
     const duration = Math.max(1, Math.round((layer.endSeconds - layer.startSeconds) * fps));
-    return frame >= start && frame < start + duration ? [{ index, text: layer.text, color: layer.color,
+    return frame >= start && frame < start + duration ? [{ index, id: layer.id, text: layer.text, color: layer.color,
       position: layer.position, startSeconds: layer.startSeconds, endSeconds: layer.endSeconds,
       ...(layer.animations ? { animations: layer.animations } : {}) }] : [];
   });

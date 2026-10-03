@@ -148,7 +148,7 @@ export const timelineHasContent = (t: Timeline) =>
   t.videoTracks.some((tr) => tr.clips.length > 0) || t.audioTracks.some((tr) => tr.clips.length > 0) || t.overlays.length > 0;
 
 /** 素材显示名：时间线 src 可能带路径，展示时只取文件名 */
-export const srcLabel = (src: string) => src.split(/[\/]/).pop() || src;
+export const srcLabel = (src: string) => src.split(/[\\/]/).pop() || src;
 
 export const allSources = (t: Timeline): string[] => [
   ...new Set([...t.videoTracks, ...t.audioTracks].flatMap((tr) => tr.clips.map((c) => c.src))),
