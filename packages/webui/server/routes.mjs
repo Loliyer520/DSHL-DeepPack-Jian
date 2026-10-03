@@ -85,6 +85,7 @@ function registerTimelineRoutes(r, { store, project }) {
       label: typeof body?.label === 'string' ? body.label.slice(0, 80) : null,
       // 撤销/重做由面板以实体级系统操作提交（可写回整实体、绕过锁定）
       system: body?.undo === true && actor === 'user',
+      batchId: typeof body?.batchId === 'string' ? body.batchId.slice(0, 80) : null,
     });
     sendJson(res, 200, result, { 'X-Djian-Rev': String(result.rev) });
   });
@@ -151,6 +152,7 @@ function streamEvents(store, pid, req, res, url) {
   const unsubscribe = store.subscribe(pid, (msg) => {
     if (msg.type === 'ops') write('ops', msg, msg.rev);
     else if (msg.type === 'presence') write('presence', { presence: msg.presence });
+    else if (msg.type === 'assets') write('assets', { action: msg.action, name: msg.name });
     else if (msg.type === 'deleted') { write('deleted', {}); res.end(); }
   });
   const ping = setInterval(() => { if (!res.writableEnded) res.write(': ping\n\n'); }, 25_000);
@@ -175,9 +177,11 @@ async function assetMeta(store, pid, name) {
   return once('meta|' + pid + '|' + name, async () => {
     const kind = assetKind(name);
     let info = {};
-    if (kind !== 'image') {
-      try { info = await probe(file); } catch (e) { info = { error: e.message }; }
-    }
+    try {
+      info = await probe(file);
+      // 图片也探测宽高，但没有时长/音轨
+      if (kind === 'image') info = { width: info.width, height: info.height };
+    } catch (e) { info = kind === 'image' ? {} : { error: e.message }; }
     const meta = { kind, size: st.size, mtimeMs: Math.floor(st.mtimeMs), ...info };
     store.writeAssetMeta(pid, name, meta);
     return meta;
@@ -200,6 +204,7 @@ async function admitAsset(store, pid, temp, wantedName) {
   const final = uniqueName(dir, name);
   fs.renameSync(temp, path.join(dir, final));
   const meta = await assetMeta(store, pid, final);
+  store.notifyAssets(pid, { action: 'added', name: final });
   return { ok: true, name: final, type: meta.kind, duration: meta.duration ?? null, width: meta.width ?? null, height: meta.height ?? null };
 }
 
@@ -283,6 +288,7 @@ function registerAssetRoutes(r, { store, project }) {
     if (used && url.searchParams.get('force') !== '1') throw new HttpError(409, '素材正在被时间线使用（' + used + ' 处），先删除相关片段', 'ASSET_IN_USE');
     fs.rmSync(file, { force: true });
     store.dropAssetMeta(pid, name);
+    store.notifyAssets(pid, { action: 'removed', name });
     sendJson(res, 200, { ok: true });
   });
   registerPreviewRoutes(r, { store, project });
@@ -314,24 +320,29 @@ function registerPreviewRoutes(r, { store, project }) {
     }
     await sendFile(req, res, out, 'image/jpeg');
   });
-  // 雪碧图：{ interval, count, url }；时间线胶片按时间取格子，裁剪/缩放不再解码视频
+  // 胶片缩略图：{ v, interval, count, height, url }；第 i 格在 url + i（0 起）
+  const tilesDir = (pid, name) => path.join(store.thumbsDir(pid), name + '.tiles');
   r.add('GET', '/api/p/:pid/assets/:name/sprite', async (req, res, { params }) => {
     const { pid, name, file, kind } = resolveAsset(params);
-    if (kind !== 'video') throw new HttpError(404, '只有视频有雪碧图');
+    if (kind !== 'video') throw new HttpError(404, '只有视频有胶片缩略图');
     const meta = await assetMeta(store, pid, name);
     let info = meta.sprite;
-    const out = path.join(store.thumbsDir(pid), name + '.sprite.jpg');
-    if (!info || !fs.existsSync(out)) {
-      info = await once('sprite|' + out, () => sprite(file, out, meta.duration));
+    const dir = tilesDir(pid, name);
+    if (info?.v !== 2 || !fs.existsSync(dir)) {
+      info = await once('sprite|' + dir, () => sprite(file, dir, meta.duration));
       store.writeAssetMeta(pid, name, { ...meta, sprite: info });
     }
-    sendJson(res, 200, { ...info, url: '/api/p/' + encodeURIComponent(pid) + '/assets/' + encodeURIComponent(name) + '/sprite.jpg' });
+    sendJson(res, 200, { ...info, url: '/api/p/' + encodeURIComponent(pid) + '/assets/' + encodeURIComponent(name) + '/sprite/' });
   });
-  r.add('GET', '/api/p/:pid/assets/:name/sprite.jpg', async (req, res, { params }) => {
+  r.add('GET', '/api/p/:pid/assets/:name/sprite/:i', async (req, res, { params }) => {
     const { pid, name } = resolveAsset(params);
-    const out = path.join(store.thumbsDir(pid), name + '.sprite.jpg');
-    if (!fs.existsSync(out)) throw new HttpError(404, '雪碧图尚未生成');
-    await sendFile(req, res, out, 'image/jpeg');
+    const i = Number(params.i);
+    if (!Number.isInteger(i) || i < 0 || i >= 1000) throw new HttpError(400, '格子序号无效');
+    const tile = path.join(tilesDir(pid, name), 't_' + String(i + 1).padStart(3, '0') + '.jpg');
+    if (!fs.existsSync(tile)) throw new HttpError(404, '缩略图尚未生成');
+    // 文件名随内容不变（素材改动会换名或清缓存）：允许浏览器长缓存
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    await serveMedia(req, res, tile, 'image/jpeg');
   });
   // 波形峰值：二进制 Uint8（每秒 X-Peaks-Rate 个，0–255），视频原声同样可用
   r.add('GET', '/api/p/:pid/assets/:name/peaks', async (req, res, { params }) => {

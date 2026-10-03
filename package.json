@@ -8,7 +8,7 @@
     "build:client": "npm run bundle:timeline && npm run bundle:library",
     "bundle:timeline": "tsdown -c packages/client-timeline/tsdown.config.ts",
     "bundle:library": "tsdown -c packages/client-library/tsdown.config.ts",
-    "check": "tsc -p packages/engine/tsconfig.json --noEmit && tsc -p packages/client-timeline/tsconfig.json --noEmit",
+    "check": "tsc -p packages/engine/tsconfig.json --noEmit && tsc -p packages/client-timeline/tsconfig.json --noEmit && tsc -p packages/client-library/tsconfig.json --noEmit",
     "test": "npm run build:engine && node --test tests/*.test.mjs",
     "test:render": "npm run build:engine && node tests/integration/render-smoke.mjs",
     "test:sessions": "npm run build:engine && node tests/integration/session-isolation.mjs",

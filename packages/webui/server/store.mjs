@@ -99,6 +99,7 @@ export class Store {
     for (const suffix of ['.json', '.jpg', '.sprite.jpg', '.sprite.json', '.peaks.bin']) {
       fs.rmSync(path.join(this.thumbsDir(id), safeAssetName(name) + suffix), { force: true });
     }
+    fs.rmSync(path.join(this.thumbsDir(id), safeAssetName(name) + '.tiles'), { recursive: true, force: true });
   }
 
   // ---------- 项目 ----------
@@ -285,8 +286,13 @@ export class Store {
    * 应用一批操作。actor: user/ai/system；system=true 时以系统身份执行（撤销/恢复，绕过锁定）。
    * baseRev 落后时仍按“意图”应用（操作按 id 寻址，天然可交换），并报告与他人修改重叠的实体。
    */
-  apply(id, { ops, baseRev, actor = 'user', clientId = null, label = null, system = false }) {
+  apply(id, { ops, baseRev, actor = 'user', clientId = null, label = null, system = false, batchId = null }) {
     const p = this.load(id);
+    // 幂等：同一批次重发（网络重试、刷新后重放草稿）直接返回首次结果
+    if (batchId) {
+      const done = p.batches?.get(batchId) ?? p.events.find((e) => e.batchId === batchId);
+      if (done) return { ...(done.result ?? { rev: done.rev, receipts: [], changed: done.changed ?? [], summary: done.summary ?? [], patch: done.patch ?? [], conflicts: [] }), duplicate: true };
+    }
     if (p.readOnly) throw new StoreError(423, p.readOnly, 'READ_ONLY');
     if (!Array.isArray(ops) || !ops.length) throw new StoreError(400, 'ops 必须是非空数组');
     if (ops.length > 500) throw new StoreError(413, '单批操作不能超过 500 条');
@@ -319,8 +325,15 @@ export class Store {
     p.timeline = result.timeline;
     atomicWriteJson(this.timelineFile(id), p.timeline);
     if (result.changed.includes('meta') || result.changed.includes('*')) this.touchProjectMeta(id, p.timeline.meta);
-    const event = this.record(p, { actor, clientId, label, summary, changed: result.changed, patch });
-    return { rev: event.rev, receipts: result.receipts, changed: result.changed, summary, patch, conflicts };
+    const inverse = diffTimelines(result.timeline, before);
+    const event = this.record(p, { actor, clientId, label, summary, changed: result.changed, patch, inverse, batchId });
+    const response = { rev: event.rev, receipts: result.receipts, changed: result.changed, summary, patch, conflicts };
+    if (batchId) {
+      p.batches ??= new Map();
+      p.batches.set(batchId, { result: response });
+      if (p.batches.size > 300) p.batches.delete(p.batches.keys().next().value);
+    }
+    return response;
   }
 
   /** 整份替换（历史恢复/导入）：翻译成实体级系统操作，事件流保持可回放 */
@@ -359,8 +372,8 @@ export class Store {
     this.writeProjectMeta(id, { ...meta, canvas, updatedAt: new Date().toISOString() });
   }
 
-  record(p, { actor, clientId = null, label = null, summary, changed, patch }) {
-    const event = { rev: p.rev + 1, at: new Date().toISOString(), actor, clientId, label, summary, changed, patch };
+  record(p, { actor, clientId = null, label = null, summary, changed, patch, inverse = [], batchId = null }) {
+    const event = { rev: p.rev + 1, at: new Date().toISOString(), actor, clientId, label, summary, changed, patch, inverse, ...(batchId ? { batchId } : {}) };
     p.rev = event.rev;
     p.events.push(event);
     if (p.events.length > LIMITS.eventRing) p.events.splice(0, p.events.length - LIMITS.eventRing);
@@ -385,6 +398,10 @@ export class Store {
     p.subscribers.add(fn);
     return () => p.subscribers.delete(fn);
   }
+  /** 素材增删通知（面板素材列表实时刷新；AI 下载素材后用户立刻能看到） */
+  notifyAssets(id, detail) {
+    try { this.emit(this.load(id), { type: 'assets', ...detail }); } catch { /* 项目已删除 */ }
+  }
   emit(p, message) {
     for (const fn of p.subscribers) {
       try { fn(message); } catch (e) { console.warn('[djian] 推送失败：', e.message); }
@@ -399,6 +416,7 @@ export class Store {
     if (actor) list = list.filter((e) => (Array.isArray(actor) ? actor.includes(e.actor) : e.actor === actor));
     if (excludeClientId) list = list.filter((e) => e.clientId !== excludeClientId);
     list = list.slice(-limit).map((e) => (withPatch ? e : { rev: e.rev, at: e.at, actor: e.actor, clientId: e.clientId, label: e.label, summary: e.summary, changed: e.changed }));
+    if (!withPatch) return { rev: p.rev, truncated, events: list };
     return { rev: p.rev, truncated, events: list };
   }
 

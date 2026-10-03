@@ -157,3 +157,18 @@ test('corrupt timelines are quarantined, never overwritten; newer versions are r
   assert.equal(ro.status, 423);
   assert.ok(fs.existsSync(dir));
 });
+
+test('batches are idempotent and events carry an inverse patch', async () => {
+  const pid = await bind('sess-idem');
+  const body = { ops: [{ op: 'addMarker', id: 'mk', t: 1 }], batchId: 'b-1', clientId: 'panel' };
+  const a = await api('POST', '/api/p/' + pid + '/ops', body);
+  const b = await api('POST', '/api/p/' + pid + '/ops', body);
+  assert.equal(a.body.rev, b.body.rev);
+  const t = await api('GET', '/api/p/' + pid + '/timeline');
+  assert.equal(t.body.timeline.markers.length, 1);
+  const ev = (await api('GET', '/api/p/' + pid + '/changes?since=0&patch=1')).body.events[0];
+  assert.deepEqual(ev.inverse, [{ op: 'removeMarker', id: 'mk' }]);
+  const undo = await api('POST', '/api/p/' + pid + '/ops', { ops: ev.inverse, undo: true, clientId: 'panel', label: '撤销' });
+  assert.equal(undo.status, 200);
+  assert.equal((await api('GET', '/api/p/' + pid + '/timeline')).body.timeline.markers.length, 0);
+});

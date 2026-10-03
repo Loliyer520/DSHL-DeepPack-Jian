@@ -90,3 +90,24 @@ export function edgeScrollSpeed(x: number, left: number, right: number, edge = 4
   if (x > right - edge) return 360 * Math.min(1, Math.max(0, (x - right + edge) / edge));
   return 0;
 }
+
+/** 时间码 mm:ss.ff（帧）或 hh:mm:ss */
+export function timecode(sec: number, fps: number, withFrames = true) {
+  const frames = Math.max(0, Math.round(sec * fps));
+  const s = Math.floor(frames / fps);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const base = (s >= 3600 ? pad(Math.floor(s / 3600)) + ':' : '') + pad(Math.floor(s / 60) % 60) + ':' + pad(s % 60);
+  return withFrames ? base + '.' + pad(frames % fps) : base;
+}
+
+/** 标尺刻度步长：保证相邻刻度至少 minPx 像素 */
+export function tickStep(pxPerSec: number, fps: number, minPx = 72) {
+  return [1 / fps, 2 / fps, 5 / fps, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600].find((n) => n * pxPerSec >= minPx) ?? 7200;
+}
+
+/** 让整条时间线放进可视宽度的缩放（像素/秒），不设人为下限，长片也能完整显示 */
+export function fitPxPerSec(viewport: number, totalSec: number) {
+  return Math.max(0.5, Math.min(600, (viewport * 0.92) / Math.max(1, totalSec)));
+}
+
+export const clampZoom = (pxPerSec: number) => Math.max(0.5, Math.min(600, pxPerSec));

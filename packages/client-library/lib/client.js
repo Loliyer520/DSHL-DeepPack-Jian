@@ -29,19 +29,18 @@ window.__ModuleLoader__.load({
 		let react = require("react");
 		react = __toESM(react, 1);
 		let react_jsx_runtime = require("react/jsx-runtime");
-		//#region src/client/api.ts
+		//#region ../client-timeline/src/client/engine.ts
+		const SERVICE = "djian-engine";
 		const DEFAULT_PORT = 5180;
-		const PORT_CACHE_KEY = "djian.enginePort";
-		const hostBase = () => typeof window !== "undefined" && window.location ? `${window.location.protocol}//${window.location.hostname}` : "http://127.0.0.1";
-		let API_BASE = `${hostBase()}:${DEFAULT_PORT}`;
-		const applyBase = (port) => {
-			API_BASE = `${hostBase()}:${port}`;
-		};
-		async function isEngine(base) {
+		const PORT_CACHE = "djian.enginePort";
+		const HEADERS = { "X-Djian-Client": "panel" };
+		const hostBase = () => typeof window !== "undefined" && window.location?.hostname ? "http://" + (window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname) : "http://127.0.0.1";
+		let base = hostBase() + ":5180";
+		async function isEngine(candidate) {
 			try {
-				const r = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(1500) });
-				if (!r.ok) return false;
-				return (await r.json().catch(() => null))?.service === "djian-engine";
+				const r = await fetch(candidate + "/api/health", { signal: AbortSignal.timeout(1500) });
+				const j = await r.json().catch(() => null);
+				return r.ok && j?.service === SERVICE && (j.protocol ?? 1) >= 2;
 			} catch {
 				return false;
 			}
@@ -56,67 +55,140 @@ window.__ModuleLoader__.load({
 			}
 		}
 		let discovery = null;
-		let generation = 0;
-		function ensureEngineBase() {
-			if (typeof window === "undefined") return Promise.resolve();
-			discovery ?? (discovery = (async (gen) => {
-				const candidates = [];
-				const frag = fragmentPort();
-				if (frag > 0) candidates.push(frag);
-				let cached = 0;
+		function discoverEngine(force = false) {
+			if (force) discovery = null;
+			discovery ?? (discovery = (async () => {
+				const ports = [];
+				const push = (p) => {
+					if (p > 0 && !ports.includes(p)) ports.push(p);
+				};
+				push(fragmentPort());
 				try {
-					cached = Number(window.localStorage.getItem(PORT_CACHE_KEY));
+					push(Number(localStorage.getItem(PORT_CACHE)));
 				} catch {}
-				if (cached > 0) candidates.push(cached);
-				for (let p = DEFAULT_PORT; p <= 5190; p++) if (!candidates.includes(p)) candidates.push(p);
-				for (const p of candidates) if (await isEngine(`${hostBase()}:${p}`)) {
-					if (gen !== generation) return;
-					try {
-						window.localStorage.setItem(PORT_CACHE_KEY, String(p));
-					} catch {}
-					applyBase(p);
-					return;
+				for (let p = DEFAULT_PORT; p <= 5190; p++) push(p);
+				for (const p of ports) {
+					const candidate = hostBase() + ":" + p;
+					if (await isEngine(candidate)) {
+						base = candidate;
+						try {
+							localStorage.setItem(PORT_CACHE, String(p));
+						} catch {}
+						return candidate;
+					}
 				}
-			})(generation));
+				discovery = null;
+				throw new EngineError("找不到剪辑引擎服务，请确认 D剪 已启动", 503);
+			})());
 			return discovery;
 		}
-		let lastHealAt = 0;
-		async function apiFetch(path, init) {
-			try {
-				return await fetch(`${API_BASE}${path}`, init);
-			} catch (e) {
-				if (!(e instanceof TypeError)) throw e;
-				if (Date.now() - lastHealAt < 1e4) throw e;
-				lastHealAt = Date.now();
-				discovery = null;
-				generation++;
-				try {
-					window.localStorage.removeItem(PORT_CACHE_KEY);
-				} catch {}
-				await ensureEngineBase();
-				return fetch(`${API_BASE}${path}`, init);
+		var EngineError = class extends Error {
+			constructor(message, status, code, body) {
+				super(message);
+				this.status = status;
+				this.code = code;
+				this.body = body;
 			}
-		}
-		ensureEngineBase();
-		async function searchLibrary(q, kind, page) {
-			const r = await apiFetch(`/api/library/search?q=${encodeURIComponent(q)}&type=${kind}&page=${page}`);
-			const d = await r.json().catch(() => ({}));
-			if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
-			return d;
-		}
-		async function importLibrary(url, name, kind, sessionId) {
-			const r = await apiFetch(`/api/library/import${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ""}`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					url,
-					name,
-					kind
-				})
+		};
+		let lastHeal = 0;
+		async function request(method, path, init = {}) {
+			await discoverEngine();
+			const doFetch = () => fetch(base + path, {
+				method,
+				signal: init.signal ?? AbortSignal.timeout(init.timeoutMs ?? 2e4),
+				headers: {
+					...HEADERS,
+					...init.body !== void 0 ? { "Content-Type": "application/json" } : {},
+					...init.headers
+				},
+				body: init.raw ?? (init.body === void 0 ? void 0 : JSON.stringify(init.body))
 			});
-			const d = await r.json().catch(() => ({}));
-			if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
-			return d;
+			let r;
+			try {
+				r = await doFetch();
+			} catch (e) {
+				if (!(e instanceof TypeError) || Date.now() - lastHeal < 1e4) throw e;
+				lastHeal = Date.now();
+				try {
+					localStorage.removeItem(PORT_CACHE);
+				} catch {}
+				await discoverEngine(true);
+				r = await doFetch();
+			}
+			const text = await r.text();
+			let data = void 0;
+			try {
+				data = text ? JSON.parse(text) : void 0;
+			} catch {
+				data = text;
+			}
+			if (!r.ok) {
+				const d = data;
+				throw new EngineError(d?.error ?? "HTTP " + r.status, r.status, d?.code, data);
+			}
+			return data;
+		}
+		const P = (pid) => "/api/p/" + encodeURIComponent(pid);
+		const api = {
+			bindSession: (sessionId) => request("POST", "/api/session-project", { body: { sessionId } }).then((r) => r.project),
+			timeline: (pid) => request("GET", P(pid) + "/timeline"),
+			ops: (pid, body) => request("POST", P(pid) + "/ops", {
+				body: {
+					...body,
+					actor: "user"
+				},
+				timeoutMs: 3e4
+			}),
+			changes: (pid, since) => request("GET", P(pid) + "/changes?since=" + since + "&patch=1&limit=200"),
+			presence: (pid, body) => request("POST", P(pid) + "/presence", {
+				body,
+				timeoutMs: 5e3
+			}),
+			assets: (pid, signal) => request("GET", P(pid) + "/assets", { signal }),
+			upload: (pid, file, signal) => request("POST", P(pid) + "/assets?name=" + encodeURIComponent(file.name), {
+				raw: file,
+				headers: { "Content-Type": "application/octet-stream" },
+				signal,
+				timeoutMs: 6e5
+			}),
+			deleteAsset: (pid, name) => request("DELETE", P(pid) + "/assets/" + encodeURIComponent(name)),
+			sprite: (pid, name) => request("GET", P(pid) + "/assets/" + encodeURIComponent(name) + "/sprite", { timeoutMs: 2e5 }),
+			history: (pid) => request("GET", P(pid) + "/history"),
+			saveVersion: (pid, label) => request("POST", P(pid) + "/history", { body: { label } }),
+			restore: (pid, id, clientId) => request("POST", P(pid) + "/history/" + encodeURIComponent(id) + "/restore", {
+				body: { clientId },
+				timeoutMs: 3e4
+			}),
+			fonts: () => request("GET", "/api/fonts").then((r) => r.fonts),
+			startExport: (pid, body) => request("POST", P(pid) + "/export", { body }),
+			exportStatus: (jobId) => request("GET", "/api/export/" + encodeURIComponent(jobId)),
+			cancelExport: (jobId) => request("POST", "/api/export/" + encodeURIComponent(jobId) + "/cancel", { body: {} }),
+			rename: (pid, name) => request("PATCH", "/api/projects/" + encodeURIComponent(pid), { body: { name } })
+		};
+		//#endregion
+		//#region src/client/api.ts
+		const searchLibrary = (q, kind, page) => request("GET", "/api/library/search?q=" + encodeURIComponent(q) + "&type=" + kind + "&page=" + page, { timeoutMs: 3e4 });
+		/** 导入到当前会话绑定的项目（与剪辑面板、AI 工具同一个项目） */
+		async function importLibrary(item, name, sessionId) {
+			const project = await api.bindSession(sessionId ?? "standalone");
+			const r = await request("POST", "/api/p/" + encodeURIComponent(project.id) + "/library/import", {
+				body: {
+					url: item.url,
+					name,
+					kind: item.kind,
+					title: item.title,
+					license: item.license,
+					creator: item.creator ?? null
+				},
+				timeoutMs: 18e4
+			});
+			try {
+				window.dispatchEvent(new CustomEvent("djian:assets-changed", { detail: {
+					projectId: project.id,
+					name: r.name
+				} }));
+			} catch {}
+			return r;
 		}
 		//#endregion
 		//#region src/client/LibraryPanel.tsx
@@ -162,8 +234,7 @@ window.__ModuleLoader__.load({
 					[it.id]: { st: "busy" }
 				}));
 				try {
-					const safe = it.title.replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 60);
-					const r = await importLibrary(it.url, safe || void 0, it.kind, sessionId);
+					const r = await importLibrary(it, it.title.replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 60) || void 0, sessionId);
 					setImports((m) => ({
 						...m,
 						[it.id]: {
@@ -219,7 +290,7 @@ window.__ModuleLoader__.load({
 					}),
 					!loading && !error && items.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "djl-hint",
-						children: lastQuery.current ? "无结果——换个关键词试试（英文更准）" : "输入关键词搜索 CC 授权素材，导入后到「剪辑面板 · 素材」使用"
+						children: lastQuery.current ? "无结果——换个关键词试试（英文更准）" : "输入关键词搜索 CC 授权素材，导入后到「D剪 · 素材」使用"
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: `djl-grid ${kind === "audio" ? "djl-list" : ""}`,
@@ -292,7 +363,7 @@ window.__ModuleLoader__.load({
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "djl-foot",
-						children: "Openverse CC 聚合 · 导入后到「剪辑面板 · 素材」拖上轨道 · AI 也可经 search_media 用同一资源库"
+						children: "Openverse CC 聚合 · 导入后到「D剪 · 素材」拖上轨道 · AI 也能用 djian_search_media 搜同一资源库"
 					})
 				]
 			});
@@ -360,12 +431,15 @@ window.__ModuleLoader__.load({
 		}));
 		const inject = ["slots", "sidebarRightTabs"];
 		function apply(ctx) {
-			injectStyles();
+			ctx.effect(() => {
+				injectStyles();
+				return () => document.getElementById("djl-styles")?.remove();
+			}, "djian-library: styles");
 			ctx.effect(() => ctx.sidebarRightTabs.register({
-				id: "djian.library",
+				id: "@djian/client-ui-library",
 				kind: "djian.library",
 				keepMounted: true,
-				priority: "builtin",
+				priority: "extension",
 				title: () => "资源库",
 				guide: [{
 					id: "djian.library.open",
@@ -377,7 +451,7 @@ window.__ModuleLoader__.load({
 			}), "djian-library: tab type");
 			ctx.effect(() => ctx.slots.inject("sidebar.right.pane.tab", () => ctx.slots.register({
 				name: "sidebar.right.pane.tab",
-				key: "djian.library"
+				key: "@djian/client-ui-library"
 			}, LibraryPanel)), "djian-library: tab body");
 		}
 		//#endregion

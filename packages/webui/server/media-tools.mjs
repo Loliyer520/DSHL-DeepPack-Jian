@@ -127,14 +127,27 @@ export async function thumbnail(file, out, { kind, duration }) {
   return out;
 }
 
-/** 雪碧图：按固定间隔取关键帧拼成一行，时间线胶片按片段 inPoint/时长切片显示（裁剪不再重新解码） */
-export async function sprite(file, out, duration) {
+/**
+ * 胶片缩略图：按固定间隔各出一张小图（t_001.jpg…），时间线按片段 inPoint/时长挑格子显示，裁剪/缩放不再解码。
+ * 只用 fps/tile 之外的能力（Remotion 自带的精简版 FFmpeg 没有这两个滤镜）：输出端 -r 做恒定帧率抽样。
+ * 先只解关键帧（快）；若整段只有一两个关键帧导致画面全一样，再完整解码一次。
+ */
+export async function sprite(file, dir, duration) {
   const d = Math.max(0.1, duration ?? 1);
   const interval = Math.max(0.5, d / 120);
-  const count = Math.max(1, Math.min(120, Math.floor(d / interval) + 1));
-  fs.mkdirSync(path.dirname(out), { recursive: true });
-  await runTool('ffmpeg', ['-v', 'error', '-skip_frame', 'nokey', '-i', file, '-an', '-vf', 'fps=1/' + interval.toFixed(4) + ',scale=-2:64,tile=' + count + 'x1', '-frames:v', '1', '-q:v', '6', '-y', out], { timeoutMs: 180_000 });
-  return { interval, count, height: 64 };
+  const max = Math.max(1, Math.min(120, Math.floor(d / interval) + 1));
+  const run = async (keyOnly) => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(dir, { recursive: true });
+    await runTool('ffmpeg', ['-v', 'error', ...(keyOnly ? ['-skip_frame', 'nokey'] : []), '-i', file, '-an', '-r', (1 / interval).toFixed(6), '-fps_mode', 'cfr',
+      '-vf', 'scale=-2:64', '-frames:v', String(max), '-q:v', '6', '-y', path.join(dir, 't_%03d.jpg')], { timeoutMs: 180_000 });
+    return fs.readdirSync(dir).filter((f) => /^t_\d{3}\.jpg$/.test(f)).sort();
+  };
+  let tiles = await run(true);
+  const distinct = new Set(tiles.map((f) => fs.statSync(path.join(dir, f)).size)).size;
+  if (tiles.length >= 6 && distinct <= 2) tiles = await run(false);
+  if (!tiles.length) throw new Error('未能抽取缩略图');
+  return { v: 2, interval, count: tiles.length, height: 64 };
 }
 
 /** 波形峰值：解码成 8kHz 单声道流式统计，每秒 100 个峰值（0-255），任意大小文件都可用 */
@@ -144,9 +157,24 @@ export async function peaks(file, out) {
   const bucket = SAMPLE_RATE / PER_SECOND;
   const values = [];
   let current = 0, inBucket = 0, carry = null;
-  await runTool('ffmpeg', ['-v', 'error', '-i', file, '-vn', '-ac', '1', '-ar', String(SAMPLE_RATE), '-f', 's16le', '-'], {
+  // 输出 WAV（精简版 FFmpeg 没有 s16le 裸流封装）：先跳过 RIFF 头找到 data 块，再按 16 位样本统计
+  let header = Buffer.alloc(0);
+  let inData = false;
+  await runTool('ffmpeg', ['-v', 'error', '-i', file, '-vn', '-ac', '1', '-ar', String(SAMPLE_RATE), '-c:a', 'pcm_s16le', '-map_metadata', '-1', '-f', 'wav', '-'], {
     timeoutMs: 300_000,
-    onStdout: (chunk) => {
+    onStdout: (raw) => {
+      let chunk = raw;
+      if (!inData) {
+        header = Buffer.concat([header, raw]);
+        let off = 12;
+        while (off + 8 <= header.length) {
+          const id = header.toString('latin1', off, off + 4);
+          const size = header.readUInt32LE(off + 4);
+          if (id === 'data') { inData = true; chunk = header.subarray(off + 8); header = Buffer.alloc(0); break; }
+          off += 8 + size + (size % 2);
+        }
+        if (!inData) return;
+      }
       let buf = carry ? Buffer.concat([carry, chunk]) : chunk;
       const usable = buf.length - (buf.length % 2);
       carry = usable < buf.length ? buf.subarray(usable) : null;

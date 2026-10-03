@@ -28,7 +28,7 @@ export const FALLBACK_STACK = '"Noto Sans CJK SC", "PingFang SC", "Microsoft YaH
 // 面板 origin 是 dsh 宿主，不能用它）> Node 兜底 5180。
 export const fontsBaseUrl = (base?: string): string => {
   if (base) return base.replace(/\/+$/, "");
-  const envBase = typeof process !== "undefined" ? (process.env as { DJIAN_FONTS_BASE?: string }).DJIAN_FONTS_BASE : undefined;
+  const envBase = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.DJIAN_FONTS_BASE;
   if (envBase) return envBase.replace(/\/+$/, "");
   if (typeof window !== "undefined" && window.location) return "/fonts"; // 同源相对：渲染 bundle 由 webui 伺服，天然连对端口
   return "http://127.0.0.1:5180/fonts";
