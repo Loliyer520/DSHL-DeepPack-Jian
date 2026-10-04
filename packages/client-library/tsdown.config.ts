@@ -11,6 +11,7 @@ export default defineConfig([
     clean: false,
     external: [/^react($|\/)/, /^react-dom($|\/)/, /^@deepseek-ai\//],
     define: { 'process.env.NODE_ENV': '"production"' },
+    minify: true,
     dts: false,
     outputOptions: {
       entryFileNames: '[name].js',

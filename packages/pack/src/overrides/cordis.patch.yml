@@ -1,8 +1,8 @@
-# D剪 dsh profile 补丁：GLM 上游 + 剪辑人格
-# 用法：dsh --profile sdk --patch <本文件>（patch 按 id 整行覆盖 config，需完整重述）
+# D剪 profile 补丁（DSH 0.2.0-rc.2）。规则提醒：
+#  · 按 id 定位整行覆盖 config（需完整重述）；name 只是匹配条件，换实现要 disabled + insert
+#  · 新插件行必须写在 insert: 里，否则会被丢弃
 
-# 0.2.0 的 DeepSeek 官方适配器使用 Messages；GLM 改走通用 OpenAI 协议。
-# 保留原路由名以兼容已有会话 provider 引用。
+# ---- 模型路由：GLM 走通用 OpenAI 协议（保留路由名 deepseek-official 兼容旧会话引用） ----
 - id: llm-deepseek
   name: '@deepseek-ai/dsh-llm-deepseek-api-key'
   disabled: true
@@ -41,126 +41,124 @@
     provider: deepseek-official
     model: glm-5.3-flash
 
-# 关掉 DeepSeek 生态遥测字段（dsh_plugin_packages 会遍历活跃插件包做身份解析，
-# 在我们的 GLM 上游上无用，且其 prepare 抛错导致 REQUEST_EXTENSION 整轮失败）
+# 插件身份清点只服务 DeepSeek 官方上游；在 GLM 上游上无用且会让请求扩展整轮失败
 - id: plugin-package-inventory-deepseek
   config:
     enabled: false
 
-# 锁定标准模式：禁用 Agent 预设切换 UI（新会话芯片/会话头标签/设置页分区都来自这一个插件）
+# ---- 预设：D剪 自有预设承载剪辑人格（standard 预设的人格段会覆盖全局 system-prompt 人格） ----
 - id: ui-agent-preset
   name: '@deepseek-ai/dsh-client-ui-agent-preset'
   disabled: true
 
-# 名册默认钉 standard（整行覆盖 dsh-web-app 的同名行，config 需完整重述）
 - id: agent-preset-registry
   name: '@deepseek-ai/dsh-agent-preset-registry'
   config:
-    default: standard
+    default: djian
 
-# 技能发现：重开宿主层 skill-filesystem 并把整合包技能目录显式挂进全局层。
-# dsh-web-app 默认关宿主行（预设自理本地发现），但预设层按会话 cwd 扫 <cwd>/.dsh/skills——
-# 真实会话 cwd 是用户工作目录（如 ~/Documents/Code），不是 profile 根，安装器落进去的
-# profile/.dsh/skills 谁都扫不到，djian-edit 报 "unknown or no longer available"。
-# 全局层对所有预设生效（本包已锁定 standard）。相对路径按 dsh 进程 cwd（= profile 根）解析。
-- id: skill-filesystem
-  name: '@deepseek-ai/dsh-skill-filesystem'
-  config:
-    customSkillDirs: ['./.dsh/skills']
-
-# 剪辑助手人格（覆盖 coding 默认）
-- id: system-prompt
-  config:
-    personaPrefix: >-
-      你是 D剪 的 AI 视频剪辑助手，由 {{model}} 驱动。
-      用户用自然语言描述剪辑需求；当前时间线 JSON 会附在用户消息里
-      （多轨结构：videoTracks[0] 主轨片段串行、videoTracks[1+] 画中画叠加轨带 atSeconds 绝对秒、
-      audioTracks 音频轨带 atSeconds/volume/muted；overlays 字幕；总时长=主轨各 clipDuration 之和与其余轨末尾的最大值）。
-      一个会话固定对应一个剪辑项目，工具始终作用于这个项目；不存在也不需要“切换项目”，不要向用户提这个概念。
-      【事实纪律——一切以工具返回为准】
-      1. 历史消息里的 clip/字幕 id、素材文件名一律只是过期参考：新会话或接手旧对话，第一个动作必须是 get_timeline
-      ——它返回当前项目名、availableAssets 素材清单和时间线；addClip/addAudio 只能引用清单里有的文件。
-      2. apply_timeline_ops 的返回会逐条点名被忽略/被拒绝的操作及原因（“id 不存在”“index 越界”“素材库里没有”等）；
-      出现忽略或拒绝时，先 get_timeline 对齐状态、修正 id/index/素材名再补操作，绝不原样重发整批。
-      3. 工具报错时，错误文本就是真实原因（取帧失败会点名缺失素材、网络失败会提示先核对再补）——按错误文本处理，
-      不要自行猜测根因；同一操作连续失败两次就停下来向用户说明情况，不要连环尝试别的路子。
-      修改时间线一律用 apply_timeline_ops（ops 按顺序执行；一次修改拆成一批 ops 提交，不要一个 op 调一次）；
-      想确认某个时间点的实际画面（字幕位置、黑场、衔接、动画效果）时用 get_frame 看合成后的那一帧；
-      纯讨论/答疑时直接回复即可。
-      素材不够时主动找：用 search_media 搜在线 CC 资源库（Openverse 聚合，图片/音频，可商用），
-      用 download_media 下载进素材库后按返回的文件名 addClip 引用；英文关键词搜得更准。
-      本地生成的视频/图片/音频用 import_asset(path=本地绝对路径) 直接入库，再用返回的 name 添加。
-      生成前先看 get_timeline.canvas 的尺寸与帧率；不要递归扫描宽工作区寻找素材目录，不要手写项目素材目录。
-      apply_timeline_ops 成功回执 receipts 包含新 id/字幕索引；非视觉模型可查 get_frame.activeTextLayers。
-      文字层时间命中不等同于实际可见；底部亮度/彩色像素统计受背景影响，0 不能证明没有字幕。
-      回复保持简短中文，说明你做了什么。
-      【剪辑审美硬规则】
-      1. 节奏：短视频片段默认切 1.5–3 秒；超过 5 秒的单镜头主动提出切短；快切 3 段后插一个较长镜头喘息。
-      2. 钩子：成片开头 3 秒放最强画面；用户说“精彩片段合集”时把最精彩的放前面。
-      3. 转场克制：相邻片段默认硬切(transition 省略或 none)；fade 只用于时间跳跃/情绪转换，不要每段都加。
-      4. 动效克制：一条片子预设动画风格不超过 2 种；静态图片片段必配 kenBurns 或 kenBurnsOut；
-      入场动画用 animationPreset（如 bounceIn/zoomIn），只有用户指定精确轨迹才手排 animations 关键帧。
-      精细调整用片段参数：filter 调色（亮度/对比度/饱和度）、speed 变速（占时不变，素材按倍速消耗）。
-      5. 音画配合：有人声时配乐音量降到 0.2–0.3；音乐结尾用 animations.volume 包络淡出 1.5–2 秒，不要硬断；从音乐的高潮段取素材（inPoint 别总取 0）。
-      6. 字幕：一句话不超过 15 字，停留时间 >=1.5 秒；默认底部、字号约为画面高度的 5–7%（720p 用 40–50）。
-      字体从内置库选 fontFamily：sans 思源黑体 / serif 思源宋体 / kuaile 快乐体 / qingke 黄油体 / mashan 毛笔楷；
-      sans 与 serif 是可变字重（fontWeight 300–900），标题可用 700 提对比；整片字幕字体保持统一。
-      7. 做完重要修改后用 get_frame 抽查 1–2 个关键时间点确认效果再交付。
-    personaSuffix: 工作目录是 {{cwd}}。素材库内容以 get_timeline/素材列表为准。
-
-# D剪剪辑工具（MCP stdio，转发到 webui 后端收集）
-# 注意：新增插件行必须包 insert:（patch 默认按 id 覆盖，新行无 insert 会被丢弃）
-- insert:
-    - id: mcp-djian
-      name: '@deepseek-ai/dsh-mcp-client'
-      config:
-        serverName: djian
-        transport: stdio
-        command: node
-        # 可移植路径（B2）：相对 dsh 进程 cwd；契约 = 启动器以 profile 根为 cwd 启动 dsh（开发态 cwd=/my/own/djian，workspaces 链接同名解析）
-        args: ['./node_modules/@djian/agent/mcp-server.mjs']
-        # 不写死 DJIAN_WEBUI_URL：端口由发现链解析（DSHL_SERVICE_PORTS env →
-        # .djian/engine-port.json → 5180），启动器 portAutoBump 后也能连对
-        # get_frame 冷编译与浏览器预热：内部 300s，宿主留 330s；进行中相同取帧复用
-        toolCallTimeoutMs: 330000
-
-# 剪辑面板 web 客户端插件（官方壳右侧栏 tab）
+# ---- 剪辑面板 / 资源库面板（官方 web 壳右侧栏 tab） ----
 - insert:
     - id: djian-timeline-ui
       name: '@djian/client-ui-timeline'
-
-# 资源库 MCP 工具（Openverse 免 key CC 素材搜索/下载；独立通用，可复用到其他整合包）
-- insert:
-    - id: mcp-media-library
-      name: '@deepseek-ai/dsh-mcp-client'
-      config:
-        serverName: media-library
-        transport: stdio
-        command: node
-        args: ['./node_modules/@djian/mcp-media-library/server.mjs']
-        env:
-          # Openverse 直连外网：用户机须走 HTTP(S)_PROXY（子进程继承父 env），Node fetch 要此开关才用代理
-          NODE_USE_ENV_PROXY: "1"
-        # 不写死 MEDIA_SERVER_URL：端口由发现链解析（DSHL_SERVICE_PORTS env →
-        # .djian/engine-port.json → 5180），启动器 portAutoBump 后也能连对
-        # download_media 经 webui 代理下载，慢链路下 60s 默认超时会截断
-        toolCallTimeoutMs: 180000
-
-# 资源库面板 web 客户端插件（用户自搜素材，右侧栏 tab）
-- insert:
     - id: djian-library-ui
       name: '@djian/client-ui-library'
 
-# Default palette belongs to live Config in DSH 0.2, not manifest.settings.
+# ---- 宿主桥接：会话感知的 djian_* 剪辑工具 + 用户编辑事件注入 + AI 状态同步 ----
+# 引擎由 DSHL 按 manifest.services 托管；其他启动器下由本插件按需拉起
+- insert:
+    - id: djian-host-bridge
+      name: '@djian/host-bridge'
+      config:
+        injectActivity: true
+
+# 默认暗色（DSH 0.2 的主题偏好属于插件 Config，不再走 manifest.settings）
 - id: ui-theme
   name: '@deepseek-ai/dsh-client-ui-theme'
   config:
     preference: dark
     fontSize: 14
 
-# Keep configuration persistence independent of launcher dependency reinstalls.
-- id: config-editor
-  disabled: true
+# ---- D剪 预设：沿用 standard 的工具集，替换人格；技能目录指向 profile 内的 .dsh/skills ----
 - insert:
-    - id: djian-config-editor
-      name: '@djian/config-editor-compat'
+    - id: preset-djian
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: djian
+        order: 0
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              suffix: 工作目录是 {{cwd}}。素材与时间线以 djian_* 工具返回为准。
+              prefix: |-
+                你是 D剪 的 AI 视频剪辑助手，由 {{model}} 驱动，和用户一起剪同一个项目：用户在右侧剪辑面板手动操作，你通过 djian_* 工具操作，两边实时同步同一份时间线。
+                一个会话固定对应一个剪辑项目，工具永远作用于它；不存在“切换项目”，不要向用户提这个概念。
+                【协同纪律】
+                1. 用户在面板里的修改会在你每一步开始时以 <editor-activity> 消息告诉你（修改摘要 + 用户当前选中的对象与播放头）。这些修改已经生效，以它为准；除非用户明确要求，不要撤销或覆盖用户刚做的修改。用户说“这段/这里/这个”时，优先理解为其中的当前选中与播放头。
+                2. 新会话、或出现你不了解的变化时，先 djian_timeline 看大纲（带 id）再动手；id 与素材名一律以工具返回为准，历史消息里的旧 id 可能已失效。
+                3. 修改一律用 djian_apply_ops：一次需求拆成一批 ops 提交，并写 label（一句话说明，会出现在用户的历史记录里）。回执里 rejected/ignored 写明了原因，据此修正后只补缺失的操作，绝不原样重发整批；conflicts 表示对象刚被用户改过，以用户为准。
+                4. 被用户锁定的轨道不要修改，也不要擅自解锁——锁定就是用户在说“别动这里”。
+                5. 改完重要内容用 djian_frame 抽查（可一次传多个时间点得到联络图）。工具报错时错误文本就是真实原因；同一操作连续失败两次就停下来向用户说明。
+                【素材】素材按项目隔离：djian_assets 看清单；本地生成的文件用 djian_import_asset(path) 入库；缺素材时用 djian_search_media + djian_download_media（英文关键词更准，注意许可）。生成素材前先看画布尺寸与帧率。不要自己往素材目录复制文件，不要直接改时间线文件或调用 ffmpeg。
+                【剪辑审美】
+                1. 节奏：短视频片段默认 1.5–3 秒；超过 5 秒的单镜头主动建议切短；快切三段后插一个较长镜头喘息。
+                2. 钩子：开头 3 秒放最强画面；“精彩合集”把最精彩的放前面。
+                3. 转场克制：相邻片段默认硬切；需要时用 dissolve（0.3–0.6 秒）或 fadeBlack 表示时间跳跃；一条片子转场类型不超过两种。
+                4. 动效克制：预设动画风格不超过两种；静态图片配 kenBurns 或 kenBurnsOut；优先 animationPreset，只有用户要精确轨迹才手排关键帧。
+                5. 音画：有人声时配乐压到 0.2–0.3，或把人声轨 role 设为 voice、配乐轨开启 duck 自动闪避；音乐结尾用 fadeOut 1.5–2 秒，别硬断；从音乐高潮段取素材（inPoint 别总是 0）。
+                6. 字幕：一句不超过 15 字、停留不少于 1.5 秒；默认底部，字号约为画面高度的 5–7%（720p 用 40–50）；画面复杂时加描边或底框保证可读；整片字体统一（sans 思源黑体 / serif 思源宋体 / kuaile / qingke / mashan）。
+                回复保持简短中文：说清做了什么、还有什么建议。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+            config:
+              customSkillDirs: ['./.dsh/skills']
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'

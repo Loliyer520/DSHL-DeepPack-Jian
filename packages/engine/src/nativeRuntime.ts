@@ -40,12 +40,19 @@ async function removeScratch(directory: string, parent: string) {
   await fs.rm(directory, { recursive: true, force: true });
 }
 
+// 16×16 灰色 PNG，经 image2pipe 从 stdin 喂给编码器做自检。
+// 不能用 lavfi nullsrc：Remotion 自带的精简版 FFmpeg 没有 wrapped_avframe 解码器，会误判为编码器损坏。
+const PROBE_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAAAAAA6mKC9AAAAD0lEQVR4nGNoQAMMI1sAAAUMgAFaSOXNAAAAAElFTkSuQmCC', 'base64');
+
 export async function verifyEncoder(executable: string) {
   const scratch = await fs.mkdtemp(path.join(os.tmpdir(), 'djian-encoder-probe-'));
   try {
     const output = path.join(scratch, 'probe.mp4');
-    await run(executable, ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-f', 'lavfi', '-i', 'nullsrc=s=16x16',
+    const task = run(executable, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'image2pipe', '-c:v', 'png', '-i', 'pipe:0',
       '-frames:v', '1', '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', output], { timeout: 10000, maxBuffer: 256000, windowsHide: true });
+    task.child.stdin?.on('error', () => { /* 编码器提前退出时忽略写入错误，结果以退出码为准 */ });
+    task.child.stdin?.end(PROBE_PNG);
+    await task;
     if ((await fs.stat(output)).size < 128) throw new Error('编码器未生成有效视频');
   } finally { await removeScratch(scratch, os.tmpdir()); }
 }

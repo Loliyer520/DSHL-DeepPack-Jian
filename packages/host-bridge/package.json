@@ -1,0 +1,27 @@
+{
+  "name": "@djian/host-bridge",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "D剪 宿主桥接插件：会话感知的原生剪辑工具、用户编辑事件注入模型上下文、AI 状态同步",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./tools": "./lib/tools.js",
+    "./engine-client": "./lib/engine-client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "lib"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/dsh": ">=0.2.0-rc.2 <0.3.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh": {
+      "optional": true
+    }
+  },
+  "license": "MIT"
+}

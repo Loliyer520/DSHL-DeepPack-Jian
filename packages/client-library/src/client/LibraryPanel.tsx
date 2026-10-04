@@ -51,7 +51,7 @@ const LibraryContents: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
     setImports((m) => ({ ...m, [it.id]: { st: 'busy' } }));
     try {
       const safe = it.title.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 60);
-      const r = await importLibrary(it.url, safe || undefined, it.kind, sessionId);
+      const r = await importLibrary(it, safe || undefined, sessionId);
       setImports((m) => ({ ...m, [it.id]: { st: 'done', name: r.name } }));
     } catch (e) {
       setImports((m) => ({ ...m, [it.id]: { st: 'err', err: e instanceof Error ? e.message : String(e) } }));
@@ -88,7 +88,7 @@ const LibraryContents: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
       {error && <div className="djl-error">{error}</div>}
       {!loading && !error && items.length === 0 && (
         <div className="djl-hint">
-          {lastQuery.current ? '无结果——换个关键词试试（英文更准）' : '输入关键词搜索 CC 授权素材，导入后到「剪辑面板 · 素材」使用'}
+          {lastQuery.current ? '无结果——换个关键词试试（英文更准）' : '输入关键词搜索 CC 授权素材，导入后到「D剪 · 素材」使用'}
         </div>
       )}
 
@@ -137,7 +137,7 @@ const LibraryContents: React.FC<{ sessionId?: string }> = ({ sessionId }) => {
           </button>
         </div>
       )}
-      <div className="djl-foot">Openverse CC 聚合 · 导入后到「剪辑面板 · 素材」拖上轨道 · AI 也可经 search_media 用同一资源库</div>
+      <div className="djl-foot">Openverse CC 聚合 · 导入后到「D剪 · 素材」拖上轨道 · AI 也能用 djian_search_media 搜同一资源库</div>
     </div>
   );
 };

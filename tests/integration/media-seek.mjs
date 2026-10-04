@@ -44,12 +44,12 @@ try {
   });
   await ready(base + '/api/health');
   const { project } = await (await fetch(base + '/api/session-project', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'seek-test' }),
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Djian-Client': 'test' }, body: JSON.stringify({ sessionId: 'seek-test' }),
   })).json();
   const file = path.join(data, 'projects', project.id, 'assets', '跳转测试.mp4');
   execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30', '-t', '90', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18', '-g', '30', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-y', file], { windowsHide: true });
   const size = fs.statSync(file).size;
-  const media = `${base}/project-assets/${encodeURIComponent(path.basename(file))}?session=seek-test`;
+  const media = `${base}/api/p/${encodeURIComponent(project.id)}/media/${encodeURIComponent(path.basename(file))}`;
   pageServer = http.createServer((_req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.end(`<video crossorigin="anonymous" preload="metadata" src="${media}"></video>`);

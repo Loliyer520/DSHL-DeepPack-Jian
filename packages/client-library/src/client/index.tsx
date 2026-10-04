@@ -26,15 +26,18 @@ export const inject = [
 // 1) sidebarRightTabs.register 注册 tab 类型定义（id/kind/title/guide 胶囊）
 // 2) slots.inject("sidebar.right.pane.tab", ...) 里 slots.register 挂该类型的渲染组件（key = 类型 id）
 export function apply(ctx: any) {
-  injectStyles();
+  ctx.effect(() => {
+    injectStyles();
+    return () => document.getElementById('djl-styles')?.remove();
+  }, 'djian-library: styles');
 
   ctx.effect(
     () =>
       ctx.sidebarRightTabs.register({
-        id: 'djian.library',
+        id: '@djian/client-ui-library',
         kind: 'djian.library',
         keepMounted: true,
-        priority: 'builtin',
+        priority: 'extension',
         title: () => '资源库',
         guide: [
           {
@@ -51,7 +54,7 @@ export function apply(ctx: any) {
 
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () =>
     ctx.slots.register(
-      { name: 'sidebar.right.pane.tab', key: 'djian.library' },
+      { name: 'sidebar.right.pane.tab', key: '@djian/client-ui-library' },
       LibraryPanel,
     ),
   ), 'djian-library: tab body');

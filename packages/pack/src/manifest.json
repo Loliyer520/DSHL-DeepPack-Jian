@@ -2,66 +2,53 @@
   "manifestVersion": 5,
   "type": "profile",
   "name": "djian",
-  "version": "1.3.2",
+  "version": "2.0.0",
   "displayName": {
     "zh-CN": "D剪 · AI 视频剪辑工作台",
     "en-US": "Djian · AI Video Editing Workbench"
   },
   "description": {
-    "zh-CN": "JSON 时间线驱动的视频剪辑：AI 操作与手动 WebUI 编辑同一份时间线，一键出片。",
-    "en-US": "JSON-timeline-driven video editing: AI operations and manual WebUI edits share one timeline."
+    "zh-CN": "人与 AI 同时剪同一条时间线：面板手动剪辑与 AI 工具实时同步，用户的每次修改都会作为事件告诉 AI；支持转场、关键帧、字幕样式、画中画、配乐闪避，一键出片。",
+    "en-US": "You and the AI edit one timeline together: manual edits in the panel and AI tool calls stay in sync, and every user edit is reported to the model as an event. Transitions, keyframes, styled captions, picture-in-picture, music ducking and one-click export."
   },
   "author": "Loliy",
   "profileName": "djian",
   "dshVersion": "0.2.0-rc.2",
+  "dshVersions": ["0.2.0-rc.2"],
+  "launchers": {
+    "dshl": { "supported": true, "minVersion": "0.5.0.0", "reason": "使用 DSHL 的 vendor 直挂安装与 services 本地服务托管" },
+    "hdsl": { "supported": false, "reason": "依赖 DSHL 扩展（vendor 直挂、services）" },
+    "dsh-packforge-app": { "supported": false, "reason": "依赖 DSHL 扩展（vendor 直挂、services）" },
+    "official-desktop": { "supported": false, "reason": "依赖 DSHL 扩展（vendor 直挂、services）" },
+    "dsh-cli": { "supported": false, "reason": "依赖 DSHL 扩展（vendor 直挂、services）" }
+  },
   "bundles": [
     "@deepseek-ai/dsh-base",
     "@deepseek-ai/dsh-web-app"
   ],
   "dependencies": {
-    "@djian/agent": "vendor:djian-agent-0.1.0.tgz",
-    "@djian/engine": "vendor:djian-engine-0.1.0.tgz",
-    "@djian/client-ui-timeline": "vendor:djian-client-ui-timeline-0.1.0.tgz",
-    "@djian/client-ui-library": "vendor:djian-client-ui-library-0.1.0.tgz",
-    "@djian/mcp-media-library": "vendor:djian-mcp-media-library-0.1.0.tgz",
-    "@djian/webui": "vendor:djian-webui-0.1.0.tgz",
-    "@deepseek-ai/dsh-sdk-client": "0.2.0-rc.2",
-    "@remotion/bundler": "4.0.526",
-    "@remotion/player": "4.0.526",
+    "@djian/engine": "vendor:djian-engine-0.2.0.tgz",
+    "@djian/webui": "vendor:djian-webui-0.2.0.tgz",
+    "@djian/host-bridge": "vendor:djian-host-bridge-0.2.0.tgz",
+    "@djian/client-ui-timeline": "vendor:djian-client-ui-timeline-0.2.0.tgz",
+    "@djian/client-ui-library": "vendor:djian-client-ui-library-0.2.0.tgz",
     "@remotion/renderer": "4.0.526",
+    "remotion": "4.0.526",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "remotion": "4.0.526",
-    "zod": "3.25.76",
-    "@deepseek-ai/dsh-base": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-web-app": "0.2.0-rc.2",
-    "@djian/dsh-app-boot-compat": "vendor:djian-dsh-app-boot-compat-0.2.0-rc.2.tgz",
-    "@djian/config-editor-compat": "vendor:djian-config-editor-compat-0.2.0-rc.2.tgz"
+    "zod": "3.25.76"
   },
   "services": [
     {
       "name": "djian-engine",
       "command": "node",
-      "args": [
-        "./node_modules/@djian/webui/server/index.mjs"
-      ],
-      "env": {
-        "DJIAN_PATCH": "./cordis.patch.yml",
-        "NODE_USE_ENV_PROXY": "1"
-      },
+      "args": ["./node_modules/@djian/webui/server/index.mjs"],
+      "env": { "NODE_USE_ENV_PROXY": "1" },
       "port": 5180,
       "portAutoBump": true,
       "healthPath": "/api/health",
-      "readyTimeoutMs": 120000,
+      "readyTimeoutMs": 90000,
       "required": true
     }
-  ],
-  "settings": {
-    "ui-theme": {
-      "preference": "dark"
-    },
-    "agent-preset-registry": {
-      "default": "standard"
-    }
-  }
+  ]
 }

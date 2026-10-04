@@ -1,409 +1,89 @@
-// D剪 MCP 剪辑工具服务（stdio JSON-RPC，MCP 协议）
-// dsh agent 通过它修改时间线；本进程只做校验+转发到 webui 后端收集，run 结束后由前端统一下发执行。
-import readline from "node:readline";
-import fs from "node:fs";
-import path from "node:path";
-import { importAsset } from './import-asset.mjs';
+#!/usr/bin/env node
+// D剪 MCP 适配器（stdio）：给 DSH 之外的 agent（Claude Code、Codex、其他 MCP 客户端）调用剪辑引擎。
+// 与宿主插件共用同一套工具定义（../host-bridge/lib/tools.js）；MCP 协议不携带会话，
+// 所以每个工具都要求显式传 projectId（用 djian_projects 列出或新建）。
+import readline from 'node:readline';
+import { EngineClient } from '../host-bridge/lib/engine-client.js';
+import { TOOLS, toolByName } from '../host-bridge/lib/tools.js';
+import { SessionState } from '../host-bridge/lib/activity.js';
 
-// 后端端口发现链（启动器 portAutoBump 后实际端口可能不是 5180）：
-// 显式 DJIAN_WEBUI_URL → 启动器注入的 DSHL_SERVICE_PORTS JSON → profile 根
-// .dshl-service-ports.json（启动器写的全服务契约）→ 引擎自落盘的
-// engine-port.json（cwd=profile 根；HOME 场景再查 ~/.djian）→ 探测 5180..5190
-// （与启动器顺延窗口一致）→ 默认 5180。
-// 除显式 env 外，每个候选都要过 /api/health 身份校验（service=djian-engine）：
-// 端口文件可能是上次崩溃留下的陈旧数据，端口也可能撞上别家服务。验证通过的地址
-// 进程内缓存，缓存失联（引擎重启换口）自动重扫——自愈，不盲信任何一层。
-let verifiedBase = "";
-async function engineAlive(base) {
-  try {
-    const res = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(1500) });
-    if (!res.ok) return false;
-    const j = await res.json().catch(() => null);
-    return j?.service === "djian-engine";
-  } catch { return false; }
-}
-function candidateBases() {
-  const list = [];
-  const fromMap = (map) => {
-    const p = Number(map?.["djian-engine"] ?? map?.port);
-    return p > 0 ? `http://127.0.0.1:${p}` : null;
-  };
-  try {
-    const viaEnv = fromMap(JSON.parse(process.env.DSHL_SERVICE_PORTS || "{}"));
-    if (viaEnv) list.push(viaEnv);
-  } catch { /* 非法 JSON 忽略 */ }
-  const files = [
-    path.join(process.cwd(), ".dshl-service-ports.json"),
-    path.join(process.cwd(), ".djian", "engine-port.json"),
-  ];
-  if (process.env.HOME) files.push(path.join(process.env.HOME, ".djian", "engine-port.json"));
-  for (const f of files) {
-    try {
-      const viaFile = fromMap(JSON.parse(fs.readFileSync(f, "utf-8")));
-      if (viaFile) list.push(viaFile);
-    } catch { /* 文件不存在或尚未写入 */ }
+const client = new EngineClient({ clientId: 'djian-mcp' });
+const states = new Map();
+const stateFor = async (projectId) => {
+  if (typeof projectId !== 'string' || !projectId) throw new Error('缺少 projectId：先调用 djian_projects 列出或新建项目');
+  let s = states.get(projectId);
+  if (!s) {
+    s = new SessionState('mcp-' + projectId);
+    s.projectId = projectId;
+    const list = await client.get('/api/projects');
+    const p = list.projects.find((x) => x.id === projectId);
+    if (!p) throw new Error('项目 ' + projectId + ' 不存在');
+    s.projectName = p.name;
+    states.set(projectId, s);
   }
-  for (let p = 5180; p <= 5190; p++) list.push(`http://127.0.0.1:${p}`);
-  return [...new Set(list)];
-}
-async function webui() {
-  if (process.env.DJIAN_WEBUI_URL) return process.env.DJIAN_WEBUI_URL.replace(/\/+$/, "");
-  if (verifiedBase && (await engineAlive(verifiedBase))) return verifiedBase;
-  for (const base of candidateBases()) {
-    if (await engineAlive(base)) {
-      verifiedBase = base;
-      return base;
-    }
-  }
-  verifiedBase = "";
-  // 兜底默认：引擎没起时让请求自然报连接错误（与旧行为一致，工具报错里带地址好排查）
-  return "http://127.0.0.1:5180";
-}
-
-const NUM = { type: "number" };
-const PATCH = {
-  type: "object",
-  properties: {
-    src: { type: "string" },
-    inPoint: NUM,
-    clipDuration: { type: "number", exclusiveMinimum: 0 },
-    transition: { enum: ["none", "fade"] },
-    volume: { type: "number", minimum: 0, maximum: 1 },
-    atSeconds: { type: "number", minimum: 0, description: "叠加轨专用：绝对起始秒" },
-    box: {
-      type: "object",
-      properties: {
-        x: { type: "number", minimum: 0, maximum: 1 },
-        y: { type: "number", minimum: 0, maximum: 1 },
-        w: { type: "number", minimum: 0.01, maximum: 1 },
-        h: { type: "number", minimum: 0.01, maximum: 1 },
-      },
-      description: "叠加轨专用：画中画盒子（0-1 分数矩形）",
-    },
-    speed: { type: "number", minimum: 0.1, maximum: 10, description: "恒定变速：2=快放一倍，0.5=慢放；clipDuration 仍是成片占时" },
-    filter: {
-      type: "object",
-      properties: {
-        brightness: { type: "number", minimum: 0, maximum: 3 },
-        contrast: { type: "number", minimum: 0, maximum: 3 },
-        saturate: { type: "number", minimum: 0, maximum: 3 },
-        blur: { type: "number", minimum: 0, maximum: 20, description: "px" },
-        grayscale: { type: "number", minimum: 0, maximum: 1 },
-        sepia: { type: "number", minimum: 0, maximum: 1 },
-        hueRotate: { type: "number", minimum: 0, maximum: 360, description: "度" },
-      },
-      description: "基础滤镜，省略的通道不调；设 {} 清空滤镜",
-    },
-    animations: {
-      type: "object",
-      properties: {
-        x: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM, e: { enum: ["linear", "in", "out", "inOut", "bounce", "elastic"], description: "到下一帧的缓动" } }, required: ["t", "v"] }, description: "画布分数偏移（0=原位）" },
-        y: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM, e: { enum: ["linear", "in", "out", "inOut", "bounce", "elastic"] } }, required: ["t", "v"] } },
-        scale: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM, e: { enum: ["linear", "in", "out", "inOut", "bounce", "elastic"] } }, required: ["t", "v"] }, description: "1=原大" },
-        opacity: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM, e: { enum: ["linear", "in", "out", "inOut", "bounce", "elastic"] } }, required: ["t", "v"] }, description: "0-1" },
-        rotation: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM, e: { enum: ["linear", "in", "out", "inOut", "bounce", "elastic"] } }, required: ["t", "v"] }, description: "度" },
-        volume: { type: "array", items: { type: "object", properties: { t: NUM, v: NUM, e: { enum: ["linear", "in", "out", "inOut", "bounce", "elastic"] } }, required: ["t", "v"] }, description: "音量包络 0-1，乘在 clip.volume 上" },
-      },
-      description: "关键帧动画：t=clip 内相对秒，v=值，e=缓动(linear/in/out/inOut/bounce/elastic)；设 {} 清空动画",
-    },
-    animationPreset: {
-      type: "string",
-      enum: ["fadeIn", "slideInLeft", "slideInRight", "slideInUp", "zoomIn", "bounceIn", "spinIn", "fadeOut", "slideOutLeft", "slideOutRight", "zoomOut", "kenBurns", "kenBurnsOut", "pop", "tilt", "pulse", "wobble", "float", "none"],
-      description: "一键动画预设（服务端按 clip 时长展开成关键帧，比手排 animations 省事）；'none'=清除动画",
-    },
-    text: { type: "string" },
-    startSeconds: NUM,
-    endSeconds: NUM,
-    position: { enum: ["top", "center", "bottom"] },
-    fontSize: NUM,
-    color: { type: "string" },
-    fontFamily: { enum: ["sans", "serif", "kuaile", "qingke", "mashan"], description: "字幕字体：sans=思源黑体 serif=思源宋体 kuaile=快乐体（可爱） qingke=黄油体（海报标题） mashan=毛笔楷（书法）" },
-    fontWeight: { type: "integer", minimum: 100, maximum: 900, description: "字重 100-900（思源黑/宋是可变字体）；快乐体/黄油体/毛笔楷只有 400" },
-  },
+  return s;
 };
-const opSchema = (op, props, required = []) => ({
-  type: "object",
-  properties: { op: { enum: [op] }, ...props },
-  required: ["op", ...required],
-  additionalProperties: false,
+
+const withProject = (schema) => ({
+  ...schema,
+  properties: { projectId: { type: 'string', description: '剪辑项目 id（djian_projects 返回）' }, ...(schema.properties ?? {}) },
+  required: ['projectId', ...(schema.required ?? [])],
 });
 
-const TOOLS = [
-  {
-    name: "apply_timeline_ops",
-    description:
-      "对当前视频时间线应用一批剪辑操作（时间线 v2 多轨模型）。ops 数组按顺序执行。每个元素必须是 {\"op\":\"操作名\", ...参数} 形式：\n" +
-      'addClip{src,inPoint,clipDuration,transition,volume,track?,atSeconds?,box?} —— track 省略或 "main" 加主轨道（串行）；track:"pip" 加画中画叠加轨（必顷 atSeconds 绝对秒，box 可选 0-1 分数矩形 {x,y,w,h}，默认右下 30%）/ ' +
-      'removeClip{id} / updateClip{id,patch} / reorderClips{order:[id...]} / ' +
-      'addAudio{src,duration,atSeconds,volume?,track?} —— 音频轨加 clip，track 是轨名（同名复用，缺省新建） / ' +
-      'removeAudio{id} / updateAudioTrack{id,patch:{volume?,muted?,name?}} / ' +
-      'splitClip{id,atSeconds} —— 在全局时间轴 atSeconds 处把片段一分为二（主轨/叠加/音频 clip 均可，切点太靠边会被忽略）/ ' +
-      'v3 能力：updateClip 的 patch 可设 speed（0.1-10 恒定变速，2=快放一倍，clipDuration 仍是成片占时）、filter（{brightness?,contrast?,saturate?,blur?,grayscale?,sepia?,hueRotate?}，设 {} 清空）、animations（关键帧 {x?,y?,scale?,opacity?,rotation?,volume?}: [{t,v,e?}]，t 为 clip 内相对秒，e 缓动 linear/in/out/inOut/bounce/elastic；x/y 是画布分数偏移，scale 1=原大，opacity/volume 0-1，rotation 度；设 {} 清空；给音频 clip 设 volume 包络即音量包络）、animationPreset（一键动画预设：fadeIn/slideInLeft/slideInRight/slideInUp/zoomIn/bounceIn/spinIn/fadeOut/slideOutLeft/slideOutRight/zoomOut/kenBurns/kenBurnsOut/pop/tilt/pulse/wobble/float，"none" 清除；按 clip 时长自动展开成关键帧，比手排省事优先用）/ ' +
-      '字幕动画：addOverlay 直接带 animations/animationPreset，updateOverlay 的 patch 同理（同一套关键帧与预设，t 为字幕内相对秒、出现时刻=0，通道 x/y/scale/opacity/rotation；预设按字幕时长展开，"none" 清除）；字幕字体 fontFamily 可选 sans(思源黑体)/serif(思源宋体)/kuaile(快乐体)/qingke(黄油体)/mashan(毛笔楷)，fontWeight 100-900（黑/宋可变）/ ' +
-      'addOverlay{text,startSeconds,endSeconds,position,fontSize,color,animations?,animationPreset?} / removeOverlay{index} / updateOverlay{index,patch} / ' +
-      'setMeta{patch:{fps?,width?,height?}}（调画布：帧率 1-120，宽高 16-7680 偶数）。\n' +
-      "时间单位都是秒；transition 只接受 \"fade\" 或 \"none\"。总时长 = 主轨道串行与所有叠加/音频 clip 末尾的最大值。返回会逐条点名被忽略（id/index 无效）和被拒绝（格式/素材不合法）的操作及原因；全部没生效时标错并要求先 get_timeline 核对。",
-    inputSchema: {
-      type: "object",
-      properties: {
-        ops: {
-          type: "array",
-          items: {
-            oneOf: [
-              opSchema("addClip", { type: { enum: ["video", "image"] }, src: { type: "string" }, inPoint: NUM, clipDuration: { type: "number", exclusiveMinimum: 0 }, transition: { enum: ["none", "fade"] }, volume: { type: "number", minimum: 0, maximum: 1 }, track: { type: "string" }, atSeconds: NUM, box: { type: "object" }, speed: { type: "number", minimum: 0.1, maximum: 10, description: "恒定变速：2=快放一倍；clipDuration 仍是成片占时" }, filter: { type: "object", description: "基础滤镜 {brightness,contrast,saturate,blur,grayscale,sepia,hueRotate}" }, animations: { type: "object", description: "关键帧 {x,y,scale,opacity,rotation,volume}: [{t,v}]，t=clip 内相对秒，线性插值" } }),
-              opSchema("removeClip", { id: { type: "string" } }, ["id"]),
-              opSchema("updateClip", { id: { type: "string" }, patch: PATCH }, ["id", "patch"]),
-              opSchema("reorderClips", { order: { type: "array", items: { type: "string" } } }, ["order"]),
-              opSchema("addAudio", { src: { type: "string" }, inPoint: NUM, duration: { type: "number", exclusiveMinimum: 0 }, volume: { type: "number", minimum: 0, maximum: 1 }, atSeconds: NUM, track: { type: "string" }, speed: { type: "number", minimum: 0.1, maximum: 10 }, animations: { type: "object", description: "音量包络 {volume:[{t,v}]}，t=clip 内相对秒" } }, ["src", "duration"]),
-              opSchema("removeAudio", { id: { type: "string" } }, ["id"]),
-              opSchema("splitClip", { id: { type: "string" }, atSeconds: { type: "number", description: "全局时间轴切点（秒）" } }, ["id", "atSeconds"]),
-              opSchema("updateAudioTrack", { id: { type: "string" }, patch: { type: "object", properties: { volume: { type: "number", minimum: 0, maximum: 1 }, muted: { type: "boolean" }, name: { type: "string" } } } }, ["id", "patch"]),
-              opSchema("addOverlay", { text: { type: "string" }, startSeconds: NUM, endSeconds: NUM, position: { enum: ["top", "center", "bottom"] }, fontSize: NUM, color: { type: "string" }, fontFamily: { enum: ["sans", "serif", "kuaile", "qingke", "mashan"], description: "字幕字体：sans=思源黑体 serif=思源宋体 kuaile=快乐体（可爱） qingke=黄油体（海报标题） mashan=毛笔楷（书法）" }, fontWeight: { type: "integer", minimum: 100, maximum: 900 }, animations: { type: "object", description: "字幕关键帧 {x,y,scale,opacity,rotation}: [{t,v,e?}]，t=字幕内相对秒（出现时刻=0）" }, animationPreset: { type: "string", enum: ["fadeIn", "slideInLeft", "slideInRight", "slideInUp", "zoomIn", "bounceIn", "spinIn", "fadeOut", "slideOutLeft", "slideOutRight", "zoomOut", "kenBurns", "kenBurnsOut", "pop", "tilt", "pulse", "wobble", "float", "none"], description: "字幕一键动画预设（按字幕时长展开成关键帧）；'none'=清除动画" } }, ["text", "startSeconds", "endSeconds"]),
-              opSchema("removeOverlay", { index: { type: "integer", minimum: 0 } }, ["index"]),
-              opSchema("updateOverlay", { index: { type: "integer", minimum: 0 }, patch: PATCH }, ["index", "patch"]),
-              opSchema("setMeta", { patch: { type: "object", properties: { fps: { type: "integer", minimum: 1, maximum: 120 }, width: { type: "number" }, height: { type: "number" } }, required: [] } }, ["patch"]),
-            ],
-          },
-        },
-      },
-      required: ["ops"],
-    },
-  },
-  {
-    name: "get_timeline",
-    description: "读取当前状态：返回 project、canvas（width/height/fps，生成素材前先读取）、assetsDir 绝对路径、availableAssets（addClip/addAudio 引用这里的文件名）、timeline（v2 多轨 JSON）。本地生成文件先 import_asset 入库。修改前后、新会话开始时调用；id/index/素材名以返回为准。",
-    inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "project_list",
-    description: "列出当前绑定的剪辑项目（一个 dsh 会话固定绑定一个项目，由面板自动管理，模型不能切换）。返回项目 id/名称/画布参数。",
-    inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "import_asset",
-    description: "把本地生成的视频/图片/音频直接放进当前项目素材库，无需查找或写入项目目录。提供本地绝对路径 path；小文件也可用 base64 + name。最大 512MB（base64 32MB），重名自动改名。返回实际 name/type/duration/projectId/assetsDir；再用 name 执行 addClip/addAudio。优先用本工具，不要递归全盘搜索或 Copy-Item 到素材目录。",
-    inputSchema: { type: "object", properties: { path: { type: "string", description: "本地文件绝对路径，推荐" }, base64: { type: "string", description: "标准 base64，小文件备用" }, name: { type: "string", description: "保存文件名，base64 时必填；必须带媒体扩展名" } }, anyOf: [{ required: ["path"] }, { required: ["base64", "name"] }] },
-  },
-  {
-    name: "asset_list",
-    description: "返回当前项目 projectId、assetsDir 绝对路径和 assets（文件名/类型/大小/时长）。本地生成素材用 import_asset 入库，addClip 的 src 用返回文件名。",
-    inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "get_frame",
-    description:
-      "查看时间线在第 N 秒处合成后的实际画面（与成片一致，含字幕/淡入等效果）。" +
-      "返回该帧 PNG 图片 + 画面数据统计（平均亮度/黑场占比/主色/底部字幕区亮像素占比）。" +
-      "若你无法接收图像，请依据 stats 数据判断：avgBrightness<16 是黑场、contrast<10 接近纯色、" +
-      "bottomThirdBrightPercent 只统计亮度>200像素；bottomThirdColoredPercent 统计显著彩色像素，背景也会贡献。任一指标为0不证明没有字幕。activeTextLayers 列出该帧时间范围命中的字幕（含颜色/动画），不保证像素可见。冷启动可能需要数分钟；秒数越界自动钳到有效范围。",
-    inputSchema: {
-      type: "object",
-      properties: { seconds: { type: "number", minimum: 0, description: "要看的时间点（秒）" } },
-      required: ["seconds"],
-    },
-  },
-];
+const PROJECTS_TOOL = {
+  name: 'djian_projects',
+  description: '列出 D剪 剪辑项目；传 create:{name, width?, height?, fps?} 新建项目。其他 djian_* 工具都需要 projectId。',
+  inputSchema: { type: 'object', properties: { create: { type: 'object', properties: { name: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' }, fps: { type: 'number' } } } } },
+};
 
-function send(msg) {
-  process.stdout.write(JSON.stringify(msg) + "\n");
-}
+const listTools = () => [PROJECTS_TOOL, ...TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: withProject(t.parameters) }))];
 
-async function forwardOps(ops) {
-  let res;
-  try {
-    res = await fetch(`${await webui()}/api/internal/ops`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ops }),
-      signal: AbortSignal.timeout(30_000),
-    });
-  } catch (e) {
-    // 网络在请求或响应阶段中断：操作可能已生效（服务端可能已落盘但响应丢失）。
-    // 探测后如实告知模型，让它先核对再补差，防止整批重发造成重复添加。
-    const reachable = await fetch(`${await webui()}/api/health`, { signal: AbortSignal.timeout(3_000) })
-      .then((r) => r.ok)
-      .catch(() => false);
-    if (reachable) {
-      throw new Error("网络在响应阶段中断，操作可能已经生效：请先用 get_timeline 核对当前状态，缺什么补什么，切勿整批重发（可能重复添加）");
+async function callTool(name, args = {}) {
+  if (name === 'djian_projects') {
+    if (args.create) {
+      const r = await client.post('/api/projects', { name: args.create.name, meta: { width: args.create.width, height: args.create.height, fps: args.create.fps } });
+      return { content: [{ type: 'text', text: '已新建项目 ' + r.id + '「' + r.project?.name + '」' }], structuredContent: r };
     }
-    throw new Error(`无法连接 D剪 后端（${await webui()}）：引擎可能正在启动或重启，请稍后重试`);
+    const r = await client.get('/api/projects');
+    return { content: [{ type: 'text', text: r.projects.map((p) => p.id + ' 「' + p.name + '」 ' + (p.meta ? p.meta.width + '×' + p.meta.height + '@' + p.meta.fps : '')).join('\n') || '还没有项目' }], structuredContent: r };
   }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `webui HTTP ${res.status}`);
-  return data;
+  const tool = toolByName.get(name);
+  if (!tool) throw new Error('未知工具 ' + name);
+  const { projectId, ...rest } = args;
+  const state = await stateFor(projectId);
+  const result = await tool.execute(client, state, rest);
+  const content = [{ type: 'text', text: result.text }];
+  if (result.image) content.push({ type: 'image', data: result.image.data.toString('base64'), mimeType: result.image.mediaType });
+  return { content, structuredContent: JSON.parse(JSON.stringify(result.value ?? {})) };
 }
 
-async function fetchTimeline() {
-  const go = async () =>
-    fetch(`${await webui()}/api/internal/timeline`, { signal: AbortSignal.timeout(10_000) }).then(async (res) => {
-      if (!res.ok) throw new Error(`webui HTTP ${res.status}`);
-      return res.json();
-    });
-  try {
-    return await go();
-  } catch (e) {
-    if (e instanceof TypeError) return go(); // 网络抖动（连接层失败）重试一次
-    throw e;
-  }
-}
-
-// 通用 GET/POST JSON（项目/素材工具用）
-async function apiJson(pathname, body) {
-  const go = async () => {
-    const res = await fetch(`${await webui()}${pathname}`, {
-      method: body === undefined ? "GET" : "POST",
-      headers: body === undefined ? {} : { "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(15_000),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `webui HTTP ${res.status}`);
-    return data;
-  };
-  try {
-    return await go();
-  } catch (e) {
-    if (e instanceof TypeError) return go(); // 网络抖动（连接层失败）重试一次
-    throw e;
-  }
-}
-
-async function fetchFrame(seconds) {
-  let res;
-  try { res = await fetch(`${await webui()}/api/internal/frame`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ seconds }),
-    signal: AbortSignal.timeout(300_000), // 首次取帧可能编译与预热浏览器
-  }); } catch (error) {
-    if (error.name === 'TimeoutError') throw new Error('取帧仍可能在编译或预热，请稍后重试相同时间点；引擎会复用尚未完成的同一次取帧。');
-    throw error;
-  }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `webui HTTP ${res.status}`);
-  return data;
-}
-
+const send = (msg) => process.stdout.write(JSON.stringify(msg) + '\n');
 const rl = readline.createInterface({ input: process.stdin });
-rl.on("line", async (line) => {
-  try { fs.appendFileSync("/tmp/djian-mcp.log", `${new Date().toISOString()} ${line}\n`); } catch {}
+rl.on('line', (line) => {
   let msg;
-  try {
-    msg = JSON.parse(line);
-  } catch {
-    return;
-  }
+  try { msg = JSON.parse(line); } catch { return; }
   const { id, method, params } = msg;
-  const reply = (result) => id !== undefined && send({ jsonrpc: "2.0", id, result });
-  const fail = (code, message) => id !== undefined && send({ jsonrpc: "2.0", id, error: { code, message } });
-
-  try {
-    switch (method) {
-      case "initialize":
-        return reply({
-          protocolVersion: params?.protocolVersion ?? "2025-03-26",
-          capabilities: { tools: {} },
-          serverInfo: { name: "djian-timeline", version: "0.1.0" },
-        });
-      case "notifications/initialized":
-      case "initialized":
-        return; // 通知无需回复
-      case "ping":
-        return reply({});
-      case "tools/list":
-        return reply({ tools: TOOLS });
-      case "tools/call": {
-        const name = params?.name;
-        const args = params?.arguments ?? {};
-        if (name === "import_asset") {
-          return reply({ content: [{ type: "text", text: JSON.stringify(await importAsset(args, await webui())) }] });
-        }
-        if (name === "apply_timeline_ops") {
-          const ops = Array.isArray(args.ops) ? args.ops : [];
-          const r = await forwardOps(ops);
-          const rejected = r.rejected ?? [];
-          const ignored = r.ignored ?? [];
-          const applied = Array.isArray(r.receipts)
-            ? r.receipts.filter(receipt => receipt.status === 'applied' || receipt.status === 'partial').length
-            : Math.max(0, (r.accepted ?? ops.length) - ignored.length);
-          const detail = [
-            ignored.length ? `忽略 ${ignored.length} 个（${ignored.map((x) => `${x.op}${x.id ? ` ${x.id}` : x.index !== undefined ? ` #${x.index}` : ""}：${x.reason}`).join("；")}）` : "",
-            rejected.length ? `拒绝 ${rejected.length} 个（${rejected.map((x) => `#${x.index} ${x.reason}`).join("；")}）` : "",
-          ].filter(Boolean).join("；");
-          if (applied === 0 && ops.length > 0) {
-            return reply({
-              content: [{ type: "text", text: `没有操作被应用${detail ? "：" + detail : ""}。先 get_timeline 核对当前状态（id/index/素材名以它返回为准），修正后再提交。` }],
-              isError: true,
-            });
-          }
-          return reply({
-            content: [{ type: "text", text: JSON.stringify({ applied, project: r.project, receipts: r.receipts ?? [], ignored, rejected }) }],
-          });
-        }
-        if (name === "get_timeline") {
-          const t = await fetchTimeline();
-          const [assets, projects] = await Promise.all([
-            apiJson("/api/assets").catch(() => ({ assets: [] })),
-            apiJson("/api/projects").catch(() => ({})),
-          ]);
-          const cur = projects.projects?.find((p) => p.id === projects.current);
-          return reply({
-            content: [{
-              type: "text",
-              text: JSON.stringify({
-                project: cur ? { id: cur.id, name: cur.name } : null,
-                canvas: t.meta,
-                assetsDir: assets.assetsDir,
-                availableAssets: (assets.assets ?? []).map((a) => `${a.name}${a.duration ? `(${a.duration}s)` : ""}`),
-                timeline: t,
-              }),
-            }],
-          });
-        }
-        if (name === "project_list") {
-          const r = await apiJson("/api/projects");
-          const cur = r.projects?.find((p) => p.id === r.current);
-          return reply({ content: [{ type: "text", text: JSON.stringify({ bound: cur ?? null, note: "会话与项目固定绑定，无需也无法切换" }) }] });
-        }
-        if (name === "asset_list") {
-          const r = await apiJson("/api/assets");
-          return reply({ content: [{ type: "text", text: JSON.stringify(r) }] });
-        }
-        if (name === "get_frame") {
-          const seconds = Number(args.seconds);
-          if (!Number.isFinite(seconds) || seconds < 0) {
-            return reply({ content: [{ type: "text", text: "seconds 必须是非负数字" }], isError: true });
-          }
-          const r = await fetchFrame(seconds);
-          if (r.error) return reply({ content: [{ type: "text", text: r.error }], isError: true });
-          return reply({
-            content: [
-              { type: "image", data: r.pngBase64, mimeType: "image/png" },
-              {
-                type: "text",
-                text:
-                  `第 ${seconds}s 处的合成帧（第 ${r.frame} 帧，${r.width}×${r.height}）。\n` +
-                  `画面数据统计：${JSON.stringify(r.stats)}\n` +
-                  `本帧时间范围命中的文字层：${JSON.stringify(r.activeTextLayers ?? [])}（不是像素可见性证明，透明度/动画/遮挡仍须看图）。\n` +
-                  `判读参考：avgBrightness<16=黑场；contrast<10=接近纯色；` +
-                  `bottomThirdBrightPercent=亮度>200的底部像素占比；bottomThirdColoredPercent=显著彩色像素占比。背景也会贡献，指标为0不能排除字幕。darkPercent 高=整体偏暗。`,
-              },
-            ],
-          });
-        }
-        return fail(-32601, `unknown tool: ${name}`);
-      }
-      case "resources/list":
-        return reply({ resources: [] });
-      case "prompts/list":
-        return reply({ prompts: [] });
-      default:
-        if (id !== undefined) return fail(-32601, `unknown method: ${method}`);
-    }
-  } catch (e) {
-    return reply({
-      content: [{ type: "text", text: `工具执行失败：${e.message}` }],
-      isError: true,
-    });
+  const reply = (result) => id !== undefined && send({ jsonrpc: '2.0', id, result });
+  const fail = (code, message) => id !== undefined && send({ jsonrpc: '2.0', id, error: { code, message } });
+  switch (method) {
+    case 'initialize':
+      reply({ protocolVersion: params?.protocolVersion ?? '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'djian', version: '0.2.0' } });
+      break;
+    case 'notifications/initialized':
+    case 'initialized':
+      break;
+    case 'ping':
+      reply({});
+      break;
+    case 'tools/list':
+      reply({ tools: listTools() });
+      break;
+    case 'tools/call':
+      callTool(params?.name, params?.arguments ?? {})
+        .then(reply)
+        .catch((e) => reply({ isError: true, content: [{ type: 'text', text: '错误：' + (e?.message ?? e) }] }));
+      break;
+    default:
+      fail(-32601, '未知方法 ' + method);
   }
 });
