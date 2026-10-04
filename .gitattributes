@@ -1,0 +1,14 @@
+# 统一用 LF：Windows 开发机 core.autocrlf=true 时也不让 CRLF 进仓库，保证引擎源码哈希（预构建渲染包戳）跨平台一致
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.mp4 binary
+*.webm binary
+*.mp3 binary
+*.m4a binary
+*.wav binary
+*.woff2 binary
+*.tgz binary
+*.dspack binary

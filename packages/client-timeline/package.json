@@ -1,6 +1,6 @@
 {
   "name": "@djian/client-ui-timeline",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "D剪剪辑面板：官方 dsh web 壳里的右侧栏 tab（预览/片段/字幕/导出）",
   "type": "module",
@@ -31,6 +31,13 @@
     "watch": "tsdown --watch"
   },
   "devDependencies": {
-    "tsdown": "^0.23.0"
+    "tsdown": "^0.23.0",
+    "@remotion/player": "4.0.526",
+    "remotion": "4.0.526",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "typescript": "5.6.3"
   }
 }

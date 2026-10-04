@@ -68,3 +68,32 @@ export const expandAnimationPreset = (name: string, dur: number): Animations | u
 
 export const listAnimationPresets = () =>
   Object.entries(ANIMATION_PRESETS).map(([key, p]) => ({ key, label: p.label, group: p.group }));
+
+export const presetGroup = (name: string): AnimationPreset["group"] | undefined => ANIMATION_PRESETS[name]?.group;
+
+/**
+ * 片段/字幕的生效动画 = 预设引用（按当前时长展开）+ 显式关键帧（同通道显式优先）。
+ * 渲染层、面板预览、分割烘焙都走这里，保证预设在裁剪/变速后仍对齐首尾。
+ */
+export function resolveAnimations(
+  item: { animations?: Animations; effects?: { preset: string }[] },
+  duration: number,
+): Animations | undefined {
+  const effects = item.effects ?? [];
+  if (!effects.length) return item.animations;
+  const out: Animations = {};
+  for (const e of effects) {
+    const expanded = expandAnimationPreset(e.preset, duration);
+    if (!expanded) continue;
+    for (const [ch, kfs] of Object.entries(expanded) as [keyof Animations, Keyframe[] | undefined][]) {
+      if (!kfs?.length) continue;
+      const prev = out[ch];
+      // 同通道多个预设（如入场+出场都动 opacity）：按时间拼接，后者在时间上不重叠时可共存
+      out[ch] = prev ? [...prev.filter((k) => k.t < kfs[0].t), ...kfs] : kfs;
+    }
+  }
+  for (const [ch, kfs] of Object.entries(item.animations ?? {}) as [keyof Animations, Keyframe[] | undefined][]) {
+    if (kfs?.length) out[ch] = kfs;
+  }
+  return Object.keys(out).length ? out : undefined;
+}

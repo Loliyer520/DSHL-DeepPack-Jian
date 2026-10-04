@@ -1,46 +1,47 @@
 ---
 name: djian-edit
-description: 视频剪辑操作时使用——剪段、拼接、画中画、加字幕、配乐、调色变速，全部通过 apply_timeline_ops 编辑 D剪时间线完成。
+description: 视频剪辑操作速查——剪段、拼接、画中画、字幕样式、转场、关键帧、配乐与闪避、调色变速、导出；全部通过 djian_* 工具完成。
 ---
 
-# D剪剪辑操作
+# D剪 剪辑速查
 
-一切剪辑 = 通过 `apply_timeline_ops` 编辑时间线 JSON（多轨 schema）。webui 后端是唯一事实源：AI 工具与用户面板操作同一份数据，不要直接读写时间线文件或调 ffmpeg。
+一切剪辑 = 通过 `djian_apply_ops` 修改时间线。引擎是唯一事实源：你和用户（剪辑面板）编辑同一份数据，彼此的修改实时可见。
 
 ## 工作流
 
-1. 看用户消息里附带的时间线，或 `get_timeline` 拉最新；素材清单用 `asset_list`。
-   生成视频前读取 canvas 的 width/height/fps。本地生成文件直接 `import_asset(path=绝对路径)`，不要搜索素材目录；按返回 name 引用。
-2. 把需求拆成一批 ops 一次 `apply_timeline_ops` 提交（ops 按顺序执行；格式错误整批被拒，按返回原因修正重试）。
-3. 关键修改后 `get_frame <秒>` 抽帧确认画面再交付。
+1. `djian_timeline` 看大纲（每个片段/字幕/轨道都带 id）。需要素材清单时加 `assets:true` 或用 `djian_assets`。
+2. 把需求拆成一批 ops，一次 `djian_apply_ops` 提交，并写 `label`（会出现在用户的历史记录里）。
+3. 看回执：rejected/ignored 写明原因，只补缺失的操作；`conflicts` 表示对象刚被用户改过，以用户为准。
+4. `djian_frame` 抽查关键时间点；传数组可一次得到多帧联络图。
+5. 每一步开始时，用户的新修改会以 `<editor-activity>` 自动出现——尊重它们，不要改回去。
 
 ## 时间线结构
 
-- `meta`: fps / width / height。总时长 = 主轨（videoTracks[0]）各 clipDuration 之和与其余轨末尾的最大值，不手写。
-- `videoTracks[0]` 主轨串行；`videoTracks[1+]` 叠加轨：画中画，clip 带 `atSeconds` 绝对秒 + `box` 分数矩形 {x,y,w,h}。
-- `audioTracks[]` 音频轨：clip 带 atSeconds/inPoint/duration/volume，轨带 volume/muted。
-- `overlays[]` 字幕：text/startSeconds/endSeconds/position(top|center|bottom)/fontSize/color/fontFamily/fontWeight。
+- 主轨（`videoTracks[0]`）片段首尾相接；转场居中于剪辑点，不改变总时长。
+- 叠加轨（画中画/贴图）片段带绝对起点 `atSeconds` 和盒子 `box{x,y,w,h}`（0–1 画布分数）；越靠后的轨越在上层。
+- 音频轨片段带 `atSeconds/inPoint/duration/volume`；轨道有 `volume/muted/role/duck`。
+- 文字层（字幕/标题）带稳定 id 与起止秒；`x/y` 给出时按中心点自由摆放。
 
-## op 速查（apply_timeline_ops）
+## 常用配方
 
-- 片段：`addClip`(src/inPoint/clipDuration [,track/atSeconds/box/transition/volume/speed/filter/animations])、`removeClip`(id)、`updateClip`(id+patch)、`reorderClips`(order=id数组)、`splitClip`(id+atSeconds 全局秒)
-- 音频：`addAudio`(src/duration [,inPoint/atSeconds/volume/track/speed/animations.volume])、`removeAudio`(id)、`updateAudioTrack`(id+patch{volume,muted,name})
-- 字幕：`addOverlay`(text/startSeconds/endSeconds [,position/fontSize/color/fontFamily/fontWeight/animationPreset/animations])、`removeOverlay`(index)、`updateOverlay`(index+patch)
-- 画布：`setMeta`(patch{fps,width,height})
+- 剪掉一段：`splitClip` 两次切出区间，再 `removeClip` 中间那段（主轨会自动补位）。
+- 插入片段：`addClip{src, index}` 或 `addClip{src, atSeconds}`（插到最近剪辑点）。
+- 叠化转场：`updateClip{id, patch:{transition:{type:"dissolve", duration:0.5}}}`（作用于进入该片段的剪辑点）。
+- 画中画：`addClip{src, track:"pip", atSeconds, clipDuration, box:{x:0.62,y:0.06,w:0.34,h:0.34}, animationPreset:"slideInRight"}`。
+- 醒目字幕：`addOverlay{text, startSeconds, endSeconds, fontFamily:"sans", fontWeight:700, stroke:{color:"#000000", width:4}}`；底框用 `background:{color:"#000000", opacity:0.55}`。
+- 字幕文件：已有 SRT/VTT 用 `djian_subtitles{action:"import", path}` 一次导入（与已有字幕重叠会自动放到新字幕层，整批可撤销）；交付字幕用 `djian_subtitles{action:"export"}` 拿 SRT 文本。
+- 标题自由摆放：`addOverlay{text, startSeconds, endSeconds, kind:"title", x:0.5, y:0.3, fontSize:96, animationPreset:"zoomIn"}`。
+- 配乐 + 人声闪避：`addAudio{src, atSeconds:0, track:"配乐", fadeOut:2}`，`updateTrack{id:<人声轨>, patch:{role:"voice"}}`，`updateTrack{id:<配乐轨>, patch:{duck:{level:0.25}}}`。
+- 关键帧轨迹：`setKeyframe{id, channel:"x", t:0, v:-0.3}` + `setKeyframe{id, channel:"x", t:1, v:0, e:"out"}`（t 为片段内相对秒）。
+- 定格 / 翻转 / 裁切：`updateClip{id, patch:{freeze:true}}`、`{flipH:true}`、`{crop:{x:0.1,y:0,w:0.8,h:1}}`。
+- 调色变速：`patch:{filter:{brightness:1.1, saturate:1.2}, speed:2}`（速度改变素材消耗，占时不变）。
+- 导出：`djian_export{action:"start", quality:"high"}`，再用 `action:"status"` 查进度。
 
-## 参数要点
+## 素材
 
-- `speed` 恒定变速：占时（clipDuration）不变，素材消耗 = 占时 × speed（2 = 快放一倍）。
-- `filter` 调色：{brightness, contrast, saturate, blur(px), grayscale, sepia, hueRotate(deg)}，可叠加，克制使用。
-- `animations` 关键帧：{x,y,scale,opacity,rotation,volume} → [{t,v,e?}]，t = 片段/字幕内相对秒，e 缓动 linear|in|out|inOut|bounce|elastic。仅用户要精确轨迹时手排；常规动作用 `animationPreset` 一键预设（fadeIn/slideIn*/zoomIn/bounceIn/spinIn/kenBurns/kenBurnsOut 等，按字幕时长自动展开，'none' 清除）。
-- 字幕字体 `fontFamily`：sans 思源黑体 / serif 思源宋体（可变字重，fontWeight 300–900）/ kuaile 快乐体 / qingke 黄油体 / mashan 毛笔楷（后三者仅 400）。整片字幕字体统一。
-- 字幕时间不得超出总时长；一句 ≤15 字、停留 ≥1.5 秒；720p 字号 40–50。
+- 本地生成的文件：`djian_import_asset{path:"绝对路径"}`；重名会改名，之后用返回的名字。
+- 在线素材：`djian_search_media{query:"英文关键词", type:"image"|"audio"}` → `djian_download_media{url, title, license, creator}`。
 
-## 其他工具
+## 审美提醒
 
-- `get_frame`(seconds)：看合成后那一帧，验证字幕位置/黑场/衔接/动画。
-- `get_timeline` / `asset_list`：最新时间线 / 素材库。
-- `import_asset`：本地绝对路径入库（最多 512MB），或 base64 + name（最多 32MB）；重名自动改名，使用返回的实际 name。失败且结果不明确时先查 asset_list，不盲目重复上传。
-- `apply_timeline_ops` 成功也返回 receipts：新 clip 的 id、字幕 overlayIndex，以及 applied/ignored/partial 状态。索引对应操作执行时状态，后续删除或重排可能改变索引。
-- `get_frame` 的 activeTextLayers 列出本帧时间范围命中的文字/颜色/动画；不保证实际可见。bottomThirdBrightPercent 仅统计亮度>200，bottomThirdColoredPercent 统计显著彩色像素，背景也会贡献；0 不能排除字幕。首帧预热可花数分钟，超时后重试同一时间点会复用未完成请求。
-- `search_media` + `download_media`（media-library）：Openverse CC 图片/音频搜索与入库，英文关键词更准；下载后按返回的文件名 addClip/addAudio 引用。
+节奏 1.5–3 秒一切；开头 3 秒放最强画面；转场与动效克制（各不超过两种）；字幕一句不超过 15 字、停留至少 1.5 秒；配乐结尾淡出，不要硬断。

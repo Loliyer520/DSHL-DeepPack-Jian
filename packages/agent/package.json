@@ -1,10 +1,13 @@
 {
   "name": "@djian/agent",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "dependencies": {
-    "@deepseek-ai/dsh": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-sdk-client": "0.2.0-rc.2"
+  "description": "D剪 MCP 适配器：供 DSH 之外的 agent 通过 MCP 调用剪辑引擎（需显式 projectId）",
+  "files": [
+    "mcp-server.mjs"
+  ],
+  "bin": {
+    "djian-mcp": "./mcp-server.mjs"
   }
 }

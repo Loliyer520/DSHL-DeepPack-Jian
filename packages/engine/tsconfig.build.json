@@ -6,7 +6,22 @@
     "outDir": "dist",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["DOM", "ES2022"]
+    "lib": [
+      "DOM",
+      "ES2022"
+    ]
   },
-  "include": ["src/schema.ts", "src/render.ts", "src/presets.ts", "src/fonts.ts"]
+  "include": [
+    "src/schema.ts",
+    "src/timeline.ts",
+    "src/ops.ts",
+    "src/diff.ts",
+    "src/describe.ts",
+    "src/render.ts",
+    "src/presets.ts",
+    "src/fonts.ts",
+    "src/browser.ts",
+    "src/nativeRuntime.ts",
+    "src/srt.ts"
+  ]
 }

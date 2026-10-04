@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck (engine, panels)
+        run: npm run check
+      - name: Unit + engine tests
+        run: npm test
+      - name: Build panels
+        run: npm run build:client
+      - name: Panel bundles are committed and up to date
+        shell: bash
+        run: git diff --exit-code -- packages/client-timeline/lib packages/client-library/lib
+
+  pack:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build .dspack (build, spec self-check, leaf dependencies, read-back)
+        run: node packages/pack/scripts/build-dspack.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: djian-dspack
+          path: |
+            dist/*.dspack
+            dist/*.dspack.sha256
+          if-no-files-found: error
