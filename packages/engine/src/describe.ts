@@ -63,7 +63,9 @@ export function fieldChanges(before: Record<string, unknown> | undefined, after:
 export function describeOp(op: Op, receipt: Receipt | undefined, before: Timeline, after: Timeline): string | undefined {
   if (receipt && (receipt.status === "rejected" || receipt.status === "ignored")) return undefined;
   const o = op as Record<string, unknown>;
-  const newId = receipt?.id;
+  // 同一操作顺带新建了轨道时回执是 ids（轨道 id + 片段 id）：取能在时间线里找到的那个实体
+  const newIds = receipt?.ids ?? (receipt?.id ? [receipt.id] : []);
+  const newId = newIds.find((id) => findAnyClip(after, id) || after.overlays.some((x) => x.id === id) || (after.markers ?? []).some((m) => m.id === id)) ?? receipt?.id;
   const where = (id: unknown) => findAnyClip(after, id)?.where ?? findAnyClip(before, id)?.where ?? "";
   switch (op.op) {
     case "addClip": {

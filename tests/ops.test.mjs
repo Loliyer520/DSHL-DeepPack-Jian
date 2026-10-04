@@ -206,3 +206,16 @@ test('describeBatch produces readable lines with names and before→after values
   assert.match(lines[1], /添加字幕「开场」（1\.2s–3s）/);
   assert.match(lines[2], /在 1s 处分割主轨片段「a\.mp4」/);
 });
+
+test('describeBatch names clips added together with a new track (receipt carries ids)', () => {
+  const t = base();
+  const ops = [
+    { op: 'addClip', src: 'b.mp4', track: 'new', atSeconds: 1.5, clipDuration: 3.5 },
+    { op: 'addAudio', src: 'm.mp3', track: 'new', atSeconds: 0, duration: 4 },
+  ];
+  const r = applyOps(t, ops, ctx());
+  assert.ok(r.receipts[0].ids?.length === 2, 'new track + clip');
+  const lines = describeBatch(t, r.timeline, ops, r.receipts);
+  assert.match(lines[0], /添加「b\.mp4」（1\.5s–5s）/);
+  assert.match(lines[1], /添加音频「m\.mp3」（0s 起，时长 4s）/);
+});
