@@ -66,6 +66,19 @@ test('store: 乐观更新 + AI 并发 + 撤销只回退自己的修改 + 单独�
     store.undo();
     await until(() => s().pending === 0);
     assert.deepEqual(texts(s().timeline), ['AI 字幕']);
+
+    // 刷新/重开面板：「动态」补回最近的修改记录（含 AI 的，可继续单独撤销）
+    const reopened = new TimelineStore('sess-store-1');
+    await reopened.start();
+    try {
+      await until(() => reopened.getSnapshot().activity.length >= 5);
+      const acts = reopened.getSnapshot().activity;
+      assert.deepEqual(acts.map((a) => a.rev), [...acts.map((a) => a.rev)].sort((a, b) => b - a), '按版本倒序');
+      assert.ok(acts.some((a) => a.actor === 'ai' && a.inverse?.length), '历史里的 AI 修改仍可撤销');
+      assert.equal(reopened.getSnapshot().toasts.length, 0, '补历史不弹提示');
+    } finally {
+      reopened.stop();
+    }
   } finally {
     store.stop();
   }

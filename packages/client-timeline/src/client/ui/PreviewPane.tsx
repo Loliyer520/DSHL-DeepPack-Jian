@@ -4,7 +4,7 @@ import { Player, type PlayerRef } from '@remotion/player';
 import type { Overlay, Timeline } from '../../../../engine/src/schema';
 import { TimelineVideo } from '../../../../engine/src/TimelineVideo';
 import { clipBox, locateClip, timelineDurationInFrames, timelineHasContent } from '../../../../engine/src/timeline';
-import { assetBaseUrl, fontsBaseUrl } from '../engine';
+import { assetBaseUrl, fontsBaseUrl, mediaUrl } from '../engine';
 import { useEditor, useStore, usePlayhead } from '../context';
 import { useSelection } from '../selection';
 
@@ -44,7 +44,16 @@ export function PreviewPane() {
   }, []);
   const attach = useCallback((ref: PlayerRef | null) => { playerRef.current = ref; ed.clock.attach(ref); }, [ed.clock]);
   useEffect(() => { if (!ed.host.visible) ed.clock.pause(); }, [ed.host.visible, ed.clock]);
-  const onMediaError = useCallback((src: string) => setFailure('无法加载素材「' + decodeURIComponent(String(src).split('/').pop() ?? src) + '」'), []);
+  // 浏览器在 Range 请求被中断时也会报媒体错误（数据其实已缓冲好、仍可播放）：先确认素材确实读不到再提示
+  const pid = project?.id;
+  const onMediaError = useCallback((src: string) => {
+    const name = decodeURIComponent(String(src).split('/').pop() ?? src);
+    const show = () => setFailure('无法加载素材「' + name + '」');
+    if (!pid) { show(); return; }
+    fetch(mediaUrl(pid, name), { method: 'HEAD', signal: AbortSignal.timeout(8000) })
+      .then((r) => { if (!r.ok) show(); })
+      .catch(show);
+  }, [pid]);
   const inputProps = useMemo(() => (timeline && project ? { timeline, assetBase: assetBaseUrl(project.id), fontsBase: fontsBaseUrl(), onMediaError } : null), [timeline, project, onMediaError]);
   if (!timeline || !inputProps) return <div className="dj-stage-empty">正在连接剪辑引擎…</div>;
   ed.clock.fps = timeline.meta.fps;

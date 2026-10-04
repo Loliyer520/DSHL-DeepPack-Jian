@@ -58,8 +58,8 @@ export function ActivityPane() {
         {list.map((a) => (
           <div key={a.rev + ':' + a.at} className={'dj-ev ' + (a.actor === 'ai' ? 'dj-ai' : 'dj-user')}>
             <header>
-              <b>{WHO[a.actor] ?? a.actor}</b>{a.label && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.label}</span>}
-              <span className="dj-spacer" /><span title={'版本 ' + a.rev}>{ago(a.at, now)}</span>
+              <b>{WHO[a.actor] ?? a.actor}</b>{a.label && <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.label}>{a.label.replace(/^AI\s*[：:]\s*/, '')}</span>}
+              {!a.label && <span className="dj-spacer" />}<span style={{ flex: 'none', whiteSpace: 'nowrap' }} title={'版本 ' + a.rev}>{ago(a.at, now)}</span>
             </header>
             {a.summary.length > 0 && <ul>{a.summary.slice(0, 5).map((s, i) => <li key={i}>{s}</li>)}{a.summary.length > 5 && <li>…等 {a.summary.length} 项</li>}</ul>}
             <footer>

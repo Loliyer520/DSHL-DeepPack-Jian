@@ -1,13 +1,14 @@
 // 面板样式：一套设计令牌（映射宿主 --dsw-alias-* 语义色，提供暗色兜底），按 .dj- 前缀隔离。
 // 插件卸载时移除 <style>（index.tsx 的 effect 负责）。
 export const CSS = String.raw`
-.dj-root{--dj-bg:var(--dsw-alias-bg-base,#121214);--dj-s1:var(--dsw-alias-bg-layer-1,#1a1a1d);--dj-s2:var(--dsw-alias-bg-layer-2,#222226);--dj-s3:var(--dsw-alias-bg-layer-3,#2b2b30);
+/* 设计令牌：右键菜单经 portal 挂到 body 上，不在 .dj-root 内，所以也要声明 */
+.dj-root,.dj-menu{--dj-bg:var(--dsw-alias-bg-base,#121214);--dj-s1:var(--dsw-alias-bg-layer-1,#1a1a1d);--dj-s2:var(--dsw-alias-bg-layer-2,#222226);--dj-s3:var(--dsw-alias-bg-layer-3,#2b2b30);
 --dj-t1:var(--dsw-alias-label-primary,#ececef);--dj-t2:var(--dsw-alias-label-secondary,#b4b4bb);--dj-t3:var(--dsw-alias-label-tertiary,#86868f);
 --dj-line:var(--dsw-alias-border-l2,rgba(255,255,255,.1));--dj-line2:var(--dsw-alias-border-l3,rgba(255,255,255,.16));--dj-hover:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.06));
 --dj-accent:var(--dsw-alias-button-primary-fill,#4d6bfe);--dj-on-accent:var(--dsw-alias-label-primary-foreground,#fff);--dj-hl:var(--dsw-alias-button-info-fill,#7aaaff);--dj-danger:var(--dsw-alias-state-error-primary,#f0505a);--dj-ok:var(--dsw-alias-state-success-primary,#34b27b);--dj-warn:var(--dsw-alias-state-warn-primary,#f2a43a);
 --dj-r1:var(--dsw-radius-xs,4px);--dj-r2:var(--dsw-radius-sm,6px);--dj-r3:var(--dsw-radius-md,8px);--dj-font:var(--dsw-font-family,system-ui,"PingFang SC","Microsoft YaHei",sans-serif);
---dj-main:#3b82f6;--dj-pip:#8b5cf6;--dj-audio:#14b8a6;--dj-text:#f59e0b;--dj-marker:#ef4444;--dj-ai:#c084fc;
-position:relative;display:grid;height:100%;min-height:0;box-sizing:border-box;background:var(--dj-bg);color:var(--dj-t1);font:13px/1.45 var(--dj-font);outline:none;overflow:hidden;
+--dj-main:#3b82f6;--dj-pip:#8b5cf6;--dj-audio:#14b8a6;--dj-text:#f59e0b;--dj-marker:#ef4444;--dj-ai:#c084fc;}
+.dj-root{position:relative;display:grid;height:100%;min-height:0;box-sizing:border-box;background:var(--dj-bg);color:var(--dj-t1);font:13px/1.45 var(--dj-font);outline:none;overflow:hidden;
 grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(150px,42%) auto minmax(180px,1fr);grid-template-areas:"top" "stage" "transport" "timeline"}
 .dj-root *,.dj-root *::before,.dj-root *::after{box-sizing:border-box}
 .dj-root.dj-medium{grid-template-columns:minmax(0,1fr) 300px;grid-template-rows:auto minmax(180px,50%) auto minmax(180px,1fr);grid-template-areas:"top top" "stage side" "transport side" "timeline side"}
@@ -18,6 +19,8 @@ grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(150px,42%) au
 .dj-timeline{grid-area:timeline;display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--dj-s1)}
 .dj-side{grid-area:side;display:flex;flex-direction:column;min-height:0;border-left:.5px solid var(--dj-line);background:var(--dj-s1)}
 .dj-left{grid-area:left;display:flex;flex-direction:column;min-height:0;border-right:.5px solid var(--dj-line);background:var(--dj-s1)}
+/* 侧栏跨多行：内容高度不能参与网格行的尺寸计算，否则属性面板一长就把时间线挤出可视区 */
+.dj-side,.dj-left{contain:size;overflow:hidden}
 .dj-root.dj-narrow .dj-side{position:absolute;left:0;right:0;bottom:0;height:min(62%,520px);z-index:30;border-left:0;border-top:.5px solid var(--dj-line2);box-shadow:0 -12px 32px rgba(0,0,0,.45);border-radius:12px 12px 0 0}
 .dj-root.dj-narrow .dj-side[hidden],.dj-root.dj-medium .dj-left{display:none}
 .dj-title{flex:1;min-width:0;display:flex;align-items:center;gap:8px}
@@ -29,6 +32,7 @@ grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(150px,42%) au
 .dj-pill.dj-ai{color:#fff;background:linear-gradient(90deg,#7c3aed,#c026d3);animation:dj-pulse 1.6s ease-in-out infinite}
 @keyframes dj-pulse{50%{opacity:.7}}
 .dj-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;height:28px;padding:0 10px;border:0;border-radius:var(--dj-r2);background:var(--dj-s2);color:var(--dj-t1);font:inherit;cursor:pointer;white-space:nowrap}
+a.dj-btn{text-decoration:none}
 .dj-btn:hover:not(:disabled){background:var(--dj-s3)}.dj-btn:disabled{opacity:.45;cursor:default}
 .dj-btn.dj-primary{background:var(--dj-accent);color:var(--dj-on-accent)}.dj-btn.dj-primary:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover,var(--dj-accent))}
 .dj-btn.dj-danger{color:var(--dj-danger)}
@@ -173,7 +177,9 @@ export const CSS_PANELS = String.raw`
 .dj-ev.dj-ai{box-shadow:inset 2px 0 0 var(--dj-ai)}.dj-ev.dj-user{box-shadow:inset 2px 0 0 var(--dj-hl)}
 .dj-ev ul{margin:4px 0 0;padding-left:16px;color:var(--dj-t2);font-size:12px}
 .dj-ev footer{display:flex;gap:6px;margin-top:6px}
-.dj-menu{position:fixed;z-index:1000;min-width:180px;padding:4px;border-radius:var(--dj-r3);background:var(--dsw-menu-surface-fill,var(--dj-s2));box-shadow:var(--dsw-elevation-prominent,0 16px 40px rgba(0,0,0,.45));color:var(--dj-t1);font:13px/1.4 var(--dj-font)}
+.dj-menu{box-sizing:border-box}
+.dj-menu *{box-sizing:border-box}
+.dj-menu{position:fixed;z-index:1000;min-width:180px;padding:4px;border-radius:var(--dj-r3);background:var(--dj-s2);box-shadow:var(--dsw-elevation-prominent,0 16px 40px rgba(0,0,0,.45));color:var(--dj-t1);font:13px/1.4 var(--dj-font)}
 .dj-menu button{display:flex;align-items:center;gap:8px;width:100%;height:28px;padding:0 10px;border:0;border-radius:var(--dj-r1);background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .dj-menu button:hover:not(:disabled),.dj-menu button:focus-visible{background:var(--dj-hover)}
 .dj-menu button:disabled{opacity:.4}

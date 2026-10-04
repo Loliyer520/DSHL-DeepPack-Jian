@@ -1,6 +1,11 @@
 // 编辑事件注入：把用户在剪辑面板里的修改（以及当前选中/播放头）整理成一条 <editor-activity> 上下文。
 // 只在有新内容时产出，保证提示词缓存稳定；单次拉取有超时，绝不拖慢模型调用。
-const time = (iso) => (typeof iso === 'string' ? iso.slice(11, 19) : '');
+// 本地时间（宿主与用户在同一台机器上；与 DSH 注入给模型的时间上下文一致，不用 UTC）
+const pad2 = (n) => String(n).padStart(2, '0');
+const time = (iso) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+};
 const sec = (v) => {
   if (typeof v !== 'number' || !Number.isFinite(v)) return '?';
   const m = Math.floor(v / 60);

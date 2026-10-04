@@ -103,6 +103,7 @@ export class TimelineStore {
       this.projectId = project.id;
       this.emit({ project });
       await this.reload();
+      void this.loadRecentActivity();
       this.restorePersisted();
       this.connect();
     } catch (e) {
@@ -168,6 +169,19 @@ export class TimelineStore {
       for (const ev of r.events) this.onRemote(ev);
     } catch { await this.reload().catch(() => undefined); }
   }
+  /** 刷新/重开面板后补回最近 40 次修改（只填「动态」，不闪烁、不弹提示） */
+  private async loadRecentActivity() {
+    if (!this.projectId || this.confirmedRev <= 0) return;
+    try {
+      const upTo = this.confirmedRev;
+      const r = await api.changes(this.projectId, Math.max(0, upTo - 40));
+      const seen = new Set(this.snapshot.activity.map((a) => a.rev));
+      const items: ActivityItem[] = r.events.filter((ev) => ev.rev <= upTo && !seen.has(ev.rev))
+        .map((ev) => ({ rev: ev.rev, at: ev.at, actor: ev.actor, label: ev.label, summary: ev.summary, changed: ev.changed, inverse: ev.inverse, mine: ev.clientId === this.clientId }));
+      if (items.length) this.emit({ activity: [...this.snapshot.activity, ...items].sort((a, b) => b.rev - a.rev).slice(0, 60) });
+    } catch { /* 历史记录拿不到不影响编辑 */ }
+  }
+
   private recordActivity(ev: EngineEvent, mine: boolean) {
     const item: ActivityItem = { rev: ev.rev, at: ev.at, actor: ev.actor, label: ev.label, summary: ev.summary, changed: ev.changed, inverse: ev.inverse, mine };
     const activity = [item, ...this.snapshot.activity.filter((a) => a.rev !== ev.rev)].slice(0, 60);
@@ -180,7 +194,7 @@ export class TimelineStore {
       if (this.flashTimer) clearTimeout(this.flashTimer);
       this.flashTimer = setTimeout(() => this.emit({ flash: {} }), 2600);
       if (ev.actor === 'ai') {
-        const text = 'AI：' + (ev.label ?? ev.summary[0] ?? '修改了时间线') + (ev.summary.length > 1 ? '（共 ' + ev.summary.length + ' 项）' : '');
+        const text = 'AI：' + (ev.label ?? ev.summary[0] ?? '修改了时间线').replace(/^AI\s*[：:]\s*/, '') + (ev.summary.length > 1 ? '（共 ' + ev.summary.length + ' 项）' : '');
         extra.toasts = [...this.snapshot.toasts, { id: ++this.toastSeq, kind: 'ai' as const, text, ...(ev.inverse?.length ? { action: { label: '撤销', run: () => this.revert(item) } } : {}) }].slice(-3);
       }
     }
