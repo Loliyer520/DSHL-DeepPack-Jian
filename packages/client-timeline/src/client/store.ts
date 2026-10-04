@@ -42,8 +42,9 @@ export function pinIds(ops: Op[], receipts: LocalReceipt[]): Op[] {
     const ids = r?.ids ?? (r?.id ? [r.id] : []);
     if (!r || r.status === 'rejected' || !ids.length) return op;
     const next = { ...op };
-    if (ADD_OPS.has(op.op) && next.id === undefined) next.id = ids[ids.length - 1];
-    if (op.op === 'addClip' && ids.length > 1 && typeof next.track === 'string' && ['pip', 'new', 'overlay'].includes(next.track)) next.track = ids[0];
+    if (ADD_OPS.has(op.op) && next.id === undefined) next.id = r.id ?? ids[ids.length - 1];
+    if ((op.op === 'addClip' || op.op === 'addAudio') && ids.length > 1) next.track = ids.find((id) => id !== next.id);
+    if (op.op === 'addAudio' && ids.length > 1) next.name = op.name ?? (typeof op.track === 'string' && op.track !== 'new' ? op.track : '音频');
     if (NEW_ID_OPS.has(op.op) && next.newId === undefined) next.newId = ids[ids.length - 1];
     return next;
   });

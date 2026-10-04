@@ -7,7 +7,7 @@ import { loadTs } from './helpers/ts-load.mjs';
 const engine = await startEngine();
 const mem = new Map([['djian.enginePort', String(engine.port)]]);
 globalThis.localStorage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
-const { TimelineStore } = await loadTs('packages/client-timeline/src/client/store.ts');
+const { TimelineStore, pinIds } = await loadTs('packages/client-timeline/src/client/store.ts');
 const { computeLayout, snap, snapPoints } = await loadTs('packages/client-timeline/src/client/timeline/layout.ts');
 
 const until = async (fn, ms = 8000) => {
@@ -133,4 +133,24 @@ test('layout: 文字在上、画中画上层在上、主轨、音频在下；专
   assert.ok(pts.includes(2.5) && pts.includes(3) && pts.includes(0.2) && !pts.includes(2) === false);
   assert.deepEqual(snap(2.96, pts, 0.1), { value: 3, at: 3 });
   assert.deepEqual(snap(2.7, pts, 0.1), { value: 2.7, at: null });
+});
+
+
+test('new PiP and audio tracks retain optimistic clip and track ids on the server', async () => {
+  const { applyOps } = await import('../packages/engine/dist/ops.js');
+  const { parseTimeline } = await import('../packages/engine/dist/schema.js');
+  for (const op of [
+    { op: 'addClip', src: 'pip.png', track: 'pip', atSeconds: 1 },
+    { op: 'addClip', src: 'pip.png', box: { x: 0, y: 0, w: 0.5, h: 0.5 }, atSeconds: 1 },
+    { op: 'addAudio', src: 'music.mp3', track: 'new' },
+    { op: 'addAudio', src: 'music.mp3' },
+  ]) {
+    const empty = parseTimeline({meta:{fps:30,width:1280,height:720},videoTracks:[{id:'v1',name:'Main',clips:[]}],audioTracks:[],overlays:[]});
+    let seq=0; const local=applyOps(empty,[op],{newId:p=>p+'local'+(++seq)});
+    const pinned=pinIds([op],local.receipts);
+    const remote=applyOps(empty,pinned,{newId:p=>p+'server'+(++seq)});
+    assert.deepEqual(remote.timeline,local.timeline,JSON.stringify(op));
+    const track=[...local.timeline.videoTracks,...local.timeline.audioTracks].find(t=>t.clips.length);
+    assert.equal(local.receipts[0].id,track.clips[0].id,'receipt names clip rather than new track');
+  }
 });

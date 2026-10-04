@@ -340,7 +340,7 @@ function overlayTrackFor(s: Scope, wanted: unknown, name?: unknown): VideoTrack 
   return track;
 }
 
-function audioTrackFor(s: Scope, wanted: unknown, trackVolume?: unknown): AudioTrack {
+function audioTrackFor(s: Scope, wanted: unknown, trackVolume?: unknown, trackName?: unknown): AudioTrack {
   const t = s.t;
   if (typeof wanted === "string" && wanted !== "new") {
     const hit = t.audioTracks.find((tr) => tr.id === wanted || tr.name === wanted);
@@ -349,8 +349,8 @@ function audioTrackFor(s: Scope, wanted: unknown, trackVolume?: unknown): AudioT
     const free = t.audioTracks.find((tr) => !tr.locked);
     if (free) return free;
   }
-  const id = takeId(s, undefined, "a");
-  const name = typeof wanted === "string" && wanted !== "new" ? wanted.slice(0, 30) : "音频";
+  const id = takeId(s, typeof wanted === "string" && wanted !== "new" && ID_RE.test(wanted) ? wanted : undefined, "a");
+  const name = typeof trackName === "string" ? trackName.slice(0, 30) : typeof wanted === "string" && wanted !== "new" ? wanted.slice(0, 30) : "音频";
   const track: AudioTrack = { id, name, volume: clampOr(trackVolume, 1, 0, 1), muted: false, clips: [] };
   t.audioTracks.push(track);
   s.touched.add("track:" + id);
@@ -625,7 +625,7 @@ function addAudioOp(s: Scope, op: Record<string, unknown>) {
   const src = checkAsset(s, op.src);
   const inPoint = clampOr(op.inPoint, 0, 0, 86400);
   const known = s.ctx.assetDuration?.(src);
-  const track = audioTrackFor(s, op.track, op.trackVolume);
+  const track = audioTrackFor(s, op.track, op.trackVolume, op.name);
   assertUnlocked(s, track);
   const clip: AudioClip = {
     id: takeId(s, op.id, "c"),
@@ -1106,7 +1106,7 @@ export function applyOps(timeline: Timeline, rawOps: readonly unknown[], ctx: Op
       op: op.op,
       status: !effective ? "ignored" : s.warnings.length ? "partial" : "applied",
       ...(s.newIds.length === 1 ? { id: s.newIds[0] } : s.newIds.length ? { ids: s.newIds } : id ? { id } : {}),
-      ...(s.newIds.length > 1 ? { id: s.newIds[s.newIds.length - 1] } : {}),
+      ...(s.newIds.length > 1 ? { id: op.op === "addClip" ? s.newIds[0] : s.newIds[s.newIds.length - 1] } : {}),
       ...(s.warnings.length ? { warnings: s.warnings } : !effective ? { reason: "没有产生变化" } : {}),
     });
   });
