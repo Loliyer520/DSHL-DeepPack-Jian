@@ -6,6 +6,9 @@ import { pipeline } from 'node:stream/promises';
 import { FONTS } from '../../engine/dist/fonts.js';
 import { listAnimationPresets } from '../../engine/dist/presets.js';
 import { OP_NAMES } from '../../engine/dist/ops.js';
+import { ICONS } from '../../engine/dist/icons.js';
+import { SLIDE_TEMPLATES, SLIDE_THEMES } from '../../engine/dist/templates.js';
+import { CHART_LABEL, CHART_TYPES, SHAPE_LABEL, SHAPE_TYPES, TEXT_EFFECTS } from '../../engine/dist/timeline.js';
 import { cuesToOps, parseSubtitles, toSrt, toVtt } from '../../engine/dist/srt.js';
 import { Router, HttpError, readJson, sendJson } from './http.mjs';
 import { serveMedia } from './media.mjs';
@@ -29,6 +32,17 @@ export function buildRouter({ store, render }) {
   r.add('GET', '/api/fonts', (req, res) => sendJson(res, 200, { fonts: FONTS.map(({ id, label, weights }) => ({ id, label, variable: weights.includes(' ') })) }));
   r.add('GET', '/api/animation-presets', (req, res) => sendJson(res, 200, { presets: listAnimationPresets() }));
   r.add('GET', '/api/ops', (req, res) => sendJson(res, 200, { ops: OP_NAMES }));
+  // 元素目录：图标/形状/图表/幻灯片模板与主题/动画预设（面板与 AI 工具共用）
+  r.add('GET', '/api/catalog', (req, res) => sendJson(res, 200, {
+    icons: ICONS.map(({ name, label, group }) => ({ name, label, group })),
+    shapes: SHAPE_TYPES.map((type) => ({ type, label: SHAPE_LABEL[type] })),
+    charts: CHART_TYPES.map((type) => ({ type, label: CHART_LABEL[type] })),
+    templates: Object.entries(SLIDE_TEMPLATES).map(([key, t]) => ({ key, ...t })),
+    themes: Object.entries(SLIDE_THEMES).map(([key, t]) => ({ key, label: t.label, dark: t.dark, accent: t.accent, text: t.text, bg: t.bg })),
+    presets: listAnimationPresets(),
+    textEffects: TEXT_EFFECTS,
+    fonts: FONTS.map(({ id, label }) => ({ id, label })),
+  }));
   r.add('GET', '/fonts/:file', async (req, res, { params }) => {
     const font = FONTS.find((f) => f.file === params.file);
     const file = font && path.join(FONTS_DIR, font.file);
@@ -212,6 +226,8 @@ async function admitAsset(store, pid, temp, wantedName) {
 function usageMap(timeline) {
   const m = new Map();
   for (const tr of [...timeline.videoTracks, ...timeline.audioTracks]) for (const c of tr.clips) m.set(c.src, (m.get(c.src) ?? 0) + 1);
+  // 图片元素也算引用：正在用的素材不能删
+  for (const o of timeline.overlays) if (o.image?.src) m.set(o.image.src, (m.get(o.image.src) ?? 0) + 1);
   return m;
 }
 

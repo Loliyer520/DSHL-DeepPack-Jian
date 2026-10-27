@@ -21,15 +21,21 @@ const BLEND_LABEL: Record<string, string> = { normal: '正常', multiply: '正�
 export const TRANSITION_NAMES: Record<string, string> = { dissolve: '叠化', fadeBlack: '闪黑', fadeWhite: '闪白', slide: '滑动', wipe: '擦除', push: '推入', zoom: '缩放', blur: '模糊' };
 const DIR_LABEL: Record<string, string> = { left: '向左', right: '向右', up: '向上', down: '向下' };
 const EASE_LABEL: Record<string, string> = { linear: '匀速', in: '缓入', out: '缓出', inOut: '缓入缓出', bounce: '弹跳', elastic: '弹性', hold: '定格' };
-export const CHANNEL_LABEL: Record<string, string> = { x: '位移 X', y: '位移 Y', scale: '缩放', scaleX: '横向缩放', scaleY: '纵向缩放', opacity: '不透明度', rotation: '旋转', volume: '音量', brightness: '亮度', contrast: '对比度', saturate: '饱和度', blur: '模糊' };
+export const CHANNEL_LABEL: Record<string, string> = { x: '位移 X', y: '位移 Y', scale: '缩放', scaleX: '横向缩放', scaleY: '纵向缩放', opacity: '不透明度', rotation: '旋转', volume: '音量', brightness: '亮度', contrast: '对比度', saturate: '饱和度', blur: '模糊', clipL: '左侧擦除', clipR: '右侧擦除', clipT: '顶部擦除', clipB: '底部擦除', progress: '进度' };
 
-/** 动画页：预设（入场/出场/组合/循环）+ 关键帧概览，片段与字幕共用 */
+const GROUP_HINT: Record<string, string> = { 进度: '可与入场动画叠加：文字逐字打出、形状/图标描边绘制、数字滚动、图表生长' };
+
+/** 动画页：预设（入场/出场/组合/循环/进度）+ 关键帧概览，片段与元素共用 */
 export function AnimationTab({ target, kind, effects, fps, now }: { target: Target; kind: 'clip' | 'overlay'; effects: { preset: string }[] | undefined; fps: number; now: number }) {
   const ed = useEditor();
   const { commit } = useEdit();
   const op = kind === 'clip' ? 'updateClip' : 'updateOverlay';
   const groups = new Map<string, { key: string; label: string }[]>();
-  for (const p of listAnimationPresets()) { if (!groups.has(p.group)) groups.set(p.group, []); groups.get(p.group)!.push(p); }
+  for (const p of listAnimationPresets()) {
+    if (kind === 'clip' && p.group === '进度') continue;
+    if (!groups.has(p.group)) groups.set(p.group, []);
+    groups.get(p.group)!.push(p);
+  }
   const active = new Set((effects ?? []).map((e) => e.preset));
   const channels = Object.entries(target.animations ?? {}).filter(([, k]) => k && k.length && !(k.length === 1 && k[0].e === 'hold')) as [string, NonNullable<Animations['x']>][];
   const atHead = channels.filter(([ch]) => channelState(target, ch, now, fps).state === 'on');
@@ -39,6 +45,7 @@ export function AnimationTab({ target, kind, effects, fps, now }: { target: Targ
     <>
       {[...groups].map(([group, list]) => (
         <Section key={group} title={group}>
+          {GROUP_HINT[group] && <p className="dj-hint" style={{ marginTop: 0 }}>{GROUP_HINT[group]}</p>}
           <div className="dj-chips">
             {list.map((p) => (
               <button key={p.key} type="button" className="dj-chip" aria-pressed={active.has(p.key)}

@@ -1,18 +1,18 @@
 import { z } from "zod";
-import { ANIM_CHANNELS, BLEND_MODES, DIRECTIONS, EASING_NAMES, SCHEMA_VERSION, TRANSITION_TYPES, secToFrames } from "./timeline.js";
-export { ANIM_CHANNELS, BLEND_MODES, DIRECTIONS, EASING_NAMES, TRANSITION_TYPES };
+import { ANIM_CHANNELS, BLEND_MODES, CHART_TYPES, DIRECTIONS, EASING_NAMES, ELEMENT_KINDS, LIST_STYLES, SCHEMA_VERSION, SHAPE_TYPES, TEXT_EFFECTS, TRANSITION_TYPES, secToFrames } from "./timeline.js";
+export { ANIM_CHANNELS, BLEND_MODES, CHART_TYPES, DIRECTIONS, EASING_NAMES, ELEMENT_KINDS, LIST_STYLES, SHAPE_TYPES, TEXT_EFFECTS, TRANSITION_TYPES };
 
-// ---------- D剪 时间线 JSON 契约 v5（多轨 + 稳定 id + 可选高级字段） ----------
+// ---------- D剪 时间线 JSON 契约 v6（多轨 + 稳定 id + 幻灯片式元素） ----------
 // 唯一事实源：AI 剪辑操作、面板手动调整都编辑这份 JSON；渲染层吃 JSON 出 mp4。
 //
 // 归一化模型（parseTimeline 输出一律是 v5 结构）：
 //   videoTracks[0]  = 主轨道：clips 串行，无 atSeconds，时长 = Σ clipDuration（转场居中于剪辑点，不改总时长）
 //   videoTracks[1+] = 叠加轨（画中画/贴图）：clip 带绝对 atSeconds + 可选 box（0-1 分数矩形）；越靠后越在上层
 //   audioTracks     = 音频轨：clip 带 atSeconds / inPoint / duration，轨 volume×clip volume
-//   overlays        = 文字/字幕层（稳定 id），绝对秒区间
+//   overlays        = 元素层（稳定 id，绝对秒区间）：字幕/标题/文本/形状/图片/图标/图表，kind 区分
 //   markers         = 标记点
 //
-// 兼容：v1 {clips, audio} 自动迁移；v2–v4 缺 id 的字幕在解析时补确定性 id；
+// 兼容：v1 {clips, audio} 自动迁移；v2–v4 缺 id 的字幕在解析时补确定性 id；v5→v6 只增字段。
 // 新字段全部可选（additive），旧数据零改动可读。version 高于本引擎支持的数据拒绝加载，防止旧版覆盖新数据。
 
 export const transitionObjectSchema = z.object({
@@ -36,12 +36,14 @@ export const keyframeSchema = z.object({
 });
 
 // 可动画通道。x/y 为画布分数偏移（0=原位），scale 1=原大，opacity 0-1，rotation 度，
-// volume 0-1 乘在片段音量上；brightness/contrast/saturate 1=原；blur 像素。
+// volume 0-1 乘在片段音量上；brightness/contrast/saturate 1=原；blur 像素；
+// clipL/clipR/clipT/clipB 0-1 从对应边裁掉的比例（擦除入场/出场）；progress 0-1 元素进度（打字/描边/数字滚动/图表生长，缺省 1）。
 export type AnimChannel = (typeof ANIM_CHANNELS)[number];
 const kfList = z.array(keyframeSchema).optional();
 export const animationsSchema = z.object({
   x: kfList, y: kfList, scale: kfList, scaleX: kfList, scaleY: kfList, opacity: kfList,
   rotation: kfList, volume: kfList, brightness: kfList, contrast: kfList, saturate: kfList, blur: kfList,
+  clipL: kfList, clipR: kfList, clipT: kfList, clipB: kfList, progress: kfList,
 });
 
 export const filterSchema = z.object({
@@ -141,6 +143,62 @@ export const legacyAudioSchema = z.object({
 });
 
 const colorSchema = z.string().max(40);
+// 填充：纯色，或线性/径向渐变（angle 为线性渐变角度，0=从左到右，90=从上到下）
+export const fillSchema = z.union([
+  colorSchema,
+  z.object({
+    type: z.enum(["linear", "radial"]),
+    angle: z.number().min(-360).max(360).optional(),
+    stops: z.array(z.object({ offset: z.number().min(0).max(1), color: colorSchema })).min(2).max(8),
+  }),
+]);
+const outlineSchema = z.object({ color: colorSchema, width: z.number().min(0).max(200), dash: z.enum(["solid", "dashed", "dotted"]).optional() });
+export const shapeSchema = z.object({
+  type: z.enum(SHAPE_TYPES),
+  fill: fillSchema.optional(),
+  stroke: outlineSchema.optional(),
+  radius: z.number().min(0).max(2000).optional(), // 圆角（像素）：矩形/对话框
+  points: z.number().int().min(3).max(24).optional(), // 星形角数
+  inner: z.number().min(0.05).max(0.95).optional(), // 星形内径比 / 圆环内径比
+});
+export const imageSchema = z.object({
+  src: z.string().min(1),
+  fit: z.enum(["cover", "contain", "fill"]).optional(),
+  radius: z.number().min(0).max(2000).optional(),
+  border: outlineSchema.optional(),
+});
+export const iconSchema = z.object({
+  name: z.string().min(1).max(60), // 内置图标名（见 icons.ts）
+  strokeWidth: z.number().min(0.25).max(6).optional(),
+  fill: colorSchema.optional(), // 图标内部填充色（缺省不填充）
+});
+export const chartSchema = z.object({
+  type: z.enum(CHART_TYPES),
+  data: z.array(z.object({ label: z.string().max(60).optional(), value: z.number(), color: colorSchema.optional() })).min(1).max(24),
+  max: z.number().positive().optional(), // 刻度上限（进度条/进度环缺省 100）
+  colors: z.array(colorSchema).max(12).optional(),
+  showValues: z.boolean().optional(),
+  showLabels: z.boolean().optional(),
+  prefix: z.string().max(12).optional(),
+  unit: z.string().max(12).optional(),
+  decimals: z.number().int().min(0).max(4).optional(),
+  trackColor: colorSchema.optional(),
+  thickness: z.number().min(0.02).max(1).optional(), // 柱宽/线宽/环宽比例
+});
+export const counterSchema = z.object({
+  from: z.number(),
+  to: z.number(),
+  decimals: z.number().int().min(0).max(4).optional(),
+  prefix: z.string().max(12).optional(),
+  suffix: z.string().max(12).optional(),
+  separator: z.boolean().optional(), // 千分位
+});
+export const textEffectSchema = z.object({
+  type: z.enum(TEXT_EFFECTS),
+  by: z.enum(["char", "word", "line"]).optional(),
+  interval: z.number().min(0).max(2).optional(), // 相邻单位的间隔秒
+  duration: z.number().min(0.02).max(5).optional(), // 每个单位的入场时长
+});
 export const overlaySchema = z.object({
   id: z.string().min(1),
   text: z.string(),
@@ -153,9 +211,9 @@ export const overlaySchema = z.object({
   fontWeight: z.number().int().min(100).max(900).optional(),
   animations: animationsSchema.optional(),
   effects: z.array(effectSchema).max(8).optional(),
-  // v5 版式：x/y 给出时按锚点（文字块中心）自由摆放，覆盖 position
-  x: z.number().min(0).max(1).optional(),
-  y: z.number().min(0).max(1).optional(),
+  // v5 版式：x/y 给出时按锚点（元素中心）自由摆放，覆盖 position；允许略出画布（-1–2）
+  x: z.number().min(-1).max(2).optional(),
+  y: z.number().min(-1).max(2).optional(),
   align: z.enum(["left", "center", "right"]).optional(),
   maxWidth: z.number().min(0.1).max(1).optional(),
   lineHeight: z.number().min(0.8).max(3).optional(),
@@ -173,8 +231,26 @@ export const overlaySchema = z.object({
     padding: z.number().min(0).max(200).optional(),
     radius: z.number().min(0).max(200).optional(),
   }).optional(),
-  kind: z.enum(["subtitle", "title"]).optional(),
+  // subtitle 字幕（永远在最上层）/ title 标题 / text 文本框 / shape 形状 / image 图片 / icon 图标 / chart 图表；缺省按字幕
+  kind: z.enum(ELEMENT_KINDS).optional(),
   track: z.number().int().min(0).max(31).optional(),
+  // ---- v6 元素 ----
+  name: z.string().max(40).optional(), // 图层名（面板与 AI 引用用）
+  group: z.string().max(64).optional(), // 同组元素（如一页幻灯片）在时间线上合并显示、一起移动
+  w: z.number().min(0.002).max(4).optional(), // 盒子宽（画布宽度的比例）；文字给了 w 就在盒子里排版
+  h: z.number().min(0.002).max(4).optional(), // 盒子高（画布高度的比例）
+  rotate: z.number().min(-3600).max(3600).optional(), // 静态旋转（度），rotation 关键帧叠加在上面
+  opacity: z.number().min(0).max(1).optional(),
+  valign: z.enum(["top", "middle", "bottom"]).optional(),
+  padding: z.number().min(0).max(1000).optional(), // 盒内文字边距（像素）
+  list: z.enum(LIST_STYLES).optional(), // 每行一个列表项
+  accent: colorSchema.optional(), // 强调色：==文字== 高亮、列表符号
+  counter: counterSchema.optional(), // 数字滚动：显示 from→to（progress 驱动）
+  textEffect: textEffectSchema.optional(), // 逐字/逐词/逐行入场
+  shape: shapeSchema.optional(),
+  image: imageSchema.optional(),
+  icon: iconSchema.optional(),
+  chart: chartSchema.optional(),
 });
 
 export const markerSchema = z.object({
@@ -191,7 +267,7 @@ const metaSchema = z.object({
   background: colorSchema.optional(),
 });
 
-// 输入：v1–v5 字段都收（字幕/标记 id 可缺，由归一化补齐）
+// 输入：v1–v6 字段都收（字幕/标记 id 可缺，由归一化补齐）
 const timelineInputSchema = z.object({
   meta: metaSchema,
   version: z.number().int().optional(),
@@ -224,6 +300,9 @@ export type VideoTrack = z.infer<typeof videoTrackSchema>;
 export type AudioClip = z.infer<typeof audioClipSchema>;
 export type AudioTrack = z.infer<typeof audioTrackSchema>;
 export type Overlay = z.infer<typeof overlaySchema>;
+export type Fill = z.infer<typeof fillSchema>;
+export type ShapeSpec = z.infer<typeof shapeSchema>;
+export type ChartSpec = z.infer<typeof chartSchema>;
 export type Marker = z.infer<typeof markerSchema>;
 export type Meta = z.infer<typeof metaSchema>;
 export type Timeline = z.infer<typeof timelineSchema>;
@@ -260,7 +339,7 @@ export const hash36 = (s: string): string => {
 
 type Input = z.infer<typeof timelineInputSchema>;
 
-// v1 → v5 迁移 + 不变量维护（至少一条视频轨、id 全局唯一、时长至少一帧）
+// v1 → v6 迁移 + 不变量维护（至少一条视频轨、id 全局唯一、时长至少一帧）
 function normalize(input: Input): Timeline {
   const fps = input.meta.fps;
   const frame = 1 / fps;

@@ -67,6 +67,8 @@ function Waveform({ pid, src, inPoint, duration, speed, width }: { pid: string; 
   return <canvas ref={ref} className="dj-wave" style={{ width: '100%' }} />;
 }
 
+const KIND_GLYPH: Record<string, string> = { subtitle: 'T ', title: 'T ', text: '¶ ', shape: '◆ ', image: '▣ ', icon: '★ ', chart: '▥ ', slide: '▤ ' };
+
 const kfTimes = (a: Animations | undefined) => {
   const set = new Set<number>();
   for (const list of Object.values(a ?? {})) for (const k of list ?? []) set.add(Math.round(k.t * 1000) / 1000);
@@ -88,13 +90,16 @@ export const ClipBlock = memo(function ClipBlock({ block, pid, pps, top, height,
   const fadeIn = c?.fadeIn ?? a?.fadeIn, fadeOut = c?.fadeOut ?? a?.fadeOut;
   const visibleOffset = Math.max(0, visibleFrom * pps - left);
   const visibleW = Math.min(width, visibleTo * pps - left) - visibleOffset;
+  const ek = block.members ? 'slide' : o?.kind ?? (block.kind === 'text' ? 'subtitle' : undefined);
+  if (block.members) badges.push(block.members.length + ' 个元素');
   return (
     <div className={'dj-clip dj-' + block.kind + (selected ? ' dj-sel' : '') + (flash ? ' dj-flash' : '') + (dim ? ' dj-dim' : '')}
-      data-block={block.id} data-kind={block.kind} style={{ left, width, top: top + 3, height: height - 6, bottom: 'auto' }}
-      title={block.label + ' · ' + block.duration.toFixed(2) + 's'}>
+      data-block={block.id} data-kind={block.kind} data-ek={ek} style={{ left, width, top: top + 3, height: height - 6, bottom: 'auto' }}
+      title={(block.members ? '幻灯片「' : '') + block.label + (block.members ? '」' : '') + ' · ' + block.duration.toFixed(2) + 's'}>
+      {block.members && width > 24 && block.members.map((m) => { const at = (m.startSeconds - block.start) * pps; return at > 2 && at < width - 2 ? <i key={m.id} className="dj-substart" style={{ left: at }} /> : null; })}
       {c && <Filmstrip pid={pid} src={c.src} type={c.type} inPoint={c.inPoint} speed={c.freeze ? 0 : speed} width={width} height={height - 6} pps={pps} offsetPx={visibleOffset} visibleW={visibleW} />}
       {a && <Waveform pid={pid} src={a.src} inPoint={a.inPoint} duration={a.duration} speed={speed} width={width} />}
-      <div className="dj-clip-label">{block.kind === 'text' ? 'T ' : ''}<span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{block.label}</span>{badges.map((b) => <span key={b} className="dj-badge">{b}</span>)}</div>
+      <div className="dj-clip-label">{ek ? KIND_GLYPH[ek] ?? '' : ''}<span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{block.label}</span>{badges.map((b) => <span key={b} className="dj-badge">{b}</span>)}</div>
       {fadeIn ? <div className="dj-ramp" style={{ left: 0, width: fadeIn * pps, background: 'linear-gradient(to right,rgba(0,0,0,.55),transparent)' }} /> : null}
       {fadeOut ? <div className="dj-ramp" style={{ right: 0, width: fadeOut * pps, background: 'linear-gradient(to left,rgba(0,0,0,.55),transparent)' }} /> : null}
       {selected && kfTimes(anims).map((t) => t >= 0 && t <= block.duration ? <i key={t} className="dj-kf" style={{ left: t * pps }} /> : null)}

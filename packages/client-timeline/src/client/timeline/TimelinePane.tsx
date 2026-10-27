@@ -2,13 +2,14 @@
 // 吸附、Ctrl+滚轮缩放、右键菜单、从素材库拖入。拖动过程走 store.preview，松手一次提交。
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Timeline } from '../../../../engine/src/schema';
-import { evalKeyframes, shiftAnimations, timelineHasContent } from '../../../../engine/src/timeline';
+import { evalKeyframes, isBoxElement, shiftAnimations, timelineHasContent } from '../../../../engine/src/timeline';
 import { Icon } from '../Icon';
 import { useEditor, useStore } from '../context';
 import { useSelection, type Selected } from '../selection';
 import { readPref, writePref } from '../prefs';
 import { clampZoom, edgeScrollSpeed, fitPxPerSec, mergeTimeRanges, tickStep, timecode } from '../geometry';
 import { ContextMenu, type MenuItem } from '../ui/common';
+import { InsertPanel } from '../ui/InsertPanel';
 import type { Actions } from '../actions';
 import { api, type Op } from '../engine';
 import { ClipBlock } from './ClipBlock';
@@ -26,7 +27,7 @@ type Drag =
   | { type: 'env'; block: Block; index: number | null; y0: number }
   | { type: 'marker'; id: string; t0: number; x0: number };
 
-export interface TimelineApi { zoom: (factor: number) => void; fit: () => void; toggleSnap: () => void }
+export interface TimelineApi { zoom: (factor: number) => void; fit: () => void; toggleSnap: () => void; openInsert: () => void }
 
 export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChange }: { actions: Actions; compact: boolean; onInspect: (section?: string) => void; apiRef?: React.MutableRefObject<TimelineApi | null>; onFocusChange?: (focus: Focus) => void }) {
   const ed = useEditor();
@@ -49,6 +50,10 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
   const [view, setView] = useState({ left: 0, width: 600, top: 0 });
   const [overlay, setOverlay] = useState<{ snap: number | null; marquee: { x: number; y: number; w: number; h: number } | null; insert: { x: number; top: number; height: number } | null; dropLane: string | null }>({ snap: null, marquee: null, insert: null, dropLane: null });
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const [insertAt, setInsertAt] = useState<{ x: number; y: number } | null>(null);
+  const closeInsert = useCallback(() => setInsertAt(null), []);
+  const insertBtn = useRef<HTMLButtonElement>(null);
+  const openInsert = () => { const r = insertBtn.current?.getBoundingClientRect(); setInsertAt(r ? { x: r.left, y: r.bottom + 4 } : { x: 80, y: 80 }); };
   const drag = useRef<Drag | null>(null);
   const layout: Layout | null = useMemo(() => (timeline ? computeLayout(timeline, focus, compact) : null), [timeline, focus, compact]);
   const selectedIds = useMemo(() => new Set(selected.map((s) => s.id)), [selected]);
@@ -109,7 +114,7 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
   const zoom = (factor: number) => setPps((p) => clampZoom(p * factor));
   useEffect(() => {
     if (!apiRef) return;
-    apiRef.current = { zoom, fit, toggleSnap: () => setSnapping((v) => !v) };
+    apiRef.current = { zoom, fit, toggleSnap: () => setSnapping((v) => !v), openInsert };
     return () => { apiRef.current = null; };
   });
 
@@ -120,6 +125,9 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
   };
   const laneAt = (y: number): Lane | undefined => ctx.current.layout?.lanes.find((l) => y >= l.top && y < l.top + l.height);
   const blockSel = (b: Block): Selected => ({ kind: b.kind === 'text' ? 'overlay' : 'clip', id: b.id });
+  /** 整页幻灯片块 = 它的所有元素 */
+  const blockSels = (b: Block): Selected[] => (b.members ? b.members.map((o) => ({ kind: 'overlay' as const, id: o.id })) : [blockSel(b)]);
+  const isBlockSelected = (b: Block, ids: Set<string>) => (b.members ? b.members.every((o) => ids.has(o.id)) : ids.has(b.id));
 
   /** 拖动中的预览操作（松手时同一批操作正式提交） */
   function opsFor(d: Drag, x: number, y: number): { ops: Op[]; label: string; snapAt: number | null; insert?: { x: number; top: number; height: number } } | null {
@@ -156,7 +164,11 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
       for (const it of d.ids) {
         const start = Math.max(0, it.start + delta);
         const isPrimary = it.id === b.id && d.ids.length === 1;
-        if (it.kind === 'text') {
+        if (it.members) {
+          const op: Op = { op: 'updateGroup', group: it.group, startSeconds: start };
+          if (isPrimary && target?.kind === 'text' && target.textTrack !== (it.members[0].track ?? 0)) op.patch = { track: target.textTrack };
+          ops.push(op);
+        } else if (it.kind === 'text') {
           const patch: Record<string, unknown> = { startSeconds: start, endSeconds: start + it.duration };
           if (isPrimary && target?.kind === 'text' && target.textTrack !== (it.overlay?.track ?? 0)) patch.track = target.textTrack;
           ops.push({ op: 'updateOverlay', id: it.id, patch });
@@ -169,7 +181,7 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
           ops.push(op);
         }
       }
-      return { ops, label: '移动 ' + d.ids.length + ' 项', snapAt };
+      return { ops, label: d.ids.length === 1 && b.members ? '移动幻灯片' : '移动 ' + d.ids.length + ' 项', snapAt };
     }
     if (d.type === 'trimL' || d.type === 'trimR') {
       const b = d.block;
@@ -184,14 +196,16 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
         const earliest = b.kind === 'text' || b.clip?.type === 'image' ? 0 : Math.max(0, b.start - inPoint / speed);
         v = Math.min(b.start + b.duration - frame, Math.max(earliest, v));
         const off = v - b.start;
-        if (b.kind === 'text') return { ops: [{ op: 'updateOverlay', id: b.id, patch: { startSeconds: v } }], label: '裁剪字幕开头', snapAt: sn.at };
+        if (b.members) return { ops: [{ op: 'updateGroup', group: b.group, startSeconds: v }, { op: 'updateGroup', group: b.group, endSeconds: b.start + b.duration }], label: '裁剪幻灯片开头', snapAt: sn.at };
+        if (b.kind === 'text') return { ops: [{ op: 'updateOverlay', id: b.id, patch: { startSeconds: v } }], label: '裁剪开头', snapAt: sn.at };
         const anim = (b.clip?.animations ?? b.audio?.animations) ? { animations: shiftAnimations(b.clip?.animations ?? b.audio?.animations, off) } : {};
         if (b.kind === 'audio') return { ops: [{ op: 'updateClip', id: b.id, patch: { atSeconds: v, duration: b.duration - off, inPoint: Math.max(0, inPoint + off * speed), ...anim } }], label: '裁剪开头', snapAt: sn.at };
         return { ops: [{ op: 'updateClip', id: b.id, patch: { clipDuration: b.duration - off, inPoint: b.clip?.type === 'image' ? 0 : Math.max(0, inPoint + off * speed), ...(b.kind === 'pip' ? { atSeconds: v } : {}), ...anim } }], label: '裁剪开头', snapAt: sn.at };
       }
       v = Math.max(b.start + frame, v);
       const dur = v - b.start;
-      if (b.kind === 'text') return { ops: [{ op: 'updateOverlay', id: b.id, patch: { endSeconds: v } }], label: '裁剪字幕结尾', snapAt: sn.at };
+      if (b.members) return { ops: [{ op: 'updateGroup', group: b.group, endSeconds: v }], label: '调整幻灯片时长', snapAt: sn.at };
+      if (b.kind === 'text') return { ops: [{ op: 'updateOverlay', id: b.id, patch: { endSeconds: v } }], label: '裁剪结尾', snapAt: sn.at };
       return { ops: [{ op: 'updateClip', id: b.id, patch: b.kind === 'audio' ? { duration: dur } : { clipDuration: dur } }], label: '裁剪结尾', snapAt: sn.at };
     }
     if (d.type === 'fadeIn' || d.type === 'fadeOut') {
@@ -240,7 +254,7 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
         if (!lane || lane.collapsed || lane.locked) return false;
         const top = lane.top + b.row * lane.rowHeight, l = b.start * p;
         return l + b.duration * p > rx && l < rx + w && top + lane.rowHeight > ry && top < ry + h;
-      }).map(blockSel);
+      }).flatMap(blockSels);
       const seen = new Set(d.base.map((s) => s.id));
       ed.sel.selectMany([...d.base, ...hits.filter((s) => !seen.has(s.id))]);
       return;
@@ -322,17 +336,22 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
       const b = layout.blocks.find((o) => o.id === blockEl.dataset.block);
       if (!b) return;
       const lane = layout.lanes.find((l) => l.key === b.laneKey);
-      const item = blockSel(b);
+      const sels = blockSels(b);
       const handle = target.closest('[data-handle]')?.getAttribute('data-handle') ?? undefined;
-      if (e.shiftKey || e.ctrlKey || e.metaKey) { ed.sel.select(item, e.shiftKey ? 'add' : 'toggle'); return; }
-      if (!selectedIds.has(b.id) || handle) ed.sel.select(item);
+      if (e.shiftKey || e.ctrlKey || e.metaKey) {
+        const ids = new Set(sels.map((s) => s.id));
+        const rest = ed.sel.getSnapshot().items.filter((s) => !ids.has(s.id));
+        ed.sel.selectMany(!e.shiftKey && isBlockSelected(b, selectedIds) ? rest : [...rest, ...sels]);
+        return;
+      }
+      if (!isBlockSelected(b, selectedIds) || handle) ed.sel.selectMany(sels);
       if (lane?.locked) { ed.store.toast('info', '「' + lane.label + '」已锁定，解锁后才能拖动'); return; }
       if (handle === 'trimL' || handle === 'trimR' || handle === 'fadeIn' || handle === 'fadeOut') d = { type: handle, block: b, x0: x };
       else if (handle === 'envpoint' || handle === 'envelope') {
         const idx = handle === 'envpoint' ? Number(target.getAttribute('data-index')) : null;
         d = { type: 'env', block: b, index: Number.isFinite(idx) ? idx : null, y0: y };
       } else {
-        const group = selectedIds.has(b.id) && b.kind !== 'main' ? layout.blocks.filter((o) => selectedIds.has(o.id) && o.kind !== 'main') : [b];
+        const group = isBlockSelected(b, selectedIds) && b.kind !== 'main' ? layout.blocks.filter((o) => isBlockSelected(o, selectedIds) && o.kind !== 'main') : [b];
         d = { type: 'move', block: b, ids: group.length ? group : [b], x0: x, y0: y, moved: false };
       }
     } else {
@@ -371,7 +390,7 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
       ed.store.dispatch([{ op: 'setKeyframe', id: b.id, channel: 'volume', t: Math.max(0, rel), v: cur }], { label: '添加音量关键帧' });
       return;
     }
-    onInspect(b.kind === 'text' ? 'text' : undefined);
+    onInspect(b.members ? undefined : b.overlay && isBoxElement(b.overlay) ? 'style' : b.kind === 'text' ? 'text' : undefined);
   };
 
   const onContextMenu = (e: React.MouseEvent) => {
@@ -393,8 +412,8 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
     } else if (blockEl) {
       const b = layout.blocks.find((o) => o.id === blockEl.dataset.block);
       if (!b) return;
-      if (!selectedIds.has(b.id)) ed.sel.select(blockSel(b));
-      const n = selectedIds.has(b.id) ? selected.length : 1;
+      if (!isBlockSelected(b, selectedIds)) ed.sel.selectMany(blockSels(b));
+      const n = isBlockSelected(b, selectedIds) ? selected.length : blockSels(b).length;
       items = [
         { label: '在此处分割', icon: 'split', kbd: 'S', run: () => { ed.clock.seek(at); actions.splitAtPlayhead(); } },
         { label: '裁掉播放头之前', kbd: 'Q', run: () => actions.trimToPlayhead('start') },
@@ -403,13 +422,18 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
         { label: '复制', icon: 'copy', kbd: 'Ctrl+C', run: actions.copy },
         { label: '创建副本', icon: 'duplicate', kbd: 'Ctrl+D', run: actions.duplicateSelection },
         ...(b.kind === 'main' && (b.index ?? 0) > 0 ? [{ label: '与上一段的转场…', icon: 'wand' as const, run: () => onInspect('transition') }] : []),
-        { label: '属性', icon: 'sliders', run: () => onInspect(b.kind === 'text' ? 'text' : undefined) },
+        ...(b.members ? [
+          { label: '复制整页', icon: 'duplicate' as const, run: actions.duplicateSelection },
+          { label: '解除分组', icon: 'ungroup' as const, run: () => ed.store.dispatch([{ op: 'updateGroup', group: b.group, ungroup: true }], { label: '解除分组' }) },
+        ] : []),
+        { label: '属性', icon: 'sliders', run: () => onInspect(b.members ? undefined : b.overlay && isBoxElement(b.overlay) ? 'style' : b.kind === 'text' ? 'text' : undefined) },
         { label: '交给 AI 处理', icon: 'sparkle', disabled: !ed.host.insertIntoChat, run: () => { if (!actions.askAi()) ed.store.toast('info', '当前宿主不支持插入到对话框'); } },
         { separator: true, label: '' },
-        { label: n > 1 ? '删除 ' + n + ' 项' : '删除', icon: 'trash', kbd: 'Del', danger: true, run: actions.deleteSelection },
+        { label: b.members && n === b.members.length ? '删除整页' : n > 1 ? '删除 ' + n + ' 项' : '删除', icon: 'trash', kbd: 'Del', danger: true, run: actions.deleteSelection },
       ];
     } else {
       items = [
+        { label: '在此插入元素 / 幻灯片…', icon: 'plus', run: () => { ed.clock.seek(at); setInsertAt({ x: e.clientX, y: e.clientY }); } },
         { label: '在此添加字幕', icon: 'text', run: () => { ed.clock.seek(at); actions.addText('subtitle'); } },
         { label: '在此添加标题', icon: 'text', run: () => { ed.clock.seek(at); actions.addText('title'); } },
         { label: '在此添加标记', icon: 'marker', kbd: 'M', run: () => { ed.clock.seek(at); actions.addMarker(); } },
@@ -495,6 +519,7 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
         <button className="dj-icon-btn" title="删除 (Delete)" aria-label="删除" disabled={!selected.length} onClick={actions.deleteSelection}><Icon name="trash" /></button>
         <button className="dj-icon-btn" title="创建副本 (Ctrl+D)" aria-label="创建副本" disabled={!selected.length} onClick={actions.duplicateSelection}><Icon name="duplicate" /></button>
         <span className="dj-sep" />
+        <button ref={insertBtn} data-insert-toggle className="dj-btn dj-insert-btn" title="插入文字、形状、图标、图表、图片或整页幻灯片 (I)" aria-label="插入元素" aria-haspopup="dialog" aria-expanded={Boolean(insertAt)} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setInsertAt(insertAt ? null : { x: r.left, y: r.bottom + 4 }); }}><Icon name="plus" />插入</button>
         <button className="dj-icon-btn" title="添加字幕 (T)" aria-label="添加字幕" onClick={() => actions.addText('subtitle')}><Icon name="text" /></button>
         <button className="dj-icon-btn" title="添加标记 (M)" aria-label="添加标记" onClick={actions.addMarker}><Icon name="marker" /></button>
         <span className="dj-sep" />
@@ -549,7 +574,7 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
               if (lane.collapsed) return null;
               return (
                 <ClipBlock key={b.id} block={b} pid={project.id} pps={pps} top={RULER + lane.top + b.row * lane.rowHeight} height={lane.rowHeight}
-                  selected={selectedIds.has(b.id)} flash={Boolean(flash[(b.kind === 'text' ? 'overlay:' : 'clip:') + b.id])} dim={Boolean(lane.hidden || lane.muted && b.kind === 'audio')}
+                  selected={isBlockSelected(b, selectedIds)} flash={b.members ? b.members.some((m) => flash['overlay:' + m.id]) : Boolean(flash[(b.kind === 'text' ? 'overlay:' : 'clip:') + b.id])} dim={Boolean(lane.hidden || lane.muted && b.kind === 'audio')}
                   visibleFrom={from} visibleTo={to} />
               );
             })}
@@ -583,6 +608,7 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
         </div>
       </div>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+      {insertAt && <InsertPanel x={insertAt.x} y={insertAt.y} actions={actions} scope={scope} onClose={closeInsert} />}
     </div>
   );
 }

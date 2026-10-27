@@ -124,6 +124,7 @@ export function Workspace() {
     else if (k === 'q' || k === 'Q') actions.trimToPlayhead('start');
     else if (k === 'w' || k === 'W') actions.trimToPlayhead('end');
     else if (k === 't' || k === 'T') actions.addText('subtitle');
+    else if (k === 'i' || k === 'I') tlApi.current?.openInsert();
     else if (k === 'm' || k === 'M') actions.addMarker();
     else if (k === 'n' || k === 'N') tlApi.current?.toggleSnap();
     else if (k === '+' || k === '=') tlApi.current?.zoom(1.4);
@@ -152,7 +153,7 @@ export function Workspace() {
     body = (
       <>
         {status === 'readonly' && <div className="dj-banner" style={{ gridArea: 'top', alignSelf: 'end' }}>{error ?? '项目为只读'}</div>}
-        <div className="dj-stagewrap"><PreviewPane /></div>
+        <div className="dj-stagewrap"><PreviewPane actions={actions} /></div>
         <TransportBar actions={actions} />
         <TimelinePane actions={actions} compact={compact} onInspect={inspect} apiRef={tlApi} onFocusChange={onFocusChange} />
         {size === 'wide' && <div className="dj-left"><SideTabs tabs={leftTabs} value={left} onChange={setLeft} />{pane(left)}</div>}

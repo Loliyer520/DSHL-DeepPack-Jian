@@ -1,14 +1,29 @@
 // 编辑命令：键盘、右键菜单、按钮共用；每条命令生成一批 ops 并带人类可读的 label
 import type { Clip, Overlay, Timeline } from '../../../engine/src/schema';
-import { locateClip, mainTrackStarts, srcLabel } from '../../../engine/src/timeline';
+import { elementLabel, locateClip, mainTrackStarts, srcLabel } from '../../../engine/src/timeline';
 import { splitOffset } from '../../../engine/src/ops';
 import type { Editor } from './context';
 import type { Op, AssetInfo } from './engine';
 import type { Selected } from './selection';
 import { cuesToOps, type Cue } from '../../../engine/src/srt';
+import { SLIDE_SAMPLES } from '../../../engine/src/templates';
 
 const frame = (t: Timeline) => 1 / t.meta.fps;
 const snapT = (t: Timeline, s: number) => Math.round(s * t.meta.fps) / t.meta.fps;
+/** 复制/粘贴整页时给副本一个新分组，避免和原页合并成一块 */
+const newGroupId = () => 'g' + Date.now().toString(36).slice(-5) + Math.random().toString(36).slice(2, 5);
+
+export type ElementKind = 'text' | 'title' | 'counter' | 'shape' | 'icon' | 'image' | 'chart';
+export const KIND_NAME: Record<string, string> = { subtitle: '字幕', title: '标题', text: '文本框', shape: '形状', image: '图片', icon: '图标', chart: '图表' };
+
+/** 完整选中的分组（整页幻灯片）：组 id → 成员 */
+export function selectedGroups(t: Timeline, items: Selected[]): Map<string, Overlay[]> {
+  const ids = new Set(items.filter((s) => s.kind === 'overlay').map((s) => s.id));
+  const out = new Map<string, Overlay[]>();
+  for (const o of t.overlays) if (o.group) { if (!out.has(o.group)) out.set(o.group, []); out.get(o.group)!.push(o); }
+  for (const [g, members] of out) if (!members.every((o) => ids.has(o.id))) out.delete(g);
+  return out;
+}
 
 export function itemsAtTime(t: Timeline, at: number, kinds: Selected['kind'][] = ['clip', 'overlay']): Selected[] {
   const out: Selected[] = [];
@@ -43,6 +58,31 @@ export function createActions(ed: Editor) {
   const now = () => ed.clock.time();
   const run = (ops: Op[], label: string) => (ops.length ? ed.store.dispatch(ops, { label }) : []);
 
+  /** 插入一个元素（文本框/标题/数字/形状/图标/图片/图表），放在播放头处、画面中央，默认 4 秒 */
+  const addElement = (kind: ElementKind, spec: Record<string, unknown> = {}) => {
+    const tl = t(); if (!tl) return;
+    const at = snapT(tl, now());
+    const k = Math.min(tl.meta.width, tl.meta.height) / 1080;
+    const px = (v: number) => Math.max(1, Math.round(v * k));
+    const shapeType = typeof (spec.shape as { type?: string } | undefined)?.type === 'string' ? (spec.shape as { type: string }).type : 'rect';
+    const defaults: Record<ElementKind, Record<string, unknown>> = {
+      text: { kind: 'text', text: '双击编辑文字', w: 0.5, fontSize: px(44), fontFamily: 'sans', fontWeight: 500, align: 'left', lineHeight: 1.4, animationPreset: 'riseUp' },
+      title: { kind: 'title', text: '标题文字', w: 0.8, fontSize: px(96), fontFamily: 'sans', fontWeight: 800, align: 'center', animationPreset: 'popIn' },
+      counter: { kind: 'text', text: '', counter: { from: 0, to: 100, suffix: '%' }, w: 0.35, fontSize: px(140), fontFamily: 'sans', fontWeight: 800, align: 'center', animationPreset: 'countUp' },
+      shape: { kind: 'shape', shape: { type: shapeType, ...(shapeType === 'rect' || shapeType === 'callout' ? { radius: px(24) } : {}) }, w: shapeType === 'line' || shapeType === 'arrow' || shapeType === 'doubleArrow' ? 0.3 : 0.2, animationPreset: 'popIn' },
+      icon: { kind: 'icon', icon: { name: 'star' }, w: 0.08, animationPreset: 'popIn' },
+      image: { kind: 'image', w: 0.4, animationPreset: 'fadeIn' },
+      chart: { kind: 'chart', chart: { type: 'column', data: [{ label: '一月', value: 32 }, { label: '二月', value: 48 }, { label: '三月', value: 41 }, { label: '四月', value: 66 }], showValues: true }, w: 0.5, h: 0.45, fontSize: px(26), animationPreset: 'growIn' },
+    };
+    const merged: Record<string, unknown> = { ...defaults[kind], ...spec };
+    if (kind === 'shape') merged.shape = { ...(defaults.shape.shape as object), ...(spec.shape as object | undefined) };
+    if (kind === 'chart' && spec.chart) merged.chart = { ...(defaults.chart.chart as object), ...(spec.chart as object) };
+    const op: Op = { op: 'addOverlay', startSeconds: at, endSeconds: at + 4, x: 0.5, y: 0.5, ...merged };
+    const LABEL: Record<ElementKind, string> = { text: '文本框', title: '标题', counter: '数字', shape: '形状', icon: '图标', image: '图片', chart: '图表' };
+    const r = run([op], '插入' + LABEL[kind]);
+    if (r[0]?.id) ed.sel.select({ kind: 'overlay', id: r[0].id });
+  };
+
   return {
     splitAtPlayhead() {
       const tl = t(); if (!tl) return;
@@ -71,8 +111,19 @@ export function createActions(ed: Editor) {
       ed.sel.clear();
     },
     duplicateSelection() {
+      const tl = t(); if (!tl) return;
       const items = sel().filter((s) => s.kind === 'clip' || s.kind === 'overlay');
-      run(items.map((s) => ({ op: 'duplicateClip', id: s.id })), '复制 ' + items.length + ' 项');
+      // 整页幻灯片：副本接在原页之后，换新分组
+      const groups = selectedGroups(tl, items);
+      const inGroup = new Set([...groups.values()].flat().map((o) => o.id));
+      const ops: Op[] = [];
+      for (const members of groups.values()) {
+        const g = newGroupId();
+        const span = Math.max(...members.map((o) => o.endSeconds)) - Math.min(...members.map((o) => o.startSeconds));
+        for (const { id: _id, ...rest } of members) ops.push({ op: 'addOverlay', ...rest, group: g, startSeconds: rest.startSeconds + span, endSeconds: rest.endSeconds + span });
+      }
+      for (const s of items) if (!inGroup.has(s.id)) ops.push({ op: 'duplicateClip', id: s.id });
+      run(ops, groups.size ? '复制 ' + groups.size + ' 页幻灯片' : '复制 ' + items.length + ' 项');
     },
     copy() {
       const tl = t(); if (!tl) return;
@@ -102,9 +153,11 @@ export function createActions(ed: Editor) {
         else if (kind === 'pip') ops.push({ op: 'addClip', ...rest, track: 'pip', atSeconds: at + offset });
         else ops.push({ op: 'addClip', ...rest, atSeconds: at + offset });
       }
+      const regroup = new Map<string, string>();
       for (const { overlay, offset } of clipboard.overlays) {
         const { id: _id, ...rest } = overlay;
         const len = overlay.endSeconds - overlay.startSeconds;
+        if (rest.group) { if (!regroup.has(rest.group)) regroup.set(rest.group, newGroupId()); rest.group = regroup.get(rest.group); }
         ops.push({ op: 'addOverlay', ...rest, startSeconds: at + offset, endSeconds: at + offset + len });
       }
       run(ops, '粘贴 ' + ops.length + ' 项');
@@ -164,6 +217,35 @@ export function createActions(ed: Editor) {
       const r = run([op], kind === 'title' ? '添加标题' : '添加字幕');
       if (r[0]?.id) ed.sel.select({ kind: 'overlay', id: r[0].id });
     },
+    addElement,
+    /** 把图片素材作为可自由摆放的图片元素（按原图比例，最大占画面 80%） */
+    addImageElement(asset: Pick<AssetInfo, 'name' | 'width' | 'height'>) {
+      const tl = t(); if (!tl) return;
+      const W = tl.meta.width, H = tl.meta.height;
+      const ratio = asset.width && asset.height ? asset.width / asset.height : 4 / 3;
+      let wpx = 0.4 * W, hpx = wpx / ratio;
+      if (hpx > 0.8 * H) { hpx = 0.8 * H; wpx = hpx * ratio; }
+      addElement('image', { image: { src: asset.name, fit: 'cover' }, w: wpx / W, h: hpx / H, name: srcLabel(asset.name).slice(0, 40) });
+    },
+    /** 插入一页幻灯片：在播放头处、默认 5 秒，带示例文字，选中整页 */
+    addSlide(template: string, theme: string) {
+      const tl = t(); if (!tl) return;
+      const at = snapT(tl, now());
+      const r = run([{ op: 'addSlide', template, theme, ...(SLIDE_SAMPLES[template] ?? {}), startSeconds: at, duration: 5 }], '插入幻灯片');
+      const group = r[0]?.id;
+      const after = t();
+      if (group && after) ed.sel.selectMany(after.overlays.filter((o) => o.group === group).map((o) => ({ kind: 'overlay' as const, id: o.id })));
+    },
+    /** 叠放顺序（置顶/置底/上移/下移） */
+    arrange(id: string, to: 'front' | 'back' | 'forward' | 'backward') {
+      const LABEL = { front: '置于顶层', back: '置于底层', forward: '上移一层', backward: '下移一层' };
+      run([{ op: 'arrangeOverlay', id, to }], LABEL[to]);
+    },
+    /** 选中整组（一页幻灯片的所有元素） */
+    selectGroup(group: string) {
+      const tl = t(); if (!tl) return;
+      ed.sel.selectMany(tl.overlays.filter((o) => o.group === group).map((o) => ({ kind: 'overlay' as const, id: o.id })));
+    },
     /** 把素材放到时间线：视频/图片→主轨（插到最近剪辑点）或画中画；音频→音频轨 */
     addAsset(asset: Pick<AssetInfo, 'name' | 'type' | 'duration'>, target: 'main' | 'pip' | 'audio' = asset.type === 'audio' ? 'audio' : 'main', at?: number, trackId?: string) {
       const tl = t(); if (!tl) return;
@@ -215,7 +297,7 @@ export function createActions(ed: Editor) {
           return loc ? s.id + '「' + srcLabel(loc.clip.src) + '」' + loc.start.toFixed(2) + '–' + (loc.start + loc.duration).toFixed(2) + 's' : s.id;
         }
         const o = tl.overlays.find((x) => x.id === s.id);
-        return o ? s.id + ' 字幕「' + o.text.slice(0, 20) + '」' : s.id;
+        return o ? s.id + ' ' + (KIND_NAME[o.kind ?? 'subtitle'] ?? '元素') + '「' + elementLabel(o).slice(0, 20) + '」' + (o.group ? '（幻灯片 ' + o.group + '）' : '') : s.id;
       });
       const text = parts.length ? '【选中：' + parts.join('、') + '】' : '【播放头 ' + now().toFixed(2) + 's】';
       return ed.host.insertIntoChat?.(text) ?? false;

@@ -11,7 +11,7 @@ const sec = (v) => {
   const m = Math.floor(v / 60);
   return m + ':' + (v - m * 60).toFixed(2).padStart(5, '0');
 };
-const MODE = { main: '主轨', pip: '画中画', audio: '音频', subs: '字幕' };
+const MODE = { main: '主轨', pip: '画中画', audio: '音频', subs: '字幕', text: '文字', subtitle: '字幕', title: '标题', shape: '形状', image: '图片元素', icon: '图标', chart: '图表' };
 
 export class SessionState {
   constructor(sessionId) {
@@ -33,7 +33,7 @@ export class SessionState {
 }
 
 function describeSelection(sel) {
-  const where = sel.track ? MODE[sel.track] ?? sel.track : '';
+  const where = (sel.track ? MODE[sel.track] ?? sel.track : '') + (sel.group ? ' · 幻灯片 ' + sel.group : '');
   const span = Number.isFinite(sel.start) && Number.isFinite(sel.end) ? ' ' + sec(sel.start) + '–' + sec(sel.end) : '';
   return (sel.id ?? '?') + (sel.label ? '「' + sel.label + '」' : '') + (where ? '（' + where + span + '）' : span);
 }

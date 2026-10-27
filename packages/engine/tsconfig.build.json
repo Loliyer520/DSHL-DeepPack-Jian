@@ -22,6 +22,8 @@
     "src/fonts.ts",
     "src/browser.ts",
     "src/nativeRuntime.ts",
-    "src/srt.ts"
+    "src/srt.ts",
+    "src/icons.ts",
+    "src/templates.ts"
   ]
 }

@@ -83,6 +83,7 @@ export function AssetsPane({ actions }: { actions: Actions }) {
       : [
         { label: '插入主轨（播放头处）', icon: 'film', run: () => actions.addAsset(a, 'main') },
         { label: '添加为画中画', icon: 'layers', run: () => actions.addAsset(a, 'pip') },
+        ...(a.type === 'image' ? [{ label: '作为图片元素插入（可自由摆放）', icon: 'image' as const, run: () => actions.addImageElement(a) }] : []),
       ];
     items.push({ separator: true, label: '' }, { label: a.usage ? '删除（正在使用 ' + a.usage + ' 处，需先移除）' : '删除素材', icon: 'trash', danger: true, disabled: a.usage > 0, run: () => void remove(a) });
     setMenu({ x: e.clientX, y: e.clientY, items });

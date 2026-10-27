@@ -94,8 +94,24 @@ export function getServeUrl(): Promise<string> {
 }
 
 let browserTask: Promise<Browser> | null = null;
+/**
+ * 本机完整版 Chrome/Edge 用新版无头模式（Chromium 132+ 已移除 --headless=old）。
+ * 本机浏览器起不来时（例如 Edge 有待安装的更新：启动器会把进程交给更新程序后立即退出）
+ * 改用 Remotion 的 headless-shell（首次使用自动下载并缓存）。
+ */
+async function launchRenderBrowser(): Promise<Browser> {
+  const executable = resolveRenderBrowser();
+  if (executable) {
+    try {
+      return await openBrowser("chrome", { browserExecutable: executable, chromiumOptions, chromeMode: "chrome-for-testing" });
+    } catch (error) {
+      console.warn("[djian] 本机浏览器启动失败（" + executable + "）：" + String((error as Error)?.message ?? error).split("\n")[0] + "；改用 Remotion 自带的无头浏览器");
+    }
+  }
+  return openBrowser("chrome", { browserExecutable: null, chromiumOptions });
+}
 function getBrowser(): Promise<Browser> {
-  browserTask ??= openBrowser("chrome", { browserExecutable: resolveRenderBrowser() ?? null, chromiumOptions })
+  browserTask ??= launchRenderBrowser()
     .catch((e) => { browserTask = null; throw e; });
   return browserTask;
 }

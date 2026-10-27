@@ -1,12 +1,14 @@
 // 时间线版面：把时间线 JSON 排成泳道与片段块（文字在上、画中画按层级、主轨、音频在下）
 import type { AudioClip, Clip, Overlay, Timeline } from '../../../../engine/src/schema';
-import { mainTrackStarts, srcLabel, timelineDurationInFrames } from '../../../../engine/src/timeline';
+import { elementLabel, groupTitle, mainTrackStarts, srcLabel, timelineDurationInFrames } from '../../../../engine/src/timeline';
 import { overlappingRows } from '../geometry';
 
 export type LaneKind = 'text' | 'pip' | 'main' | 'audio';
 export type Focus = 'all' | LaneKind;
 export interface Lane { key: string; kind: LaneKind; trackId?: string; textTrack?: number; label: string; top: number; height: number; rowHeight: number; rows: number; locked?: boolean; muted?: boolean; hidden?: boolean; collapsed?: boolean; role?: string }
-export interface Block { id: string; kind: LaneKind; laneKey: string; row: number; start: number; duration: number; label: string; clip?: Clip; audio?: AudioClip; overlay?: Overlay; index?: number }
+/** members/group：一页幻灯片（同 group 的元素）合并成一块，整块移动/裁剪/删除 */
+export interface Block { id: string; kind: LaneKind; laneKey: string; row: number; start: number; duration: number; label: string; clip?: Clip; audio?: AudioClip; overlay?: Overlay; index?: number; group?: string; members?: Overlay[] }
+export const GROUP_BLOCK = 'grp:';
 export interface Layout { lanes: Lane[]; blocks: Block[]; total: number; height: number }
 
 const H = { main: 60, pip: 44, audio: 44, text: 28, collapsed: 12 };
@@ -36,10 +38,24 @@ export function computeLayout(t: Timeline, focus: Focus, compact: boolean): Layo
   const textKeys = [...textTracks.keys()].sort((a, b) => b - a);
   if (!textKeys.length) textKeys.push(0);
   for (const k of textKeys) {
-    const items = textTracks.get(k) ?? [];
-    const rows = overlappingRows(items, (o) => ({ at: o.startSeconds, duration: o.endSeconds - o.startSeconds }));
-    const lane = addLane({ key: 'text:' + k, kind: 'text', textTrack: k, label: textKeys.length > 1 ? '文字 ' + (k + 1) : '文字', rows: Math.max(1, rows.length) }, H.text);
-    rows.forEach((row, r) => row.forEach((o) => blocks.push({ id: o.id, kind: 'text', laneKey: lane.key, row: r, start: o.startSeconds, duration: o.endSeconds - o.startSeconds, label: o.text || '（空）', overlay: o })));
+    const overlays = textTracks.get(k) ?? [];
+    // 同组元素合并成一块（一页幻灯片）
+    const items: Omit<Block, 'laneKey' | 'row'>[] = [];
+    const groups = new Map<string, Overlay[]>();
+    for (const o of overlays) {
+      if (o.group) { if (!groups.has(o.group)) groups.set(o.group, []); groups.get(o.group)!.push(o); continue; }
+      items.push({ id: o.id, kind: 'text', start: o.startSeconds, duration: o.endSeconds - o.startSeconds, label: elementLabel(o) || '（空）', overlay: o });
+    }
+    for (const [g, members] of groups) {
+      const start = Math.min(...members.map((o) => o.startSeconds)), end = Math.max(...members.map((o) => o.endSeconds));
+      items.push({ id: GROUP_BLOCK + g, kind: 'text', start, duration: end - start, label: groupTitle(members), group: g, members });
+    }
+    items.sort((a, b) => a.start - b.start);
+    const rows = overlappingRows(items, (b) => ({ at: b.start, duration: b.duration }));
+    const plain = overlays.every((o) => !o.kind || o.kind === 'subtitle' || (o.kind === 'title' && o.w === undefined));
+    const name = plain ? '文字' : '元素';
+    const lane = addLane({ key: 'text:' + k, kind: 'text', textTrack: k, label: textKeys.length > 1 ? name + ' ' + (k + 1) : name, rows: Math.max(1, rows.length) }, H.text);
+    rows.forEach((row, r) => row.forEach((b) => blocks.push({ ...b, laneKey: lane.key, row: r })));
   }
   // 画中画：上层在上
   const pipTracks = t.videoTracks.slice(1).map((tr, i) => ({ tr, layer: i + 2 })).reverse();

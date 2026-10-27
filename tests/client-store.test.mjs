@@ -154,3 +154,53 @@ test('new PiP and audio tracks retain optimistic clip and track ids on the serve
     assert.equal(local.receipts[0].id,track.clips[0].id,'receipt names clip rather than new track');
   }
 });
+
+
+test('slides: optimistic ids survive the server, slides collapse into one timeline block, samples build valid slides', async () => {
+  const { applyOps } = await import('../packages/engine/dist/ops.js');
+  const { parseTimeline, validateTimeline } = await import('../packages/engine/dist/schema.js');
+  const { SLIDE_SAMPLES, SLIDE_TEMPLATES } = await import('../packages/engine/dist/templates.js');
+  const { selectedGroups } = await loadTs('packages/client-timeline/src/client/actions.ts');
+  const empty = () => parseTimeline({ meta: { fps: 30, width: 1920, height: 1080 }, videoTracks: [{ id: 'v1', clips: [] }], audioTracks: [], overlays: [
+    { id: 'sub', text: '字幕', startSeconds: 0, endSeconds: 2, position: 'bottom', fontSize: 60, color: '#fff' },
+  ] });
+  // 面板乐观插入整页：服务端用同一批 id（分组 id + 元素 id）
+  const op = { op: 'addSlide', template: 'cards', theme: 'dark', ...SLIDE_SAMPLES.cards, startSeconds: 1, duration: 5 };
+  let seq = 0;
+  const local = applyOps(empty(), [op], { newId: (p) => p + 'local' + (++seq) });
+  const pinned = pinIds([op], local.receipts);
+  const remote = applyOps(empty(), pinned, { newId: (p) => p + 'server' + (++seq) });
+  assert.deepEqual(remote.timeline, local.timeline);
+  const group = local.receipts[0].id;
+  const members = local.timeline.overlays.filter((o) => o.group === group);
+  assert.ok(members.length >= 5, '一页展开成多个元素');
+
+  // 时间线：整页一块，带全部成员，标签取字号最大的文字
+  const L = computeLayout(local.timeline, 'all', false);
+  const slide = L.blocks.find((b) => b.group === group);
+  assert.ok(slide && slide.members.length === members.length);
+  assert.equal(slide.label, SLIDE_SAMPLES.cards.title);
+  assert.equal(slide.start, 1);
+  assert.equal(L.blocks.filter((b) => b.overlay?.group === group).length, 0, '成员不再单独成块');
+  assert.equal(L.lanes.find((l) => l.key === slide.laneKey).label, '元素');
+  assert.ok(L.blocks.some((b) => b.id === 'sub' && !b.members));
+
+  // 整页选中判定：全部成员都选中才算
+  const sel = members.map((o) => ({ kind: 'overlay', id: o.id }));
+  assert.deepEqual([...selectedGroups(local.timeline, sel).keys()], [group]);
+  assert.equal(selectedGroups(local.timeline, sel.slice(1)).size, 0);
+
+  // 整块拖动 = updateGroup：出场间隔不变
+  const moved = applyOps(local.timeline, [{ op: 'updateGroup', group, startSeconds: 3 }]).timeline.overlays.filter((o) => o.group === group);
+  assert.deepEqual(moved.map((o) => +(o.startSeconds - 2).toFixed(3)), members.map((o) => +o.startSeconds.toFixed(3)));
+
+  // 插入面板的示例内容：每个模板、横竖屏都能生成合法的一页
+  for (const portrait of [false, true]) {
+    for (const template of Object.keys(SLIDE_TEMPLATES)) {
+      const base = parseTimeline({ meta: { fps: 30, width: portrait ? 1080 : 1920, height: portrait ? 1920 : 1080 }, videoTracks: [{ id: 'v1', clips: [] }], audioTracks: [], overlays: [] });
+      const r = applyOps(base, [{ op: 'addSlide', template, theme: 'light', ...(SLIDE_SAMPLES[template] ?? {}) }]);
+      assert.equal(r.receipts[0].status, 'applied', template);
+      assert.deepEqual(validateTimeline(r.timeline), [], template);
+    }
+  }
+});

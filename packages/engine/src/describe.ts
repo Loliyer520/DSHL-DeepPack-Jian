@@ -1,13 +1,27 @@
 // 操作 → 人类可读的中文事件描述（给模型的编辑事件流、面板活动流、历史标签共用）
 import type { Overlay, Timeline } from "./schema.js";
 import type { Op, Receipt } from "./ops.js";
-import { mainTrackStarts, srcLabel } from "./timeline.js";
+import { CHART_LABEL, SHAPE_LABEL, elementLabel, mainTrackStarts, srcLabel } from "./timeline.js";
+import { SLIDE_TEMPLATES } from "./templates.js";
 import { ANIMATION_PRESETS } from "./presets.js";
 
 const sec = (v: unknown) => (typeof v === "number" ? v.toFixed(2).replace(/\.?0+$/, "") + "s" : "?");
 const pct = (v: unknown) => (typeof v === "number" ? Math.round(v * 100) + "%" : "?");
 const short = (s: string, n = 14) => (s.length > n ? s.slice(0, n) + "…" : s);
-const ovLabel = (o: Overlay | undefined) => (o ? "「" + short(o.text || "空字幕") + "」" : "（已删除的字幕）");
+const ovLabel = (o: Overlay | undefined) => (o ? "「" + short(elementLabel(o)) + "」" : "（已删除的元素）");
+/** 元素类型名：字幕/标题/文本/形状（具体形状）/图片/图标/图表 */
+const kindName = (o: Overlay | undefined) => {
+  switch (o?.kind) {
+    case "shape": return SHAPE_LABEL[o.shape?.type ?? "rect"] ?? "形状";
+    case "image": return "图片";
+    case "icon": return "图标";
+    case "chart": return CHART_LABEL[o.chart?.type ?? "column"] ?? "图表";
+    case "text": return "文本";
+    case "title": return "标题";
+    default: return "字幕";
+  }
+};
+const elName = (o: Overlay | undefined) => (o ? kindName(o) + ovLabel(o) : "（已删除的元素）");
 
 type AnyClip = Record<string, unknown> & { id: string; src: string };
 function findAnyClip(t: Timeline, id: unknown): { clip: AnyClip; where: string } | undefined {
@@ -42,7 +56,24 @@ const FIELD: Record<string, [string, (v: unknown) => string]> = {
   x: ["横向位置", pct], y: ["纵向位置", pct], muted: ["静音", (v) => (v ? "开" : "关")], flipH: ["水平翻转", (v) => (v ? "开" : "关")],
   flipV: ["垂直翻转", (v) => (v ? "开" : "关")], freeze: ["定格", (v) => (v ? "开" : "关")], fadeIn: ["淡入", sec], fadeOut: ["淡出", sec],
   blendMode: ["混合", (v) => String(v ?? "正常")], stroke: ["描边", (v) => (v ? "有" : "无")], background: ["底框", (v) => (v ? "有" : "无")],
+  w: ["宽", pct], h: ["高", pct], rotate: ["旋转", (v) => String(v) + "°"], name: ["名称", (v) => String(v ?? "无")], group: ["分组", (v) => (v ? String(v) : "无")],
+  valign: ["垂直对齐", (v) => ({ top: "顶部", middle: "居中", bottom: "底部" } as Record<string, string>)[String(v)] ?? String(v)], padding: ["内边距", (v) => String(v) + "px"],
+  list: ["列表", (v) => ({ bullet: "圆点", number: "编号", check: "对勾" } as Record<string, string>)[String(v)] ?? "无"], accent: ["强调色", (v) => String(v)],
+  counter: ["数字滚动", (v) => (v && typeof v === "object" ? String((v as { from: number }).from) + "→" + String((v as { to: number }).to) : "无")],
+  textEffect: ["逐字动画", (v) => (v && typeof v === "object" ? String((v as { type: string }).type) : "无")],
+  shape: ["形状", (v) => (v && typeof v === "object" ? (SHAPE_LABEL[String((v as { type: string }).type)] ?? "形状") + "（" + shapeStyle(v as Record<string, unknown>) + "）" : "无")],
+  image: ["图片", (v) => (v && typeof v === "object" ? srcLabel(String((v as { src: string }).src)) : "无")],
+  icon: ["图标", (v) => (v && typeof v === "object" ? String((v as { name: string }).name) : "无")],
+  chart: ["图表", (v) => (v && typeof v === "object" ? (CHART_LABEL[String((v as { type: string }).type)] ?? "图表") + " " + ((v as { data?: unknown[] }).data?.length ?? 0) + " 项" : "无")],
+  kind: ["类型", (v) => String(v ?? "字幕")], track: ["层", (v) => String(v ?? 0)],
 };
+function shapeStyle(v: Record<string, unknown>) {
+  const fill = v.fill;
+  const parts = [typeof fill === "string" ? "填充 " + fill : fill && typeof fill === "object" ? "渐变填充" : "无填充"];
+  if (v.stroke && typeof v.stroke === "object") parts.push("描边 " + String((v.stroke as { color: string }).color));
+  if (typeof v.radius === "number" && v.radius) parts.push("圆角 " + v.radius);
+  return parts.join("，");
+}
 
 /** 实体字段级对比：「时长 3s→2.4s，速度 1×→2×」 */
 export function fieldChanges(before: Record<string, unknown> | undefined, after: Record<string, unknown> | undefined): string[] {
@@ -88,14 +119,14 @@ export function describeOp(op: Op, receipt: Receipt | undefined, before: Timelin
       const hit = findAnyClip(before, o.id);
       if (hit) return "删除" + hit.where + "片段「" + srcLabel(hit.clip.src) + "」";
       const ov = before.overlays.find((x) => x.id === o.id);
-      return ov ? "删除字幕" + ovLabel(ov) : undefined;
+      return ov ? "删除" + elName(ov) : undefined;
     }
     case "updateClip": {
       const a = findAnyClip(before, o.id)?.clip;
       const b = findAnyClip(after, o.id)?.clip;
       if (!a) {
         const oa = before.overlays.find((x) => x.id === o.id), ob = after.overlays.find((x) => x.id === o.id);
-        return oa ? "修改字幕" + ovLabel(oa) + "：" + fieldChanges(oa, ob).join("，") : undefined;
+        return oa ? "修改" + elName(oa) + "：" + fieldChanges(oa, ob).join("，") : undefined;
       }
       const changes = fieldChanges(a, b);
       return changes.length ? "调整" + where(o.id) + "片段「" + srcLabel(a.src) + "」：" + changes.join("，") : undefined;
@@ -111,14 +142,17 @@ export function describeOp(op: Op, receipt: Receipt | undefined, before: Timelin
     }
     case "splitClip": {
       const ov = before.overlays.find((x) => x.id === o.id);
-      if (ov) return "在 " + sec(o.atSeconds) + " 处分割字幕" + ovLabel(ov);
+      if (ov) return "在 " + sec(o.atSeconds) + " 处分割" + elName(ov);
       return "在 " + sec(o.atSeconds) + " 处分割" + where(o.id) + "片段" + clipName(before, o.id);
     }
     case "splitOverlay": {
       const ov = before.overlays.find((x) => x.id === o.id) ?? before.overlays[Number(o.index)];
-      return "在 " + sec(o.atSeconds) + " 处分割字幕" + ovLabel(ov);
+      return "在 " + sec(o.atSeconds) + " 处分割" + elName(ov);
     }
-    case "duplicateClip": return "复制" + clipName(before, o.id);
+    case "duplicateClip": {
+      const ov = before.overlays.find((x) => x.id === o.id);
+      return "复制" + (ov ? elName(ov) : clipName(before, o.id));
+    }
     case "addTrack": return "新建" + (o.kind === "audio" ? "音频轨" : "画中画轨") + (o.name ? "「" + String(o.name) + "」" : "");
     case "removeTrack": {
       const tr = [...before.videoTracks, ...before.audioTracks].find((x) => x.id === o.id);
@@ -143,17 +177,39 @@ export function describeOp(op: Op, receipt: Receipt | undefined, before: Timelin
     case "moveTrack": return "调整轨道「" + ([...after.videoTracks, ...after.audioTracks].find((x) => x.id === o.id)?.name ?? String(o.id)) + "」的层级";
     case "addOverlay": {
       const ov = after.overlays.find((x) => x.id === newId);
-      return ov ? "添加字幕" + ovLabel(ov) + "（" + sec(ov.startSeconds) + "–" + sec(ov.endSeconds) + "）" : "添加字幕";
+      if (!ov) return "添加元素";
+      const where = ov.w !== undefined ? "，位置 (" + pct(ov.x ?? 0.5) + "," + pct(ov.y ?? 0.5) + ") 大小 " + pct(ov.w) + "×" + pct(ov.h ?? ov.w) : "";
+      return "添加" + elName(ov) + "（" + sec(ov.startSeconds) + "–" + sec(ov.endSeconds) + where + "）";
     }
     case "removeOverlay": {
       const ov = typeof o.id === "string" ? before.overlays.find((x) => x.id === o.id) : before.overlays[Number(o.index)];
-      return "删除字幕" + ovLabel(ov);
+      return "删除" + elName(ov);
     }
     case "updateOverlay": {
       const a = typeof o.id === "string" ? before.overlays.find((x) => x.id === o.id) : before.overlays[Number(o.index)];
       const b = a ? after.overlays.find((x) => x.id === a.id) : undefined;
       const changes = fieldChanges(a, b);
-      return changes.length ? "修改字幕" + ovLabel(a) + "：" + changes.join("，") : undefined;
+      return changes.length ? "修改" + elName(a) + "：" + changes.join("，") : undefined;
+    }
+    case "arrangeOverlay": {
+      const ov = before.overlays.find((x) => x.id === o.id);
+      return ({ front: "置顶", back: "置底", forward: "上移一层", backward: "下移一层" } as Record<string, string>)[String(o.to)] + " " + elName(ov);
+    }
+    case "addSlide": {
+      const els = after.overlays.filter((x) => x.group === newIds[0]);
+      const title = els.find((x) => x.name === "标题" || x.name === "引文")?.text;
+      const start = els.length ? Math.min(...els.map((x) => x.startSeconds)) : 0, end = els.length ? Math.max(...els.map((x) => x.endSeconds)) : 0;
+      return "添加幻灯片「" + (SLIDE_TEMPLATES[String(o.template)]?.label ?? String(o.template)) + "」" + (title ? "：" + short(title.replace(/\*\*|==/g, ""), 20) : "") + "（" + els.length + " 个元素，" + sec(start) + "–" + sec(end) + "，分组 " + newIds[0] + "）";
+    }
+    case "updateGroup": {
+      const a = before.overlays.filter((x) => x.group === o.group), b = after.overlays.filter((x) => a.some((y) => y.id === x.id));
+      if (!a.length) return undefined;
+      const span = (l: Overlay[]) => sec(Math.min(...l.map((x) => x.startSeconds))) + "–" + sec(Math.max(...l.map((x) => x.endSeconds)));
+      return "调整分组 " + String(o.group) + "（" + a.length + " 个元素）：" + span(a) + "→" + span(b) + (o.ungroup ? "，并取消分组" : "");
+    }
+    case "removeGroup": {
+      const a = before.overlays.filter((x) => x.group === o.group);
+      return a.length ? "删除分组 " + String(o.group) + " 的 " + a.length + " 个元素" : undefined;
     }
     case "setMeta": return "画布改为 " + after.meta.width + "×" + after.meta.height + " @" + after.meta.fps + "fps" + (after.meta.background ? "，背景 " + after.meta.background : "");
     case "setKeyframe": return "为" + targetName(after, o.id) + "在 " + sec(o.t) + " 设 " + String(o.channel) + " 关键帧 = " + String(o.v);
@@ -168,7 +224,7 @@ export function describeOp(op: Op, receipt: Receipt | undefined, before: Timelin
 
 function targetName(t: Timeline, id: unknown) {
   const ov = t.overlays.find((x) => x.id === id);
-  return ov ? "字幕" + ovLabel(ov) : clipName(t, id);
+  return ov ? elName(ov) : clipName(t, id);
 }
 
 /** 实体级差异描述（撤销/恢复/整份替换等系统批次用） */
@@ -194,13 +250,13 @@ export function describeDiff(before: Timeline, after: Timeline, limit = 12): str
   const bo = new Map(after.overlays.map((o) => [o.id, o]));
   for (const [id, o] of bo) {
     const prev = ao.get(id);
-    if (!prev) lines.push("恢复/添加字幕" + ovLabel(o));
+    if (!prev) lines.push("恢复/添加" + elName(o));
     else {
       const ch = fieldChanges(prev as unknown as Record<string, unknown>, o as unknown as Record<string, unknown>);
-      if (ch.length) lines.push("字幕" + ovLabel(prev) + "：" + ch.join("，"));
+      if (ch.length) lines.push(elName(prev) + "：" + ch.join("，"));
     }
   }
-  for (const [id, o] of ao) if (!bo.has(id)) lines.push("移除字幕" + ovLabel(o));
+  for (const [id, o] of ao) if (!bo.has(id)) lines.push("移除" + elName(o));
   if (JSON.stringify(before.meta) !== JSON.stringify(after.meta)) lines.push("画布改为 " + after.meta.width + "×" + after.meta.height + " @" + after.meta.fps + "fps");
   const tracks = (t: Timeline) => new Map([...t.videoTracks, ...t.audioTracks].map((tr) => [tr.id, tr.name ?? tr.id]));
   const at = tracks(before), bt = tracks(after);

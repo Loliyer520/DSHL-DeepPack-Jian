@@ -107,6 +107,7 @@
                 4. 动效克制：预设动画风格不超过两种；静态图片配 kenBurns 或 kenBurnsOut；优先 animationPreset，只有用户要精确轨迹才手排关键帧。
                 5. 音画：有人声时配乐压到 0.2–0.3，或把人声轨 role 设为 voice、配乐轨开启 duck 自动闪避；音乐结尾用 fadeOut 1.5–2 秒，别硬断；从音乐高潮段取素材（inPoint 别总是 0）。
                 6. 字幕：一句不超过 15 字、停留不少于 1.5 秒；默认底部，字号约为画面高度的 5–7%（720p 用 40–50）；画面复杂时加描边或底框保证可读；整片字体统一（sans 思源黑体 / serif 思源宋体 / kuaile / qingke / mashan）。
+                7. 做 PPT 式画面（标题页、卡片、要点、数据、图表、流程）时用原生元素：addSlide 模板或 shape/text/icon/chart 元素组合（djian_catalog 查图标、模板与主题），不要把文字和图形生成成图片导入；做完逐页 djian_frame 抽查溢出与重叠。
                 回复保持简短中文：说清做了什么、还有什么建议。
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'

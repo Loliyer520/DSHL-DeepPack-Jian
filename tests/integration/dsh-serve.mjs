@@ -1,6 +1,7 @@
 // 本地联调：用真实 dsh web 宿主 + 整合包补丁 + 假模型跑起 D剪，供浏览器手动/自动化检查面板。
 // 用法：node tests/integration/dsh-serve.mjs <@deepseek-ai/dsh 安装目录> [web 端口，默认 7788]
-// 假模型：用户消息含「演示」时调用 djian_apply_ops 加一条字幕（演示 AI 与人同时编辑），其余回复“好的”。不调用任何收费模型。
+// 假模型：用户消息含「演示」时调用 djian_apply_ops 加一条字幕（演示 AI 与人同时编辑），含「演示幻灯片」时用 addSlide 做两页，
+// 其余回复“好的”。不调用任何收费模型。
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,12 +29,23 @@ const fakeLlm = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
     const chunk = (delta, finish) => 'data: ' + JSON.stringify({ id: 'x' + seq, object: 'chat.completion.chunk', created: 1, model: 'glm-5.3-flash', choices: [{ index: 0, delta, finish_reason: finish }], ...(finish ? { usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } } : {}) }) + '\n\n';
     const wantsTool = Array.isArray(json.tools) && json.tools.length && userText.includes('演示') && last?.role !== 'tool';
+    // 「演示幻灯片」：用原生元素做两页（数据页 + 卡片页），演示 AI 不再导入渲染好的图片
+    const turnStart = msgs.map((m) => m.role === 'assistant' && !m.tool_calls?.length).lastIndexOf(true);
+    const slides = msgs.slice(turnStart + 1).some((m) => m.role === 'user' && String(typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? '')).includes('幻灯片'));
     if (wantsTool) {
-      const args = JSON.stringify({ ops: [{ op: 'addOverlay', text: 'AI 加的字幕 ' + (++seq), startSeconds: 1, endSeconds: 3, kind: 'subtitle' }], label: 'AI 演示：加字幕' });
+      const args = JSON.stringify(slides
+        ? {
+          ops: [
+            { op: 'addSlide', template: 'stats', theme: 'tech', kicker: 'DATA · 上线三十天', title: '用户增长', startSeconds: 0, duration: 5, items: [{ value: 12800, suffix: '+', title: '活跃会话', text: '日均 420 次' }, { value: 98.6, suffix: '%', title: '满意度' }, { value: 3, suffix: ' 秒', title: '平均响应' }] },
+            { op: 'addSlide', template: 'cards', theme: 'tech', kicker: 'OVERVIEW · 三个关键词', title: '这一版，做到三件事', startSeconds: 5, duration: 5, items: [{ title: '强大', text: '一个号主 AI\n统筹全部会话', icon: 'brain-circuit' }, { title: '便捷', text: '三条命令开张\n群里像真人接话', icon: 'zap' }, { title: '可拓展', text: '模块边界清晰\n渠道随插随用', icon: 'blocks' }] },
+          ],
+          label: 'AI 演示：做两页幻灯片',
+        }
+        : { ops: [{ op: 'addOverlay', text: 'AI 加的字幕 ' + (++seq), startSeconds: 1, endSeconds: 3, kind: 'subtitle' }], label: 'AI 演示：加字幕' });
       res.write(chunk({ role: 'assistant', content: null, tool_calls: [{ index: 0, id: 'call_' + Date.now(), type: 'function', function: { name: 'djian_apply_ops', arguments: args } }] }, null));
       res.write(chunk({}, 'tool_calls'));
     } else {
-      res.write(chunk({ role: 'assistant', content: last?.role === 'tool' ? '已加好字幕，你可以在时间线上继续调整。' : '好的' }, null));
+      res.write(chunk({ role: 'assistant', content: last?.role === 'tool' ? (slides ? '两页幻灯片做好了：文字、图标、数字都是可编辑的元素，可以在画面上直接点选修改。' : '已加好字幕，你可以在时间线上继续调整。') : '好的' }, null));
       res.write(chunk({}, 'stop'));
     }
     res.end('data: [DONE]\n\n');
