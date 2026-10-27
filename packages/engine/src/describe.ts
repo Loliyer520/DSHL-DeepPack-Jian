@@ -1,7 +1,7 @@
 // 操作 → 人类可读的中文事件描述（给模型的编辑事件流、面板活动流、历史标签共用）
 import type { Overlay, Timeline } from "./schema.js";
 import type { Op, Receipt } from "./ops.js";
-import { CHART_LABEL, SHAPE_LABEL, elementLabel, mainTrackStarts, srcLabel } from "./timeline.js";
+import { CHART_LABEL, PLOT_ITEM_LABEL, SHAPE_LABEL, elementLabel, mainTrackStarts, srcLabel, texLabel } from "./timeline.js";
 import { SLIDE_TEMPLATES } from "./templates.js";
 import { ANIMATION_PRESETS } from "./presets.js";
 
@@ -18,6 +18,9 @@ const kindName = (o: Overlay | undefined) => {
     case "chart": return CHART_LABEL[o.chart?.type ?? "column"] ?? "图表";
     case "text": return "文本";
     case "title": return "标题";
+    case "math": return "公式";
+    case "plot": return "坐标系";
+    case "camera": return "镜头";
     default: return "字幕";
   }
 };
@@ -66,7 +69,17 @@ const FIELD: Record<string, [string, (v: unknown) => string]> = {
   icon: ["图标", (v) => (v && typeof v === "object" ? String((v as { name: string }).name) : "无")],
   chart: ["图表", (v) => (v && typeof v === "object" ? (CHART_LABEL[String((v as { type: string }).type)] ?? "图表") + " " + ((v as { data?: unknown[] }).data?.length ?? 0) + " 项" : "无")],
   kind: ["类型", (v) => String(v ?? "字幕")], track: ["层", (v) => String(v ?? 0)],
+  plot: ["坐标系", (v) => (v && typeof v === "object" ? plotSummary(v as Record<string, unknown>) : "无")],
+  morph: ["变形", (v) => (v && typeof v === "object" ? "自 " + String((v as { from: string }).from) + "（" + sec((v as { duration?: number }).duration ?? 1) + "）" : "无")],
 };
+function plotSummary(v: Record<string, unknown>) {
+  const items = Array.isArray(v.items) ? (v.items as { type: string; fn?: string; fx?: string }[]) : [];
+  const range = (r: unknown) => (Array.isArray(r) ? "[" + r.join(", ") + "]" : "?");
+  const parts = ["x∈" + range(v.x) + " y∈" + range(v.y)];
+  if (items.length) parts.push(items.map((it) => (PLOT_ITEM_LABEL[it.type] ?? it.type) + (it.fn ? " " + it.fn : "")).slice(0, 4).join("、") + (items.length > 4 ? " 等 " + items.length + " 项" : ""));
+  if (v.params && typeof v.params === "object") parts.push("参数 " + Object.keys(v.params).join("/"));
+  return parts.join("，");
+}
 function shapeStyle(v: Record<string, unknown>) {
   const fill = v.fill;
   const parts = [typeof fill === "string" ? "填充 " + fill : fill && typeof fill === "object" ? "渐变填充" : "无填充"];
@@ -190,6 +203,18 @@ export function describeOp(op: Op, receipt: Receipt | undefined, before: Timelin
       const b = a ? after.overlays.find((x) => x.id === a.id) : undefined;
       const changes = fieldChanges(a, b);
       return changes.length ? "修改" + elName(a) + "：" + changes.join("，") : undefined;
+    }
+    case "transform": {
+      // 来源可能是同一批里刚建的（如 addSlide 后立即变形）：退到批后的时间线里找
+      const a = before.overlays.find((x) => x.id === o.id) ?? after.overlays.find((x) => x.id === o.id);
+      const b = after.overlays.find((x) => x.id === newId);
+      if (!a || !b) return undefined;
+      // 只列 patch 带来的变化：时间、关键帧平移、预设筛选是变形本身的规则；公式的内容直接写在前后两个名字里
+      const math = a.kind === "math" && b.kind === "math";
+      const strip = (x: Overlay) => ({ ...x, id: a.id, startSeconds: undefined, endSeconds: undefined, morph: undefined, animations: undefined, effects: undefined, ...(math ? { text: undefined, name: undefined } : {}) }) as Record<string, unknown>;
+      const changes = fieldChanges(strip(a), strip(b));
+      const label = (x: Overlay) => (x.kind === "math" ? "「" + short(texLabel(x.text), 24) + "」" : ovLabel(x));
+      return "在 " + sec(b.startSeconds) + " 把" + kindName(a) + label(a) + "变形为" + label(b) + "（" + sec(b.morph?.duration ?? 1) + " 过渡" + (changes.length ? "：" + changes.join("，") : "") + "）";
     }
     case "arrangeOverlay": {
       const ov = before.overlays.find((x) => x.id === o.id);

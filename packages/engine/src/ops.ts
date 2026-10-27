@@ -12,6 +12,7 @@ import {
   FILTER_RANGES,
   LINE_SHAPES,
   LIST_STYLES,
+  PLOT_ITEM_TYPES,
   SHAPE_TYPES,
   TEXT_EFFECTS,
   TRANSITION_TYPES,
@@ -27,6 +28,9 @@ import { iconByName } from "./icons.js";
 import { SLIDE_TEMPLATES, SLIDE_THEMES, buildSlide } from "./templates.js";
 import { ANIMATION_PRESETS, presetGroup, resolveAnimations } from "./presets.js";
 import { fontById } from "./fonts.js";
+import { RESERVED_NAMES, analyzeExpr } from "./expr.js";
+import { normalizeTex } from "./mathData.js";
+import { parsePath } from "./paths.js";
 
 export type Actor = "user" | "ai" | "system";
 
@@ -39,6 +43,8 @@ export interface OpContext {
   assetDuration?: (src: string) => number | undefined;
   /** 操作者：锁定轨道只对 system（撤销/恢复）放行 */
   actor?: Actor;
+  /** 检查 LaTeX（服务端提供）：有错返回描述，作为警告回给模型 */
+  checkTex?: (tex: string) => string | undefined;
 }
 
 export type ReceiptStatus = "applied" | "ignored" | "partial" | "rejected";
@@ -62,7 +68,7 @@ export const OP_NAMES = [
   "addClip", "removeClip", "updateClip", "moveClip", "reorderClips", "splitClip", "duplicateClip",
   "addAudio", "removeAudio", "updateAudioTrack",
   "addTrack", "removeTrack", "updateTrack", "moveTrack",
-  "addOverlay", "removeOverlay", "updateOverlay", "splitOverlay", "arrangeOverlay",
+  "addOverlay", "removeOverlay", "updateOverlay", "splitOverlay", "arrangeOverlay", "transform",
   "addSlide", "updateGroup", "removeGroup",
   "setMeta",
   "setKeyframe", "removeKeyframe", "clearKeyframes",
@@ -238,9 +244,26 @@ export function sanitizeShape(v: unknown, prev?: Overlay["shape"]): Overlay["sha
   if (points !== undefined && raw.points !== null) out.points = clamp(Math.round(points), 3, 24);
   const inner = "inner" in raw ? num(raw.inner) : base.inner;
   if (inner !== undefined && raw.inner !== null) out.inner = clamp(inner, 0.05, 0.95);
-  // 既无填充也无描边：闭合形状给默认蓝色填充，线条给白色描边
+  let open = (LINE_SHAPES as readonly string[]).includes(type);
+  if (type === "path") {
+    // 自由路径：path（SVG 路径，盒子 0–100 坐标）或 vertices（顶点）
+    const path = "path" in raw ? (typeof raw.path === "string" ? raw.path.trim().slice(0, 4000) : undefined) : base.path;
+    if (path && raw.path !== null && parsePath(path).length) out.path = path;
+    const verts = "vertices" in raw ? raw.vertices : base.vertices;
+    if (Array.isArray(verts) && raw.vertices !== null) {
+      const list = verts.map((p) => (Array.isArray(p) && p.length === 2 && num(p[0]) !== undefined && num(p[1]) !== undefined ? [clamp(num(p[0])!, -1000, 1100), clamp(num(p[1])!, -1000, 1100)] as [number, number] : undefined))
+        .filter((p): p is [number, number] => Boolean(p)).slice(0, 200);
+      if (list.length >= 2) out.vertices = list;
+    }
+    if (!out.path && !out.vertices) out.path = "M0,80 C30,0 70,100 100,20";
+    for (const k of ["closed", "smooth"] as const) { const b = k in raw ? bool(raw[k]) : base[k]; if (b) out[k] = true; }
+    const arrow = "arrow" in raw ? pick(["start", "end", "both"] as const, raw.arrow) : base.arrow;
+    if (arrow) out.arrow = arrow;
+    open = out.vertices ? !out.closed : !/z/i.test(out.path ?? "");
+  }
+  // 既无填充也无描边：闭合形状给默认蓝色填充，线条/开放路径给白色描边
   if (out.fill === undefined && !out.stroke) {
-    if ((LINE_SHAPES as readonly string[]).includes(type)) out.stroke = { color: "#ffffff", width: 6 };
+    if (open) out.stroke = { color: "#ffffff", width: 6 };
     else out.fill = "#3b82f6";
   }
   return out;
@@ -336,6 +359,118 @@ function sanitizeTextEffect(v: unknown): Overlay["textEffect"] | undefined {
     ...(num(raw.interval) !== undefined ? { interval: clampOr(raw.interval, 0.04, 0, 2) } : {}),
     ...(num(raw.duration) !== undefined ? { duration: clampOr(raw.duration, 0.4, 0.02, 5) } : {}),
   };
+}
+
+// ---------- v7 坐标系 / 变形 ----------
+const NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,11}$/;
+const DEFAULT_PLOT = { x: [-5, 5] as [number, number], y: [-3, 3] as [number, number] };
+// 各类对象的表达式里可用的自变量（参数、带 id 的函数名之外）
+const ITEM_VARS: Record<string, Partial<Record<string, string>>> = {
+  fn: { fn: "x" }, param: { fx: "t", fy: "t" }, polar: { fn: "t" },
+};
+const exprOrNum = (v: unknown): number | string | undefined => {
+  const n = typeof v === "number" && Number.isFinite(v) ? v : undefined;
+  if (n !== undefined) return n;
+  return typeof v === "string" && v.trim() ? v.trim().slice(0, 200) : undefined;
+};
+
+/** 坐标系净化：坏表达式/未定义的名字给警告（模型据此自查），主表达式坏掉的对象丢弃 */
+export function sanitizePlot(v: unknown, prev: Overlay["plot"] | undefined, warnings: string[]): Overlay["plot"] | undefined {
+  if (!isObj(v)) return undefined;
+  const base = prev ?? { ...DEFAULT_PLOT, items: [] };
+  const range = (r: unknown, fallback: [number, number], name: string): [number, number] => {
+    if (!Array.isArray(r) || r.length !== 2) return fallback;
+    const a = num(r[0]), b = num(r[1]);
+    if (a === undefined || b === undefined || a === b) { warnings.push(name + " 范围无效，保持 [" + fallback.join(", ") + "]"); return fallback; }
+    return a < b ? [clamp(a, -1e6, 1e6), clamp(b, -1e6, 1e6)] : [clamp(b, -1e6, 1e6), clamp(a, -1e6, 1e6)];
+  };
+  const out: NonNullable<Overlay["plot"]> = { x: "x" in v ? range(v.x, base.x, "x") : base.x, y: "y" in v ? range(v.y, base.y, "y") : base.y, items: [] };
+  const val = (k: string) => (k in v ? v[k] : (base as Record<string, unknown>)[k]);
+  for (const k of ["xStep", "yStep"] as const) { const n = num(val(k)); if (n !== undefined && n > 0 && val(k) !== null) out[k] = n; }
+  for (const k of ["grid", "axes", "ticks", "numbers"] as const) { const b = bool(val(k)); if (b !== undefined) out[k] = b; }
+  for (const k of ["xLabel", "yLabel"] as const) { const s2 = shortStr(val(k), 60); if (s2) out[k] = s2; }
+  for (const k of ["axisColor", "gridColor"] as const) { const c = sanitizeColor(val(k)); if (c) out[k] = c; }
+  // 参数：常数或关键帧
+  const rawParams = val("params");
+  if (isObj(rawParams)) {
+    const params: NonNullable<NonNullable<Overlay["plot"]>["params"]> = {};
+    for (const [name, pv] of Object.entries(rawParams).slice(0, 8)) {
+      if (!NAME_RE.test(name) || RESERVED_NAMES.has(name) || name === "x" || name === "t") { warnings.push("参数名「" + name + "」不可用（需字母开头，且不能是 x/t/pi/e 或函数名）"); continue; }
+      const n = num(pv);
+      const kfs = n === undefined ? sanitizeKeyframes(pv, "param") : undefined;
+      if (n !== undefined) params[name] = n;
+      else if (kfs) params[name] = kfs.slice(0, 64);
+      else warnings.push("参数「" + name + "」要写成数值或关键帧 [{t,v,e?}]");
+    }
+    if (Object.keys(params).length) out.params = params;
+  }
+  const paramNames = new Set(Object.keys(out.params ?? {}));
+  const rawItems = "items" in v ? v.items : base.items;
+  const list = Array.isArray(rawItems) ? rawItems.slice(0, 24) : [];
+  // 先收集函数 id，表达式里可以互相引用
+  const fnIds = new Set<string>();
+  for (const it of list) if (isObj(it) && (it.type === "fn" || (!it.type && it.fn)) && typeof it.id === "string" && NAME_RE.test(it.id) && !RESERVED_NAMES.has(it.id)) fnIds.add(it.id);
+  list.forEach((raw, i) => {
+    if (!isObj(raw)) return;
+    const type = pick(PLOT_ITEM_TYPES, raw.type) ?? (raw.fn !== undefined ? "fn" : raw.fx !== undefined ? "param" : raw.x !== undefined && raw.y !== undefined ? "point" : undefined);
+    if (!type) { warnings.push("坐标系第 " + (i + 1) + " 项缺少 type"); return; }
+    const it: Record<string, unknown> = { type };
+    const where = "坐标系第 " + (i + 1) + " 项（" + type + "）";
+    let broken = false;
+    const check = (key: string, value: number | string | undefined) => {
+      if (typeof value !== "string") return value;
+      const own = ITEM_VARS[type]?.[key];
+      try {
+        const { vars, calls } = analyzeExpr(key === "fn" || key === "fx" || key === "fy" ? stripLhsExpr(value) : value, fnIds);
+        const unknown = [...vars].filter((n) => !paramNames.has(n) && n !== own);
+        if (unknown.length) warnings.push(where + " 的 " + key + "「" + value + "」用到未定义的 " + unknown.join("、") + (own ? "（自变量是 " + own + "）" : "") + "，请在 params 里定义");
+        const missing = [...calls].filter((n) => !fnIds.has(n));
+        if (missing.length) warnings.push(where + " 调用了不存在的函数 " + missing.join("、"));
+        return value;
+      } catch (e) {
+        warnings.push(where + " 的 " + key + "「" + value + "」无法解析：" + (e instanceof Error ? e.message : String(e)));
+        if (key === "fn" || key === "fx" || key === "fy") broken = true;
+        return undefined;
+      }
+    };
+    if (typeof raw.id === "string" && fnIds.has(raw.id) && type === "fn") it.id = raw.id;
+    for (const key of ["fn", "fx", "fy"] as const) if (typeof raw[key] === "string") { const e = check(key, String(raw[key]).trim().slice(0, 200)); if (e !== undefined) it[key] = e; }
+    for (const key of ["x", "y", "x0", "y0", "from", "to", "n"] as const) { const e = check(key, exprOrNum(raw[key])); if (e !== undefined) it[key] = e; }
+    for (const key of ["t", "domain"] as const) {
+      const r = raw[key];
+      if (Array.isArray(r) && r.length === 2) {
+        const a = check(key, exprOrNum(r[0])), b = check(key, exprOrNum(r[1]));
+        if (a !== undefined && b !== undefined) it[key] = [a, b];
+      }
+    }
+    if ((type === "fn" || type === "polar") && !it.fn) broken = true;
+    if (type === "param" && (!it.fx || !it.fy)) broken = true;
+    if (broken) { warnings.push(where + " 缺少可用的函数表达式，已忽略"); return; }
+    if (typeof raw.of === "string" && fnIds.has(raw.of)) it.of = raw.of;
+    else if (raw.of !== undefined) warnings.push(where + " 的 of「" + String(raw.of) + "」不是已定义的函数 id");
+    const color = sanitizeColor(raw.color);
+    if (color) it.color = color;
+    const ranges = { width: [0.5, 40], size: [1, 60], opacity: [0, 1], length: [0.01, 1000], start: [0, 3600], draw: [0, 30], end: [0, 3600] } as const;
+    for (const [k, [lo, hi]] of Object.entries(ranges)) { const n = num(raw[k]); if (n !== undefined) it[k] = clamp(n, lo, hi); }
+    for (const k of ["dash", "guides"] as const) if (raw[k] === true) it[k] = true;
+    const label = shortStr(raw.label, 120);
+    if (label) it.label = label;
+    out.items.push(it as NonNullable<Overlay["plot"]>["items"][number]);
+  });
+  return out;
+}
+const stripLhsExpr = (s: string) => s.replace(/^\s*(?:[A-Za-z]\w*\s*\(\s*[A-Za-zθ]\s*\)|y|r)\s*=\s*/, "");
+
+function sanitizeMorph(s: Scope, v: unknown, self: Overlay): Overlay["morph"] | undefined {
+  const raw = typeof v === "string" ? { from: v } : v;
+  if (!isObj(raw)) return undefined;
+  const from = typeof raw.from === "string" ? raw.from : "";
+  const src = s.t.overlays.find((o) => o.id === from);
+  if (!src || from === self.id) { s.warnings.push("变形来源「" + from + "」不存在或就是自己，已忽略"); return undefined; }
+  if (src.kind === "camera") { s.warnings.push("镜头不能作为变形来源"); return undefined; }
+  if (src.endSeconds > self.startSeconds + frameOf(s.t)) s.warnings.push("变形来源「" + elementLabel(src) + "」在 " + src.endSeconds + "s 才结束，变形期间两者会同时出现；通常让它在本元素开始时（" + self.startSeconds + "s）结束");
+  const ease = sanitizeEasing(raw.ease);
+  return { from, ...(num(raw.duration) !== undefined ? { duration: clampOr(raw.duration, 1, 0.1, 10) } : {}), ...(ease !== undefined ? { ease } : {}) };
 }
 
 /** 预设名 → 新 effects 列表：同组替换；"none"/"" 返回 null 表示清空；未知名字返回 undefined */
@@ -647,13 +782,15 @@ function patchAudioClip(s: Scope, hit: AudioHit, patch: Record<string, unknown>)
 }
 
 const OVERLAY_KEYS = new Set(["text", "startSeconds", "endSeconds", "position", "fontSize", "color", "fontFamily", "fontWeight", "animations", "animationPreset", "effects", "x", "y", "align", "maxWidth", "lineHeight", "letterSpacing", "italic", "underline", "stroke", "shadow", "background", "kind", "track",
-  "name", "group", "w", "h", "rotate", "opacity", "valign", "padding", "list", "accent", "counter", "textEffect", "shape", "image", "icon", "chart"]);
-const BOX_FIELDS = { shape: "shape", image: "image", icon: "icon", chart: "chart" } as const;
+  "name", "group", "w", "h", "rotate", "opacity", "valign", "padding", "list", "accent", "counter", "textEffect", "shape", "image", "icon", "chart",
+  "plot", "morph", "tex"]);
+const BOX_FIELDS = { shape: "shape", image: "image", icon: "icon", chart: "chart", plot: "plot" } as const;
 
 function patchOverlay(s: Scope, ov: Overlay, patch: Record<string, unknown>) {
   const frame = frameOf(s.t);
   for (const key of Object.keys(patch)) if (!OVERLAY_KEYS.has(key)) s.warnings.push("元素忽略字段「" + key + "」");
   if ("text" in patch) ov.text = String(patch.text ?? "").slice(0, 2000);
+  if (typeof patch.tex === "string") { ov.text = patch.tex.slice(0, 2000); if (!("kind" in patch) && !ov.kind) patch = { ...patch, kind: "math" }; }
   if ("startSeconds" in patch) ov.startSeconds = clampOr(patch.startSeconds, ov.startSeconds, 0, 86400);
   if ("endSeconds" in patch) ov.endSeconds = clampOr(patch.endSeconds, ov.endSeconds, 0, 86400);
   if (secToFrames(s.t.meta.fps, ov.endSeconds) <= secToFrames(s.t.meta.fps, ov.startSeconds)) {
@@ -719,15 +856,26 @@ function patchOverlay(s: Scope, ov: Overlay, patch: Record<string, unknown>) {
   if ("image" in patch) setOpt(ov, "image", patch.image === null ? null : sanitizeImageSpec(s, patch.image, ov.image) ?? ov.image);
   if ("icon" in patch) setOpt(ov, "icon", patch.icon === null ? null : sanitizeIcon(s, patch.icon, ov.icon) ?? ov.icon);
   if ("chart" in patch) setOpt(ov, "chart", patch.chart === null ? null : sanitizeChart(patch.chart, ov.chart) ?? ov.chart);
+  if ("plot" in patch) setOpt(ov, "plot", patch.plot === null ? null : sanitizePlot(patch.plot, ov.plot, s.warnings) ?? ov.plot);
   if ("kind" in patch) setOpt(ov, "kind", pick(ELEMENT_KINDS, patch.kind) ?? null);
-  // 给了 shape/image/icon/chart 却没指定 kind：按内容推断
+  // 给了 shape/image/icon/chart/plot 却没指定 kind：按内容推断
   if (!("kind" in patch) && !isBoxElement(ov)) {
     for (const key of Object.keys(BOX_FIELDS) as (keyof typeof BOX_FIELDS)[]) if (key in patch && ov[key]) { ov.kind = key; break; }
   }
+  if ("morph" in patch) setOpt(ov, "morph", patch.morph === null ? null : sanitizeMorph(s, patch.morph, ov) ?? null);
   if (ov.kind === "shape" && !ov.shape) ov.shape = sanitizeShape({ type: "rect" });
   if (ov.kind === "image" && !ov.image) fail("图片元素需要 image:{src}（素材文件名）");
   if (ov.kind === "icon" && !ov.icon) fail("图标元素需要 icon:{name}");
   if (ov.kind === "chart" && !ov.chart) fail("图表元素需要 chart:{type, data}");
+  if (ov.kind === "plot" && !ov.plot) ov.plot = { ...DEFAULT_PLOT, items: [] };
+  if (ov.kind === "math") {
+    ov.text = normalizeTex(ov.text);
+    if (!ov.text) fail("公式元素需要 text（LaTeX，如 \\frac{a}{b}）");
+    if ("text" in patch || "tex" in patch || "kind" in patch) {
+      const err = s.ctx.checkTex?.(ov.text);
+      if (err) s.warnings.push("公式「" + ov.text.slice(0, 40) + "」" + err + "（画面上会显示红色错误框）");
+    }
+  }
 }
 
 /** 分割偏移（相对片段起点），对齐帧网格，两侧各留至少一帧；不合法返回 null */
@@ -892,6 +1040,7 @@ function splitOverlayOp(s: Scope, op: Record<string, unknown>) {
   const cut = ov.startSeconds + off;
   const left: Overlay = { ...base, endSeconds: cut };
   const right: Overlay = { ...base, id: takeId(s, op.newId, "o"), startSeconds: cut };
+  delete right.morph; // 变形只发生在左半段开头
   if (base.animations) right.animations = shiftAnimations(base.animations, off);
   s.t.overlays.splice(hit.index, 1, left, right);
   trackOfOverlayTouch(s, left.id); trackOfOverlayTouch(s, right.id);
@@ -1021,38 +1170,48 @@ function moveTrackOp(s: Scope, op: Record<string, unknown>) {
   s.touched.add("track:" + hit.track.id);
 }
 
-const BOX_KIND_DEFAULT_W: Record<string, number> = { shape: 0.25, image: 0.4, icon: 0.08, chart: 0.5, text: 0.5 };
+const BOX_KIND_DEFAULT_W: Record<string, number> = { shape: 0.25, image: 0.4, icon: 0.08, chart: 0.5, text: 0.5, plot: 0.6 };
+const DEFAULT_FONT_SIZE: Record<string, number> = { chart: 28, plot: 28, text: 40, math: 72 };
 
 /** 新建一个元素（addOverlay 与幻灯片模板共用）：按 kind 补缺省尺寸与样式，插到 index（缺省末尾 = 最上层） */
 function createOverlay(s: Scope, op: Record<string, unknown>, index?: number): Overlay {
   const inferred = pick(ELEMENT_KINDS, op.kind)
-    ?? (op.shape !== undefined ? "shape" : op.image !== undefined ? "image" : op.icon !== undefined ? "icon" : op.chart !== undefined ? "chart" : undefined);
-  const boxKind = inferred === "shape" || inferred === "image" || inferred === "icon" || inferred === "chart";
-  if (typeof op.text !== "string" && !boxKind && !isObj(op.counter)) fail("addOverlay 缺少 text（形状/图片/图标/图表元素可省略）");
-  const start = clampOr(op.startSeconds, 0, 0, 86400);
+    ?? (op.shape !== undefined ? "shape" : op.image !== undefined ? "image" : op.icon !== undefined ? "icon" : op.chart !== undefined ? "chart"
+      : op.plot !== undefined ? "plot" : typeof op.tex === "string" ? "math" : undefined);
+  const boxKind = inferred === "shape" || inferred === "image" || inferred === "icon" || inferred === "chart" || inferred === "plot";
+  const tex = typeof op.tex === "string" ? op.tex : undefined;
+  if (typeof op.text !== "string" && tex === undefined && !boxKind && inferred !== "camera" && !isObj(op.counter)) fail("addOverlay 缺少 text（形状/图片/图标/图表/坐标系/镜头元素可省略；公式写 LaTeX）");
+  // 镜头没给时间时覆盖整组（一页幻灯片）
+  const groupEls = inferred === "camera" && typeof op.group === "string" ? s.t.overlays.filter((o) => o.group === op.group) : [];
+  const start = clampOr(op.startSeconds, groupEls.length ? Math.min(...groupEls.map((o) => o.startSeconds)) : 0, 0, 86400);
   const { width: W, height: H } = s.t.meta;
   const ov: Overlay = {
     id: takeId(s, op.id, "o"),
-    text: typeof op.text === "string" ? op.text.slice(0, 2000) : "",
+    text: tex ?? (typeof op.text === "string" ? op.text.slice(0, 2000) : ""),
     startSeconds: start,
-    endSeconds: clampOr(op.endSeconds, start + 3, 0, 86400),
+    endSeconds: clampOr(op.endSeconds, groupEls.length ? Math.max(...groupEls.map((o) => o.endSeconds)) : start + 3, 0, 86400),
     position: ["top", "center", "bottom"].includes(op.position as string) ? (op.position as Overlay["position"]) : "bottom",
-    fontSize: clampOr(op.fontSize, inferred === "chart" ? 28 : inferred === "text" ? 40 : 48, 4, 2000),
+    fontSize: clampOr(op.fontSize, DEFAULT_FONT_SIZE[inferred ?? ""] ?? 48, 4, 2000),
     color: sanitizeColor(op.color) ?? "#ffffff",
   };
   const patch: Record<string, unknown> = {};
-  for (const key of OVERLAY_KEYS) if (key in op && !["text", "startSeconds", "position", "fontSize", "color"].includes(key)) patch[key] = op[key];
+  for (const key of OVERLAY_KEYS) if (key in op && !["text", "tex", "startSeconds", "position", "fontSize", "color"].includes(key)) patch[key] = op[key];
   patch.endSeconds = ov.endSeconds;
   if (inferred && !("kind" in op)) patch.kind = inferred;
-  if (boxKind || inferred === "text") {
+  if (boxKind || inferred === "text" || inferred === "math" || inferred === "camera") {
     if (!("x" in op)) patch.x = 0.5;
     if (!("y" in op)) patch.y = 0.5;
+  }
+  if (inferred === "camera" && !("w" in op)) patch.w = 1;
+  if (boxKind || inferred === "text") {
     if (!("w" in op)) patch.w = BOX_KIND_DEFAULT_W[inferred!] ?? 0.25;
     if (!("h" in op) && boxKind) {
       const w = clampOr(patch.w, 0.25, 0.002, 4);
       const shapeType = typeof op.shape === "string" ? op.shape : isObj(op.shape) ? op.shape.type : undefined;
       patch.h = (LINE_SHAPES as readonly string[]).includes(String(shapeType)) ? Math.max(0.004, 24 / H)
-        : inferred === "chart" ? 0.45 : inferred === "image" ? 0.4 : Math.min(4, (w * W) / H); // 缺省按像素等宽（正方形/圆）
+        : inferred === "chart" ? 0.45 : inferred === "image" ? 0.4
+        : inferred === "plot" ? Math.min(4, (w * W) / H / 1.6) // 坐标系缺省 16:10
+        : Math.min(4, (w * W) / H); // 缺省按像素等宽（正方形/圆）
     }
   }
   const at = index ?? num(op.index);
@@ -1065,6 +1224,46 @@ function createOverlay(s: Scope, op: Record<string, unknown>, index?: number): O
 
 function addOverlayOp(s: Scope, op: Record<string, unknown>) {
   createOverlay(s, op);
+}
+
+/**
+ * 变形：在 atSeconds 把元素 A 变成「A + patch」。A 在该时刻结束，新元素 B 从该时刻开始，
+ * 开头 duration 秒从 A 连续变成 B（公式推导、形状变形、函数变形……）。可以对 B 继续 transform 形成一串变化。
+ */
+function transformOp(s: Scope, op: Record<string, unknown>) {
+  const hit = findOverlay(s.t, op);
+  if (!hit) fail("找不到要变形的元素「" + String(op.id) + "」");
+  const A = hit!.overlay;
+  if (A.kind === "camera") fail("镜头不能变形；移动镜头请给它打 x/y/scale 关键帧");
+  const frame = frameOf(s.t);
+  const at = snapToFrame(s.t, clampOr(op.atSeconds ?? op.startSeconds, A.endSeconds, 0, 86400));
+  if (at < A.startSeconds + frame || at > A.endSeconds + frame / 2) fail("atSeconds 必须在元素区间内（" + A.startSeconds + "–" + A.endSeconds + "s）");
+  const origEnd = A.endSeconds;
+  const end = Math.max(at + frame, clampOr(op.endSeconds, at < origEnd - frame / 2 ? origEnd : at + 3, 0, 86400));
+  const off = at - A.startSeconds;
+  // B 继承 A 的样子：显式关键帧平移到新起点（progress 去掉，B 一出现就是完整的），预设只留出场/循环
+  const B: Overlay = { ...structuredClone(A), id: takeId(s, op.newId, "o"), startSeconds: at, endSeconds: end };
+  delete B.morph;
+  if (A.animations) {
+    const shifted = shiftAnimations(A.animations, off) as Record<string, Keyframe[] | undefined> | undefined;
+    if (shifted) delete shifted.progress;
+    if (shifted && Object.values(shifted).some((k) => k?.length)) B.animations = shifted as Animations; else delete B.animations;
+  }
+  const keepB = (e: Effect) => ["出场", "循环"].includes(presetGroup(e.preset) ?? "");
+  if (B.effects) { B.effects = B.effects.filter(keepB); if (!B.effects.length) delete B.effects; }
+  if (A.effects) { const kept = A.effects.filter((e) => presetGroup(e.preset) !== "出场"); if (kept.length) A.effects = kept; else delete A.effects; }
+  A.endSeconds = at;
+  s.t.overlays.splice(hit!.index + 1, 0, B);
+  trackOfOverlayTouch(s, A.id);
+  if (isObj(op.patch)) patchOverlay(s, B, op.patch as Record<string, unknown>);
+  const ease = sanitizeEasing(op.ease);
+  B.morph = { from: A.id, duration: clampOr(op.duration, 1, 0.1, Math.max(0.1, Math.min(10, end - at))), ...(ease !== undefined ? { ease } : {}) };
+  trackOfOverlayTouch(s, B.id);
+}
+
+/** 删掉元素后，把以它为变形来源的元素改回普通入场 */
+function dropMorphRefs(s: Scope, removed: Set<string>) {
+  for (const o of s.t.overlays) if (o.morph && removed.has(o.morph.from)) { delete o.morph; trackOfOverlayTouch(s, o.id); }
 }
 
 /** 叠放顺序：front 置顶 / back 置底 / forward 上移一层 / backward 下移一层（只与时间上重叠的元素比较） */
@@ -1136,6 +1335,7 @@ function addSlideOp(s: Scope, op: Record<string, unknown>) {
     title: slideStr(op.title, 200), subtitle: slideStr(op.subtitle, 300), kicker: slideStr(op.kicker, 80),
     items, background: op.background !== false, accent: sanitizeColor(op.accent),
     chart: typeof op.chart === "string" ? op.chart : undefined, image, icon: typeof op.icon === "string" ? op.icon : undefined,
+    formula: slideStr(op.formula ?? op.tex, 1000), fn: slideStr(op.fn, 400),
   }, s.t.meta);
   const group = takeId(s, op.id, "s");
   const track = clamp(Math.round(num(op.track) ?? 0), 0, 31);
@@ -1178,12 +1378,15 @@ function updateGroupOp(s: Scope, op: Record<string, unknown>) {
 function removeGroupOp(s: Scope, op: Record<string, unknown>) {
   const group = typeof op.group === "string" ? op.group : typeof op.id === "string" ? op.id : "";
   const before = s.t.overlays.length;
+  const removed = new Set<string>();
   s.t.overlays = s.t.overlays.filter((o) => {
     if (o.group !== group) return true;
     trackOfOverlayTouch(s, o.id);
+    removed.add(o.id);
     return false;
   });
   if (s.t.overlays.length === before) s.warnings.push("没有 group 为「" + group + "」的元素");
+  dropMorphRefs(s, removed);
 }
 function keyframeOp(s: Scope, op: Record<string, unknown>, mode: "set" | "remove" | "clear") {
   const target = keyframeTarget(s, op.id);
@@ -1346,6 +1549,7 @@ function applyOne(s: Scope, op: Op) {
       if (!hit) { s.warnings.push(typeof o.id === "string" ? "字幕「" + o.id + "」不存在" : "字幕下标越界或 expectText 不匹配（当前共 " + s.t.overlays.length + " 条）"); return; }
       s.t.overlays.splice(hit.index, 1);
       trackOfOverlayTouch(s, hit.overlay.id);
+      dropMorphRefs(s, new Set([hit.overlay.id]));
       return;
     }
     case "updateOverlay": {
@@ -1358,6 +1562,7 @@ function applyOne(s: Scope, op: Op) {
     }
     case "splitOverlay": return splitOverlayOp(s, o);
     case "arrangeOverlay": return arrangeOverlayOp(s, o);
+    case "transform": return transformOp(s, o);
     case "addSlide": return addSlideOp(s, o);
     case "updateGroup": return updateGroupOp(s, o);
     case "removeGroup": return removeGroupOp(s, o);

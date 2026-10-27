@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { ANIM_CHANNELS, BLEND_MODES, CHART_TYPES, DIRECTIONS, EASING_NAMES, ELEMENT_KINDS, LIST_STYLES, SCHEMA_VERSION, SHAPE_TYPES, TEXT_EFFECTS, TRANSITION_TYPES, secToFrames } from "./timeline.js";
-export { ANIM_CHANNELS, BLEND_MODES, CHART_TYPES, DIRECTIONS, EASING_NAMES, ELEMENT_KINDS, LIST_STYLES, SHAPE_TYPES, TEXT_EFFECTS, TRANSITION_TYPES };
+import { ANIM_CHANNELS, BLEND_MODES, CHART_TYPES, DIRECTIONS, EASING_NAMES, ELEMENT_KINDS, LIST_STYLES, PLOT_ITEM_TYPES, SCHEMA_VERSION, SHAPE_TYPES, TEXT_EFFECTS, TRANSITION_TYPES, secToFrames } from "./timeline.js";
+export { ANIM_CHANNELS, BLEND_MODES, CHART_TYPES, DIRECTIONS, EASING_NAMES, ELEMENT_KINDS, LIST_STYLES, PLOT_ITEM_TYPES, SHAPE_TYPES, TEXT_EFFECTS, TRANSITION_TYPES };
 
-// ---------- D剪 时间线 JSON 契约 v6（多轨 + 稳定 id + 幻灯片式元素） ----------
+// ---------- D剪 时间线 JSON 契约 v7（多轨 + 稳定 id + 幻灯片式元素 + 数学动画） ----------
 // 唯一事实源：AI 剪辑操作、面板手动调整都编辑这份 JSON；渲染层吃 JSON 出 mp4。
 //
 // 归一化模型（parseTimeline 输出一律是 v5 结构）：
@@ -12,7 +12,7 @@ export { ANIM_CHANNELS, BLEND_MODES, CHART_TYPES, DIRECTIONS, EASING_NAMES, ELEM
 //   overlays        = 元素层（稳定 id，绝对秒区间）：字幕/标题/文本/形状/图片/图标/图表，kind 区分
 //   markers         = 标记点
 //
-// 兼容：v1 {clips, audio} 自动迁移；v2–v4 缺 id 的字幕在解析时补确定性 id；v5→v6 只增字段。
+// 兼容：v1 {clips, audio} 自动迁移；v2–v4 缺 id 的字幕在解析时补确定性 id；v5→v6→v7 只增字段。
 // 新字段全部可选（additive），旧数据零改动可读。version 高于本引擎支持的数据拒绝加载，防止旧版覆盖新数据。
 
 export const transitionObjectSchema = z.object({
@@ -160,6 +160,12 @@ export const shapeSchema = z.object({
   radius: z.number().min(0).max(2000).optional(), // 圆角（像素）：矩形/对话框
   points: z.number().int().min(3).max(24).optional(), // 星形角数
   inner: z.number().min(0.05).max(0.95).optional(), // 星形内径比 / 圆环内径比
+  // 自由路径（type=path）：坐标系为盒子 0–100（左上 0,0，右下 100,100），给 path（SVG 路径）或 vertices（顶点）之一
+  path: z.string().max(4000).optional(),
+  vertices: z.array(z.tuple([z.number(), z.number()])).max(200).optional(),
+  closed: z.boolean().optional(), // 顶点首尾相连（闭合后可填充）
+  smooth: z.boolean().optional(), // 顶点之间画平滑曲线
+  arrow: z.enum(["start", "end", "both"]).optional(), // 开放路径的箭头
 });
 export const imageSchema = z.object({
   src: z.string().min(1),
@@ -184,6 +190,56 @@ export const chartSchema = z.object({
   decimals: z.number().int().min(0).max(4).optional(),
   trackColor: colorSchema.optional(),
   thickness: z.number().min(0.02).max(1).optional(), // 柱宽/线宽/环宽比例
+});
+// ---- v7 坐标系：数值或表达式（可用 x/t、params 里的参数、带 id 的函数名、pi/e 与常用函数） ----
+const exprSchema = z.union([z.number(), z.string().max(200)]);
+export const plotItemSchema = z.object({
+  type: z.enum(PLOT_ITEM_TYPES),
+  id: z.string().max(12).optional(), // 函数名：fn 设了 id:"f" 后，别的表达式可以写 f(a)
+  fn: z.string().max(200).optional(), // fn：y=f(x)；polar：r=f(t)
+  fx: z.string().max(200).optional(), // param：x=fx(t)
+  fy: z.string().max(200).optional(), // param：y=fy(t)
+  t: z.tuple([exprSchema, exprSchema]).optional(), // param/polar 的 t 范围（缺省 0–2π）
+  domain: z.tuple([exprSchema, exprSchema]).optional(), // fn 的 x 范围（缺省整个坐标系）
+  of: z.string().max(12).optional(), // tangent/area/riemann 作用的函数 id（缺省第一条函数）
+  x: exprSchema.optional(), y: exprSchema.optional(), // 点/标注位置；向量/线段终点；切点横坐标
+  x0: exprSchema.optional(), y0: exprSchema.optional(), // 向量/线段起点（缺省原点）
+  from: exprSchema.optional(), to: exprSchema.optional(), // 面积/黎曼和区间
+  n: exprSchema.optional(), // 黎曼和矩形个数
+  length: z.number().min(0.01).max(1000).optional(), // 切线长度（坐标单位）
+  color: colorSchema.optional(),
+  width: z.number().min(0.5).max(40).optional(), // 线宽（像素）
+  dash: z.boolean().optional(),
+  opacity: z.number().min(0).max(1).optional(), // 面积/黎曼和填充不透明度
+  size: z.number().min(1).max(60).optional(), // 点半径（像素）
+  label: z.string().max(120).optional(), // 标注文字：$…$ 为公式，{表达式} 实时代入数值
+  guides: z.boolean().optional(), // 点到坐标轴的虚线
+  start: z.number().min(0).max(3600).optional(), // 出现时刻（元素内相对秒）；不给则随 progress 依次画出
+  draw: z.number().min(0).max(30).optional(), // 画出用时（秒，缺省 1）
+  end: z.number().min(0).max(3600).optional(), // 消失时刻（元素内相对秒）
+});
+export const plotSchema = z.object({
+  x: z.tuple([z.number(), z.number()]), // 横轴范围 [min, max]
+  y: z.tuple([z.number(), z.number()]),
+  xStep: z.number().positive().optional(), // 刻度间距（缺省自动）
+  yStep: z.number().positive().optional(),
+  grid: z.boolean().optional(), // 背景网格（数轴平面）
+  axes: z.boolean().optional(), // 缺省 true
+  ticks: z.boolean().optional(), // 缺省 true
+  numbers: z.boolean().optional(), // 刻度数字，缺省 true
+  xLabel: z.string().max(60).optional(),
+  yLabel: z.string().max(60).optional(),
+  axisColor: colorSchema.optional(),
+  gridColor: colorSchema.optional(),
+  // 参数：常数或关键帧（t 为元素内相对秒）；表达式里直接用参数名，关键帧让曲线/点/面积随之连续变化
+  params: z.record(z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,11}$/), z.union([z.number(), z.array(keyframeSchema).min(1).max(64)])).optional(),
+  items: z.array(plotItemSchema).max(24),
+});
+// 变形：本元素开头 duration 秒内从 from 元素（通常刚在此刻结束）变成自己
+export const morphSchema = z.object({
+  from: z.string().min(1).max(64),
+  duration: z.number().min(0.1).max(10).optional(), // 缺省 1 秒
+  ease: easingSchema.optional(), // 缺省 inOut
 });
 export const counterSchema = z.object({
   from: z.number(),
@@ -231,7 +287,8 @@ export const overlaySchema = z.object({
     padding: z.number().min(0).max(200).optional(),
     radius: z.number().min(0).max(200).optional(),
   }).optional(),
-  // subtitle 字幕（永远在最上层）/ title 标题 / text 文本框 / shape 形状 / image 图片 / icon 图标 / chart 图表；缺省按字幕
+  // subtitle 字幕（永远在最上层）/ title 标题 / text 文本框 / shape 形状 / image 图片 / icon 图标 / chart 图表 /
+  // math 公式（text 为 LaTeX）/ plot 坐标系 / camera 镜头；缺省按字幕
   kind: z.enum(ELEMENT_KINDS).optional(),
   track: z.number().int().min(0).max(31).optional(),
   // ---- v6 元素 ----
@@ -251,6 +308,9 @@ export const overlaySchema = z.object({
   image: imageSchema.optional(),
   icon: iconSchema.optional(),
   chart: chartSchema.optional(),
+  // ---- v7 数学动画 ----
+  plot: plotSchema.optional(),
+  morph: morphSchema.optional(),
 });
 
 export const markerSchema = z.object({
@@ -267,7 +327,7 @@ const metaSchema = z.object({
   background: colorSchema.optional(),
 });
 
-// 输入：v1–v6 字段都收（字幕/标记 id 可缺，由归一化补齐）
+// 输入：v1–v7 字段都收（字幕/标记 id 可缺，由归一化补齐）
 const timelineInputSchema = z.object({
   meta: metaSchema,
   version: z.number().int().optional(),
@@ -303,6 +363,9 @@ export type Overlay = z.infer<typeof overlaySchema>;
 export type Fill = z.infer<typeof fillSchema>;
 export type ShapeSpec = z.infer<typeof shapeSchema>;
 export type ChartSpec = z.infer<typeof chartSchema>;
+export type PlotSpec = z.infer<typeof plotSchema>;
+export type PlotItem = z.infer<typeof plotItemSchema>;
+export type MorphSpec = z.infer<typeof morphSchema>;
 export type Marker = z.infer<typeof markerSchema>;
 export type Meta = z.infer<typeof metaSchema>;
 export type Timeline = z.infer<typeof timelineSchema>;
@@ -339,7 +402,7 @@ export const hash36 = (s: string): string => {
 
 type Input = z.infer<typeof timelineInputSchema>;
 
-// v1 → v6 迁移 + 不变量维护（至少一条视频轨、id 全局唯一、时长至少一帧）
+// v1 → v7 迁移 + 不变量维护（至少一条视频轨、id 全局唯一、时长至少一帧）
 function normalize(input: Input): Timeline {
   const fps = input.meta.fps;
   const frame = 1 / fps;

@@ -12,6 +12,7 @@ import { parseTimeline, type Timeline } from "./schema.js";
 import { timelineDurationInFrames } from "./timeline.js";
 import { resolveRenderBrowser } from "./browser.js";
 import { muxNativeAudio, resolveRenderBinaries, useNativeAudio } from "./nativeRuntime.js";
+import { layoutTex } from "./mathServer.js";
 
 const ENGINE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SRC_DIR = path.join(ENGINE_ROOT, "src");
@@ -154,6 +155,8 @@ export interface AssetContext {
   assetBase: string;
   /** 内置字体 HTTP 基址（…/fonts） */
   fontsBase?: string;
+  /** 公式排版接口（…/api/math） */
+  mathBase?: string;
 }
 
 export interface FrameResult {
@@ -185,7 +188,7 @@ export async function renderFrames(opts: AssetContext & {
   const format = opts.format ?? "jpeg";
   const maxSize = Math.max(64, opts.maxSize ?? 1280);
   const serveUrl = await getServeUrl();
-  const inputProps = { timeline, assetBase: opts.assetBase, fontsBase: opts.fontsBase };
+  const inputProps = { timeline, assetBase: opts.assetBase, fontsBase: opts.fontsBase, mathBase: opts.mathBase };
   const cancelSignal = linkSignal(opts.signal);
   return withBrowser(async (puppeteerInstance) => {
     const composition = await selectComposition({ serveUrl, id: "TimelineVideo", inputProps, puppeteerInstance, chromiumOptions, timeoutInMilliseconds: 120_000 });
@@ -233,14 +236,14 @@ export interface RenderOptions extends Partial<AssetContext> {
 export async function renderVideo(opts: RenderOptions): Promise<{ outFile: string; durationInFrames: number; fps: number }> {
   if (!opts.assetBase) {
     if (!opts.assetsDir) throw new Error("缺少素材来源（assetBase 或 assetsDir）");
-    return withStaticAssets(opts.assetsDir, (assetBase, fontsBase) => renderVideo({ ...opts, assetsDir: undefined, assetBase, fontsBase: opts.fontsBase ?? fontsBase }));
+    return withStaticAssets(opts.assetsDir, (assetBase, fontsBase, mathBase) => renderVideo({ ...opts, assetsDir: undefined, assetBase, fontsBase: opts.fontsBase ?? fontsBase, mathBase: opts.mathBase ?? mathBase }));
   }
   const timeline: Timeline = parseTimeline(opts.timeline);
   const durationInFrames = Math.max(1, timelineDurationInFrames(timeline));
   const binariesDirectory = await resolveRenderBinaries();
   const separateAudio = binariesDirectory ? await useNativeAudio(binariesDirectory) : false;
   const serveUrl = await getServeUrl();
-  const inputProps = { timeline, assetBase: opts.assetBase, fontsBase: opts.fontsBase };
+  const inputProps = { timeline, assetBase: opts.assetBase, fontsBase: opts.fontsBase, mathBase: opts.mathBase };
   const outFile = path.resolve(opts.outFile);
   fs.mkdirSync(path.dirname(outFile), { recursive: true });
   const scratch = separateAudio ? fs.mkdtempSync(path.join(path.dirname(outFile), ".djian-render-")) : null;
@@ -274,8 +277,8 @@ export async function renderVideo(opts: RenderOptions): Promise<{ outFile: strin
 
 /** 单帧 PNG 落盘（旧 API，CLI/调试用） */
 export async function renderFrame(opts: { timeline: unknown; timeSeconds: number; outFile: string; assetsDir: string }) {
-  return withStaticAssets(opts.assetsDir, async (assetBase, fontsBase) => {
-    const r = await renderFrames({ timeline: opts.timeline, seconds: [opts.timeSeconds], assetBase, fontsBase, format: "png", maxSize: 16384 });
+  return withStaticAssets(opts.assetsDir, async (assetBase, fontsBase, mathBase) => {
+    const r = await renderFrames({ timeline: opts.timeline, seconds: [opts.timeSeconds], assetBase, fontsBase, mathBase, format: "png", maxSize: 16384 });
     fs.mkdirSync(path.dirname(opts.outFile), { recursive: true });
     fs.writeFileSync(opts.outFile, r.buffer);
     return { outFile: opts.outFile, frame: r.frames[0], width: r.width, height: r.height };
@@ -289,11 +292,16 @@ const MIME: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
-/** 临时只读静态服务（命令行导出/测试用）：/a/<素材>、/fonts/<字体>，支持单段 Range */
-export async function withStaticAssets<T>(assetsDir: string, fn: (assetBase: string, fontsBase: string) => Promise<T>): Promise<T> {
+/** 临时只读静态服务（命令行导出/测试用）：/a/<素材>、/fonts/<字体>、/api/math 公式排版，支持单段 Range */
+export async function withStaticAssets<T>(assetsDir: string, fn: (assetBase: string, fontsBase: string, mathBase: string) => Promise<T>): Promise<T> {
   const roots: Record<string, string> = { a: path.resolve(assetsDir), fonts: path.join(ENGINE_ROOT, "fonts") };
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (url.pathname === "/api/math") {
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify(layoutTex(url.searchParams.get("tex") ?? "")));
+      return;
+    }
     const [, scope, ...rest] = url.pathname.split("/");
     const root = roots[scope];
     const name = decodeURIComponent(rest.join("/"));
@@ -318,7 +326,7 @@ export async function withStaticAssets<T>(assetsDir: string, fn: (assetBase: str
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const port = (server.address() as { port: number }).port;
   try {
-    return await fn("http://127.0.0.1:" + port + "/a/", "http://127.0.0.1:" + port + "/fonts");
+    return await fn("http://127.0.0.1:" + port + "/a/", "http://127.0.0.1:" + port + "/fonts", "http://127.0.0.1:" + port + "/api/math");
   } finally {
     server.close();
   }

@@ -21,6 +21,7 @@ export class RenderService {
 
   assetBase(pid) { return this.baseUrl + '/api/p/' + encodeURIComponent(pid) + '/media/'; }
   get fontsBase() { return this.baseUrl + '/fonts'; }
+  get mathBase() { return this.baseUrl + '/api/math'; }
 
   warmup() {
     return warmup().then(() => console.log('[djian] 渲染器已预热'), (e) => console.warn('[djian] 渲染器预热失败（首次取帧时重试）：', e.message));
@@ -41,7 +42,7 @@ export class RenderService {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 150_000);
       try {
-        const r = await renderFrames({ timeline: t, seconds: list, assetBase: this.assetBase(pid), fontsBase: this.fontsBase, format, maxSize, signal: controller.signal });
+        const r = await renderFrames({ timeline: t, seconds: list, assetBase: this.assetBase(pid), fontsBase: this.fontsBase, mathBase: this.mathBase, format, maxSize, signal: controller.signal });
         let stats = null;
         if (analyze && !r.sheet) {
           try { stats = await analyzeImage(r.buffer); } catch (e) { stats = { error: '画面统计不可用：' + e.message }; }
@@ -80,7 +81,7 @@ export class RenderService {
     this.activeJob = job;
     while (this.jobs.size > 20) this.jobs.delete(this.jobs.keys().next().value);
     renderVideo({
-      timeline: p.timeline, outFile: job.outFile, assetBase: this.assetBase(pid), fontsBase: this.fontsBase,
+      timeline: p.timeline, outFile: job.outFile, assetBase: this.assetBase(pid), fontsBase: this.fontsBase, mathBase: this.mathBase,
       scale: s, crf: CRF[quality], signal: controller.signal,
       onProgress: (pr) => {
         if (job.status !== 'rendering') return;

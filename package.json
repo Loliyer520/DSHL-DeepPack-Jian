@@ -4,7 +4,7 @@
   "private": true,
   "description": "D剪 — JSON 时间线驱动的 AI+人协同视频剪辑：引擎、剪辑面板、宿主桥接插件与 dsh 整合包",
   "scripts": {
-    "build:engine": "tsc -p packages/engine/tsconfig.build.json",
+    "build:engine": "tsc -p packages/engine/tsconfig.build.json && node packages/engine/scripts/build-mathjax.mjs",
     "build:client": "npm run bundle:timeline && npm run bundle:library",
     "bundle:timeline": "tsdown -c packages/client-timeline/tsdown.config.ts",
     "bundle:library": "tsdown -c packages/client-library/tsdown.config.ts",
@@ -31,7 +31,8 @@
     "zod": "3.25.76",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
-    "@types/node": "^22.10.0"
+    "@types/node": "^22.10.0",
+    "mathjax-full": "3.2.2"
   },
   "engines": {
     "node": ">=22.18"

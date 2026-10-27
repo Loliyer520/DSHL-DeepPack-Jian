@@ -37,9 +37,19 @@ v6 同样只加可选字段：每条 `overlay` 都是一个**画面元素**，`k
 - **叠放**：非字幕元素按（`track`，数组下标）从下到上叠放，字幕始终在最上层；`arrangeOverlay` 调整顺序（只与时间上重叠的元素比较）。
 - **动画通道**：新增 `clipL/clipR/clipT/clipB`（擦除，渲染为 `clip-path: inset`）与 `progress`（打字机、描边绘制、数字滚动、图表生长，缺省 1）。**行为变化**：文字的 `x/y` 位移关键帧现在与画中画一致，按画布比例计算（以前按文字自身尺寸），旧项目里文字的位移动画幅度会不同。
 
+## 时间线 schema v7（数学动画）
+
+v7 仍只加可选字段，但旧版引擎读到会丢掉这些字段，所以版本号升到 7（旧版引擎以只读打开新数据，不会覆盖）。
+
+- **公式** `kind:"math"`：`text` 是 LaTeX（自动去掉 `$…$`、`\[…\]` 定界符），按 `fontSize` 自然大小排版，`x/y` 为中心。排版在引擎服务端做：构建时把 `mathjax-full` 连同入口（`engine/mathjax/entry.ts`）打成 `dist/mathjax.cjs`，运行时没有额外依赖；`GET /api/math?tex=` 把 SVG 拍平成「字形片」（每片：匹配键 = Unicode 码位或「rect:mfrac」等、绝对变换矩阵、`\color` 颜色）。面板与导出都从这个接口取数并缓存，导出时用 `delayRender` 等排版就绪；面板包体积不含 MathJax。`progress` 驱动逐笔书写（按字形从左到右错开，先描边后填色）。`applyOps` 的 `checkTex`（服务端提供）把 LaTeX 错误作为警告回给模型。
+- **坐标系** `kind:"plot"`：`plot{x, y, xStep?, yStep?, grid?, axes?, ticks?, numbers?, xLabel?, yLabel?, params?, items[]}`。对象类型 fn / param / polar / point / tangent / area / riemann / vector / segment / label；表达式由 `engine/src/expr.ts` 解析成闭包求值（不用 `eval`，支持隐式乘法、`|x|`、`n!`、带 id 的用户函数互相引用）。`params` 里的参数可写成关键帧，表达式引用参数即形成联动。没有 `start` 的对象随 `progress` 依次画出，有 `start/draw/end` 的按元素内时间出现与消失。净化时检查表达式语法与未定义的名字并给出警告。
+- **变形** `morph{from, duration?, ease?}`：元素开头 duration 秒从 `from` 元素的最终状态变成自己。`transform{id, atSeconds, patch}` 一步完成「A 在此结束、B=A+patch 接上并带 morph」，关键帧平移到新起点，出场/循环预设移到 B。渲染（`morph.tsx`）：公式→公式先做保序的序列比对（相同字符才配对、仿射间隙罚分让整段尽量连续），剩余字形再按字符配对允许交叉，配对的字形插值变换矩阵与颜色、其余淡入淡出；形状→形状把两条轮廓按弧长各取 120 点、统一方向并找最佳起点后逐点插值（`paths.ts` 解析含圆弧的全部 SVG 命令）；坐标系→坐标系在对象结构相同时把两边的表达式（参数先代入数值）线性混合、坐标范围插值；其他组合用 `Freeze` 冻结 A 的最后一帧与 B 的变形完成帧，位置大小过渡并交叉淡化。删除来源元素时清掉引用。
+- **镜头** `kind:"camera"`：不渲染，描述镜头框——`x/y` 中心、`w` 宽度（1 = 全画面），`x/y/scale` 关键帧移动/缩放镜头框。合成时每个元素外包一层 `CameraLayer`，按绝对时刻找到作用于它的镜头（同组优先，其次不分组的全局镜头，字幕不受影响）并施加变换。面板选中镜头时关掉镜头效果、显示镜头框；画布编辑把舞台坐标经镜头逆变换换算回画布比例。
+- **自由路径** `shape.type:"path"`：`path`（SVG 路径）或 `vertices`（可 `smooth` Catmull-Rom、`closed`），坐标为盒子 0–100；开放路径可加 `arrow`，末端按切线方向让出箭头长度。
+
 ### 幻灯片模板
 
-`addSlide` 把模板（12 种）× 主题（6 套）展开成一组普通元素，共享一个 `group`，元素 id 由分组 id 推出（`<group>e<i>`），面板乐观插入与服务端结果一致。版式按画布横竖自动切换，字号按短边缩放。整页缺省插在最下层（不遮挡已有元素），元素之间按出场先后错开。`updateGroup`（整体移动/改时长/解组/批量改）与 `removeGroup` 操作整页；面板时间线把同组元素合并成一块显示。
+`addSlide` 把模板（14 种，含 formula、graph）× 主题（7 套，含 math）展开成一组普通元素，共享一个 `group`，元素 id 由分组 id 推出（`<group>e<i>`），面板乐观插入与服务端结果一致。版式按画布横竖自动切换，字号按短边缩放。整页缺省插在最下层（不遮挡已有元素），元素之间按出场先后错开。`updateGroup`（整体移动/改时长/解组/批量改）与 `removeGroup` 操作整页；面板时间线把同组元素合并成一块显示。
 
 ## 协同协议
 
@@ -90,7 +100,7 @@ v6 同样只加可选字段：每条 `overlay` 都是一个**画面元素**，`k
 
 ## 渲染
 
-`TimelineVideo.tsx` 同时用于面板预览（`@remotion/player`）与导出/取帧（`@remotion/renderer`），保证所见即所得。引擎服务常驻一个 Chrome 实例并预热（本机 Chrome/Edge 用新版无头模式——Chromium 132 起移除了旧版；本机浏览器起不来时改用 Remotion 自带的无头浏览器）；整合包随附预构建（压缩、无 source map）的 Remotion bundle，按源码哈希校验，不一致时才在临时目录现打包。取帧单帧按比例缩放输出，多帧逐张渲染后拼成联系表；导出走 `renderMedia`，系统编码器只有原生 AAC 时先无损混音再编码。
+`TimelineVideo.tsx` 同时用于面板预览（`@remotion/player`）与导出/取帧（`@remotion/renderer`），保证所见即所得。公式排版接口通过 `mathBase` 传入（引擎服务 `/api/math`；命令行导出的临时静态服务也提供同一接口）。引擎服务常驻一个 Chrome 实例并预热（本机 Chrome/Edge 用新版无头模式——Chromium 132 起移除了旧版；本机浏览器起不来时改用 Remotion 自带的无头浏览器）；整合包随附预构建（压缩、无 source map）的 Remotion bundle，按源码哈希校验，不一致时才在临时目录现打包。取帧单帧按比例缩放输出，多帧逐张渲染后拼成联系表；导出走 `renderMedia`，系统编码器只有原生 AAC 时先无损混音再编码。
 
 Remotion 自带的 FFmpeg 是精简版（没有 `fps`/`tile` 滤镜、没有 `lavfi` 解码与裸 PCM 封装）：胶片缩略图用输出端 `-r` 抽样成一组小图，波形用 WAV 输出并跳过 RIFF 头，编码器自检用 `image2pipe` 喂一张内嵌 PNG。
 

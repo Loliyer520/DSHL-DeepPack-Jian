@@ -1,7 +1,7 @@
 // 本地联调：用真实 dsh web 宿主 + 整合包补丁 + 假模型跑起 D剪，供浏览器手动/自动化检查面板。
 // 用法：node tests/integration/dsh-serve.mjs <@deepseek-ai/dsh 安装目录> [web 端口，默认 7788]
 // 假模型：用户消息含「演示」时调用 djian_apply_ops 加一条字幕（演示 AI 与人同时编辑），含「演示幻灯片」时用 addSlide 做两页，
-// 其余回复“好的”。不调用任何收费模型。
+// 含「演示数学动画」时做公式变形 + 函数联动 + 镜头，其余回复“好的”。不调用任何收费模型。
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,9 +31,29 @@ const fakeLlm = http.createServer((req, res) => {
     const wantsTool = Array.isArray(json.tools) && json.tools.length && userText.includes('演示') && last?.role !== 'tool';
     // 「演示幻灯片」：用原生元素做两页（数据页 + 卡片页），演示 AI 不再导入渲染好的图片
     const turnStart = msgs.map((m) => m.role === 'assistant' && !m.tool_calls?.length).lastIndexOf(true);
-    const slides = msgs.slice(turnStart + 1).some((m) => m.role === 'user' && String(typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? '')).includes('幻灯片'));
+    const turnText = msgs.slice(turnStart + 1).filter((m) => m.role === 'user').map((m) => String(typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? ''))).join(' ');
+    const slides = turnText.includes('幻灯片');
+    // 「演示数学动画」：公式书写 + 推导变形，函数图像 + 参数联动（点、切线、面积）+ 镜头推近
+    const math = turnText.includes('数学');
     if (wantsTool) {
-      const args = JSON.stringify(slides
+      const g = 'm' + (++seq);
+      const args = JSON.stringify(math
+        ? {
+          ops: [
+            { op: 'addSlide', id: g + 'a', template: 'formula', theme: 'math', kicker: 'IDENTITY · 完全平方', title: '展开 (a+b)²', formula: '(a+b)^2', subtitle: '同一个式子，换一种写法', startSeconds: 0, duration: 6 },
+            { op: 'transform', id: g + 'ae3', atSeconds: 3, duration: 1.4, patch: { text: '{\\color{#58C4DD}a}^2 + 2{\\color{#58C4DD}a}{\\color{#F7D96F}b} + {\\color{#F7D96F}b}^2' } },
+            { op: 'addSlide', id: g + 'b', template: 'graph', theme: 'math', kicker: 'DERIVATIVE · 导数', title: '切线的斜率', fn: 'x^2/2', startSeconds: 6, duration: 8 },
+            { op: 'updateOverlay', id: g + 'be3', patch: { plot: { x: [-3.5, 3.5], y: [-1, 5], params: { a: [{ t: 2.4, v: -2, e: 'inOut' }, { t: 6, v: 2 }] }, items: [
+              { type: 'fn', id: 'f', fn: 'x^2/2', color: '#58C4DD', label: '$y=\\frac{x^2}{2}$' },
+              { type: 'area', of: 'f', from: -2, to: 'a', start: 2.2, draw: 0.4, color: '#F7D96F', opacity: 0.25 },
+              { type: 'tangent', of: 'f', x: 'a', length: 2.6, start: 2.2, color: '#83C167' },
+              { type: 'point', of: 'f', x: 'a', label: '斜率 = {a}', guides: true, start: 2.2, color: '#FC6255' },
+            ] } } },
+            { op: 'addOverlay', kind: 'camera', group: g + 'b', name: '镜头', animations: { scale: [{ t: 5.4, v: 1, e: 'inOut' }, { t: 7, v: 0.55 }], x: [{ t: 5.4, v: 0, e: 'inOut' }, { t: 7, v: 0.13 }], y: [{ t: 5.4, v: 0, e: 'inOut' }, { t: 7, v: -0.04 }] } },
+          ],
+          label: 'AI 演示：数学动画',
+        }
+        : slides
         ? {
           ops: [
             { op: 'addSlide', template: 'stats', theme: 'tech', kicker: 'DATA · 上线三十天', title: '用户增长', startSeconds: 0, duration: 5, items: [{ value: 12800, suffix: '+', title: '活跃会话', text: '日均 420 次' }, { value: 98.6, suffix: '%', title: '满意度' }, { value: 3, suffix: ' 秒', title: '平均响应' }] },
@@ -45,7 +65,7 @@ const fakeLlm = http.createServer((req, res) => {
       res.write(chunk({ role: 'assistant', content: null, tool_calls: [{ index: 0, id: 'call_' + Date.now(), type: 'function', function: { name: 'djian_apply_ops', arguments: args } }] }, null));
       res.write(chunk({}, 'tool_calls'));
     } else {
-      res.write(chunk({ role: 'assistant', content: last?.role === 'tool' ? (slides ? '两页幻灯片做好了：文字、图标、数字都是可编辑的元素，可以在画面上直接点选修改。' : '已加好字幕，你可以在时间线上继续调整。') : '好的' }, null));
+      res.write(chunk({ role: 'assistant', content: last?.role === 'tool' ? (math ? '做好了两段数学动画：公式逐笔写出后推导变形；函数图像上的点、切线和面积随参数 a 联动，最后镜头推近到切点。公式、曲线都是可编辑的元素。' : slides ? '两页幻灯片做好了：文字、图标、数字都是可编辑的元素，可以在画面上直接点选修改。' : '已加好字幕，你可以在时间线上继续调整。') : '好的' }, null));
       res.write(chunk({}, 'stop'));
     }
     res.end('data: [DONE]\n\n');

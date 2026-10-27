@@ -5,6 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { parseTimeline, validateTimeline, TimelineVersionError } from '../../engine/dist/schema.js';
 import { applyOps, normalizeOp } from '../../engine/dist/ops.js';
+import { texError } from '../../engine/dist/mathServer.js';
 import { diffTimelines } from '../../engine/dist/diff.js';
 import { describeBatch } from '../../engine/dist/describe.js';
 import { atomicWriteJson, readJsonFile } from './storage.mjs';
@@ -301,6 +302,7 @@ export class Store {
       actor: system ? 'system' : actor,
       assetExists: (src) => this.assetExists(id, src),
       assetDuration: (src) => this.assetDuration(id, src),
+      checkTex: texError,
     });
     const issues = validateTimeline(result.timeline);
     if (issues.length) {

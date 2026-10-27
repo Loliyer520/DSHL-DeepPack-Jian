@@ -19,7 +19,7 @@ const base = () => parseTimeline({
 
 test('legacy overlays get deterministic ids and the current schema version', () => {
   const a = base(), b = base();
-  assert.equal(a.version, 6);
+  assert.equal(a.version, 7);
   assert.equal(a.overlays[0].id, b.overlays[0].id);
   assert.notEqual(a.overlays[0].id, a.overlays[1].id);
   assert.deepEqual(validateTimeline(a), []);

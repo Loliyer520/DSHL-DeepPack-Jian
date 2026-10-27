@@ -3,8 +3,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Player, type PlayerRef } from '@remotion/player';
 import { TimelineVideo } from '../../../../engine/src/TimelineVideo';
 import { timelineDurationInFrames, timelineHasContent } from '../../../../engine/src/timeline';
-import { assetBaseUrl, fontsBaseUrl, mediaUrl } from '../engine';
+import { labelTex, prefetchMath } from '../../../../engine/src/math';
+import { assetBaseUrl, engineBase, fontsBaseUrl, mediaUrl } from '../engine';
 import { useEditor, useStore } from '../context';
+import { useSelection } from '../selection';
 import type { Actions } from '../actions';
 import { StageCanvas, type Rect } from './StageCanvas';
 
@@ -40,7 +42,20 @@ export function PreviewPane({ actions }: { actions: Actions }) {
       .then((r) => { if (!r.ok) show(); })
       .catch(show);
   }, [pid]);
-  const inputProps = useMemo(() => (timeline && project ? { timeline, assetBase: assetBaseUrl(project.id), fontsBase: fontsBaseUrl(), onMediaError } : null), [timeline, project, onMediaError]);
+  // 选中镜头时关掉镜头效果：看到整个画布与镜头框，才能拖动取景
+  const { primary } = useSelection(ed.sel);
+  const cameraOff = Boolean(primary?.kind === 'overlay' && timeline?.overlays.find((o) => o.id === primary.id)?.kind === 'camera');
+  const mathBase = engineBase() + '/api/math';
+  // 公式提前排版：播放到公式时不用再等网络
+  useEffect(() => {
+    if (!timeline) return;
+    const texts = timeline.overlays.flatMap((o) => [
+      ...(o.kind === 'math' ? [o.text] : []),
+      ...(o.plot ? [o.plot.xLabel, o.plot.yLabel, ...o.plot.items.map((it) => it.label)].map((l) => (l ? labelTex(l) : undefined)).filter((l): l is string => Boolean(l)) : []),
+    ]);
+    if (texts.length) prefetchMath(mathBase, texts);
+  }, [timeline, mathBase]);
+  const inputProps = useMemo(() => (timeline && project ? { timeline, assetBase: assetBaseUrl(project.id), fontsBase: fontsBaseUrl(), mathBase, cameraOff, onMediaError } : null), [timeline, project, onMediaError, mathBase, cameraOff]);
   if (!timeline || !inputProps) return <div className="dj-stage-empty">正在连接剪辑引擎…</div>;
   ed.clock.fps = timeline.meta.fps;
   const duration = Math.max(1, timelineDurationInFrames(timeline));
@@ -68,7 +83,7 @@ export function PreviewPane({ actions }: { actions: Actions }) {
         style={{ width: '100%', height: '100%' }}
       />
       {!timelineHasContent(timeline) && <div className="dj-stage-empty"><b>从素材库拖入视频、图片或音频开始剪辑</b><span>也可以直接在对话里让 AI 帮你剪</span></div>}
-      {rect.width > 0 && <StageCanvas rect={rect} timeline={timeline} stage={wrap} actions={actions} />}
+      {rect.width > 0 && <StageCanvas rect={rect} timeline={timeline} stage={wrap} actions={actions} cameraOff={cameraOff} />}
       {failure && (
         <div className="dj-stage-error" role="alert">
           <b>预览暂时不可用</b><span>{failure}</span>

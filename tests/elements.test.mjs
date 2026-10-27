@@ -172,10 +172,10 @@ test('presets: new channels are valid, progress presets combine with entrance pr
   assert.equal(r.timeline.overlays[0].animations.clipR[0].v, 1, '裁剪通道钳在 0–1');
 });
 
-test('schema v6 reads v5 data and refuses newer data', () => {
+test('schema v7 reads v5 data and refuses newer data', () => {
   const v5 = parseTimeline({ meta: { fps: 30, width: 1280, height: 720 }, version: 5, videoTracks: [{ id: 'v', clips: [] }], audioTracks: [], overlays: [{ id: 'o', text: 'hi', startSeconds: 0, endSeconds: 1, kind: 'title' }] });
-  assert.equal(v5.version, 6);
-  assert.throws(() => parseTimeline({ ...v5, version: 7 }), TimelineVersionError);
+  assert.equal(v5.version, 7);
+  assert.throws(() => parseTimeline({ ...v5, version: 8 }), TimelineVersionError);
 });
 
 test('renderer helpers: rich-text markup, number formatting and shape paths', async () => {
