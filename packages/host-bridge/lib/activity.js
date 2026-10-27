@@ -11,7 +11,7 @@ const sec = (v) => {
   const m = Math.floor(v / 60);
   return m + ':' + (v - m * 60).toFixed(2).padStart(5, '0');
 };
-const MODE = { main: '主轨', pip: '画中画', audio: '音频', subs: '字幕', text: '文字', subtitle: '字幕', title: '标题', shape: '形状', image: '图片元素', icon: '图标', chart: '图表' };
+const MODE = { main: '主轨', pip: '画中画', audio: '音频', subs: '字幕', text: '文字', subtitle: '字幕', title: '标题', shape: '形状', image: '图片元素', icon: '图标', chart: '图表', math: '公式', plot: '坐标系', camera: '镜头' };
 
 export class SessionState {
   constructor(sessionId) {
