@@ -1,8 +1,8 @@
 // 面板样式：一套设计令牌（映射宿主 --dsw-alias-* 语义色，提供暗色兜底），按 .dj- 前缀隔离。
 // 插件卸载时移除 <style>（index.tsx 的 effect 负责）。
 export const CSS = String.raw`
-/* 设计令牌：右键菜单经 portal 挂到 body 上，不在 .dj-root 内，所以也要声明 */
-.dj-root,.dj-menu{--dj-bg:var(--dsw-alias-bg-base,#121214);--dj-s1:var(--dsw-alias-bg-layer-1,#1a1a1d);--dj-s2:var(--dsw-alias-bg-layer-2,#222226);--dj-s3:var(--dsw-alias-bg-layer-3,#2b2b30);
+/* 设计令牌：右键菜单/插入面板经 portal 挂到 body 上，不在 .dj-root 内，所以也要声明 */
+.dj-root,.dj-menu,.dj-pop{--dj-bg:var(--dsw-alias-bg-base,#121214);--dj-s1:var(--dsw-alias-bg-layer-1,#1a1a1d);--dj-s2:var(--dsw-alias-bg-layer-2,#222226);--dj-s3:var(--dsw-alias-bg-layer-3,#2b2b30);
 --dj-t1:var(--dsw-alias-label-primary,#ececef);--dj-t2:var(--dsw-alias-label-secondary,#b4b4bb);--dj-t3:var(--dsw-alias-label-tertiary,#86868f);
 --dj-line:var(--dsw-alias-border-l2,rgba(255,255,255,.1));--dj-line2:var(--dsw-alias-border-l3,rgba(255,255,255,.16));--dj-hover:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.06));
 --dj-accent:var(--dsw-alias-button-primary-fill,#4d6bfe);--dj-on-accent:var(--dsw-alias-label-primary-foreground,#fff);--dj-hl:var(--dsw-alias-button-info-fill,#7aaaff);--dj-danger:var(--dsw-alias-state-error-primary,#f0505a);--dj-ok:var(--dsw-alias-state-success-primary,#34b27b);--dj-warn:var(--dsw-alias-state-warn-primary,#f2a43a);
@@ -51,9 +51,16 @@ export const CSS_STAGE = String.raw`
 .dj-gizmo b{position:absolute;width:10px;height:10px;background:#fff;border:1.5px solid var(--dj-hl);border-radius:2px}
 .dj-gizmo b[data-h=nw]{left:-6px;top:-6px;cursor:nwse-resize}.dj-gizmo b[data-h=ne]{right:-6px;top:-6px;cursor:nesw-resize}
 .dj-gizmo b[data-h=sw]{left:-6px;bottom:-6px;cursor:nesw-resize}.dj-gizmo b[data-h=se]{right:-6px;bottom:-6px;cursor:nwse-resize}
+.dj-gizmo b[data-h=n]{left:calc(50% - 5px);top:-6px;cursor:ns-resize}.dj-gizmo b[data-h=s]{left:calc(50% - 5px);bottom:-6px;cursor:ns-resize}
+.dj-gizmo b[data-h=e]{top:calc(50% - 5px);right:-6px;cursor:ew-resize}.dj-gizmo b[data-h=w]{top:calc(50% - 5px);left:-6px;cursor:ew-resize}
+.dj-gizmo b,.dj-gizmo i{pointer-events:auto;touch-action:none}
+.dj-gizmo .dj-rot{position:absolute;left:calc(50% - 6px);top:-30px;width:12px;height:12px;border-radius:50%;background:#fff;border:1.5px solid var(--dj-hl);cursor:grab}
+.dj-gizmo .dj-rot::after{content:"";position:absolute;left:4.5px;top:11px;width:1.5px;height:17px;background:var(--dj-hl)}
+.dj-gizmo.dj-multi{outline-style:dashed;outline-width:1px}
+.dj-picker{position:absolute;pointer-events:auto;touch-action:none}
 .dj-guide{position:absolute;background:#f0f;pointer-events:none;opacity:.8}
 .dj-guide.dj-v{top:0;bottom:0;width:1px}.dj-guide.dj-h{left:0;right:0;height:1px}
-.dj-textedit{position:absolute;pointer-events:auto;background:rgba(0,0,0,.6);color:#fff;border:1.5px solid var(--dj-hl);border-radius:4px;font:inherit;resize:none;padding:4px 6px;outline:none;text-align:center}
+.dj-textedit{position:absolute;pointer-events:auto;background:rgba(0,0,0,.6);color:#fff;border:1.5px solid var(--dj-hl);border-radius:4px;font:inherit;resize:none;padding:4px 6px;outline:none;text-align:center;box-sizing:border-box}
 .dj-stage-empty,.dj-stage-error{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#bbb;text-align:center;padding:16px}
 .dj-stage-error{background:rgba(0,0,0,.82)}
 .dj-time{font-variant-numeric:tabular-nums;font-size:12px;color:var(--dj-t2);background:transparent;border:0;cursor:pointer;padding:2px 6px;border-radius:var(--dj-r1)}
@@ -226,5 +233,43 @@ export const CSS_PANELS = String.raw`
 .dj-root.dj-narrow .dj-hide-narrow{display:none}
 .dj-root:focus{outline:none}
 .dj-scrub:focus{cursor:text}
+/* ---- 元素：时间线块、插入面板、属性面板选择器 ---- */
+.dj-clip.dj-text[data-ek=slide]{background:linear-gradient(180deg,color-mix(in srgb,#0ea5e9 42%,#04121c),color-mix(in srgb,#0ea5e9 26%,#04121c))}
+.dj-clip.dj-text[data-ek=shape],.dj-clip.dj-text[data-ek=icon]{background:color-mix(in srgb,#ec4899 40%,#1c0612)}
+.dj-clip.dj-text[data-ek=image]{background:color-mix(in srgb,#22c55e 34%,#06180c)}
+.dj-clip.dj-text[data-ek=chart]{background:color-mix(in srgb,#a855f7 40%,#14061c)}
+.dj-clip.dj-text[data-ek=text]{background:color-mix(in srgb,var(--dj-text) 34%,#1d1404)}
+.dj-substart{position:absolute;top:0;bottom:0;width:1px;background:rgba(255,255,255,.3);pointer-events:none}
+.dj-insert-btn{height:26px;padding:0 8px;margin-right:2px;gap:4px;font-size:12px;flex:none}
+.dj-insert-btn .dj-icon{width:14px;height:14px}
+.dj-pop{position:fixed;z-index:1000;width:360px;max-width:calc(100vw - 8px);max-height:min(70vh,560px);display:flex;flex-direction:column;border-radius:var(--dj-r3);background:var(--dj-s1);color:var(--dj-t1);font:13px/1.45 var(--dj-font);box-shadow:var(--dsw-elevation-prominent,0 16px 40px rgba(0,0,0,.45));box-sizing:border-box}
+.dj-pop *{box-sizing:border-box}
+.dj-pop .dj-subtabs{margin:0;padding:4px 4px 0}
+.dj-pop .dj-tabs button{display:flex;align-items:center;justify-content:center;gap:3px;padding:0 2px;font-size:12px;white-space:nowrap;min-width:0}
+.dj-pop .dj-tabs .dj-icon{width:13px;height:13px}
+.dj-insertpop-body{padding:10px;overflow:auto;min-height:0}
+.dj-tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.dj-tile{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-height:48px;padding:7px 9px;border:0;border-radius:var(--dj-r2);background:var(--dj-s2);color:var(--dj-t1);font:inherit;text-align:left;cursor:pointer}
+.dj-tile:hover{background:var(--dj-s3)}
+.dj-tile b{font-size:12.5px;font-weight:600}.dj-tile small{font-size:11px;color:var(--dj-t3);line-height:1.35}
+.dj-pickgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(34px,1fr));gap:4px}
+.dj-pickgrid-lg{grid-template-columns:repeat(auto-fill,minmax(44px,1fr))}
+.dj-pickgrid button{display:flex;align-items:center;justify-content:center;aspect-ratio:1;border:0;border-radius:var(--dj-r2);background:var(--dj-s2);color:var(--dj-t2);cursor:pointer;padding:0}
+.dj-pickgrid button:hover{background:var(--dj-s3);color:var(--dj-t1)}
+.dj-pickgrid button[aria-pressed=true]{background:var(--dj-accent);color:var(--dj-on-accent)}
+.dj-icongrid{max-height:240px;overflow:auto}
+.dj-thumb{position:relative;display:inline-block;width:20px;height:20px;flex:none}
+.dj-imgpick{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px}
+.dj-imgpick button{aspect-ratio:16/10;padding:0;border:0;border-radius:var(--dj-r2);overflow:hidden;background:var(--dj-s2);cursor:pointer;box-shadow:inset 0 0 0 1px var(--dj-line)}
+.dj-imgpick button[aria-pressed=true]{box-shadow:0 0 0 2px var(--dj-accent)}
+.dj-imgpick img{width:100%;height:100%;object-fit:cover;display:block}
+.dj-imgpick .dj-hint{grid-column:1/-1}
+.dj-datalist{display:flex;flex-direction:column;gap:4px}
+.dj-datarow{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) 28px 24px;gap:4px;align-items:center}
+.dj-chip.dj-palette{display:inline-flex;align-items:center;gap:3px}
+.dj-chip.dj-palette i{width:9px;height:9px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(255,255,255,.25)}
+.dj-elrow{cursor:pointer;font-size:12px}
+.dj-elrow:hover{background:var(--dj-s3)!important}
+.dj-elkind{flex:none;font-size:10px;padding:1px 5px;border-radius:4px;background:var(--dj-s3);color:var(--dj-t2)}
 `;
 export const ALL_CSS = CSS + CSS_STAGE + CSS_TIMELINE + CSS_PANELS;

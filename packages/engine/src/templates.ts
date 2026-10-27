@@ -43,6 +43,22 @@ export const SLIDE_TEMPLATES: Record<string, { label: string; hint: string }> = 
   ending: { label: "结尾", hint: "title（如 谢谢观看）、subtitle" },
 };
 
+/** 面板“插入幻灯片”用的示例内容：插入后每段文字都能直接在画布上双击改 */
+export const SLIDE_SAMPLES: Record<string, Omit<SlideInput, "template" | "theme">> = {
+  cover: { kicker: "PRESENTATION", title: "演示标题", subtitle: "一句话副标题" },
+  section: { kicker: "01", title: "章节标题", subtitle: "章节说明" },
+  cards: { kicker: "OVERVIEW", title: "三个关键点", items: [{ title: "要点一", text: "简短说明", icon: "sparkles" }, { title: "要点二", text: "简短说明", icon: "zap" }, { title: "要点三", text: "简短说明", icon: "target" }] },
+  bullets: { kicker: "FEATURES", title: "核心能力", items: [{ title: "第一点", text: "补充说明" }, { title: "第二点", text: "补充说明" }, { title: "第三点", text: "补充说明" }], icon: "lightbulb" },
+  stats: { kicker: "DATA", title: "关键数据", items: [{ value: 1280, suffix: "+", title: "用户" }, { value: 98.5, suffix: "%", title: "满意度" }, { value: 3, suffix: " 秒", title: "响应" }] },
+  quote: { title: "在这里写一句引用。", subtitle: "出处" },
+  compare: { kicker: "VS", title: "方案对比", items: [{ title: "方案 A", text: "优点一\n优点二\n优点三" }, { title: "方案 B", text: "优点一\n优点二\n优点三" }] },
+  timeline: { kicker: "ROADMAP", title: "路线图", items: [{ title: "Q1", text: "里程碑" }, { title: "Q2", text: "里程碑" }, { title: "Q3", text: "里程碑" }, { title: "Q4", text: "里程碑" }] },
+  steps: { kicker: "HOW IT WORKS", title: "三步完成", items: [{ title: "第一步", text: "说明" }, { title: "第二步", text: "说明" }, { title: "第三步", text: "说明" }] },
+  chart: { kicker: "GROWTH", title: "增长趋势", chart: "column", items: [{ title: "1月", value: 120 }, { title: "2月", value: 260 }, { title: "3月", value: 410 }, { title: "4月", value: 680 }], subtitle: "数据来源：示例" },
+  imageText: { kicker: "SHOWCASE", title: "图文页标题", subtitle: "一段说明文字", items: [{ title: "要点一" }, { title: "要点二" }] },
+  ending: { title: "谢谢观看", subtitle: "联系方式" },
+};
+
 export function buildSlide(input: SlideInput, meta: { width: number; height: number }): SlideElement[] {
   const W = meta.width, H = meta.height;
   const th0 = SLIDE_THEMES[input.theme ?? "light"] ?? SLIDE_THEMES.light;

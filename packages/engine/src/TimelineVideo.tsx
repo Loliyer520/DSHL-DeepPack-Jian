@@ -252,7 +252,7 @@ const PipBox: React.FC<{ clip: Clip; anims: Animations | undefined; box: { x: nu
   const radiusPx = (clip.radius ?? 0.03) * Math.min(box.w * width, box.h * height);
   const shadow = clip.shadow === false ? undefined : "0 4px 18px rgba(0,0,0,0.45)";
   return (
-    <div style={{
+    <div data-clip={clip.id} style={{
       position: "absolute",
       left: box.x * 100 + "%", top: box.y * 100 + "%", width: box.w * 100 + "%", height: box.h * 100 + "%",
       overflow: "hidden", borderRadius: radiusPx, boxShadow: shadow,

@@ -34,13 +34,43 @@ function TextBox({ o }: { o: Overlay }) {
   );
 }
 
-export function TextInspector({ o, tab, timeline, now }: { o: Overlay; tab: TextTab; timeline: Timeline; now: number }) {
+export const overlayTarget = (o: Overlay): Target => ({ id: o.id, start: o.startSeconds, duration: o.endSeconds - o.startSeconds, animations: o.animations });
+
+export function TimeSection({ o, fps }: { o: Overlay; fps: number }) {
+  const pu = (patch: Record<string, unknown>): Op[] => [{ op: 'updateOverlay', id: o.id, patch }];
+  return (
+    <Section title="时间">
+      <div className="dj-grid">
+        <NumberField label="开始" value={o.startSeconds} step={1 / fps} min={0} suffix="s" ops={(v) => pu({ startSeconds: v, endSeconds: Math.max(v + 1 / fps, o.endSeconds) })} editLabel="调整开始" />
+        <NumberField label="结束" value={o.endSeconds} step={1 / fps} min={o.startSeconds + 1 / fps} suffix="s" ops={(v) => pu({ endSeconds: v })} editLabel="调整结束" />
+        <NumberField label="时长" value={o.endSeconds - o.startSeconds} step={1 / fps} min={1 / fps} suffix="s" ops={(v) => pu({ endSeconds: o.startSeconds + v })} editLabel="调整时长" />
+      </div>
+    </Section>
+  );
+}
+
+/** 可打关键帧的变换（叠加在静态位置/旋转之上） */
+export function TransformSection({ o, fps, now, title = '变换' }: { o: Overlay; fps: number; now: number; title?: string }) {
+  const anim = { target: overlayTarget(o), fps, now };
+  return (
+    <Section title={title}>
+      <div className="dj-grid">
+        <AnimNumber {...anim} channel="scale" label="缩放" scale={100} suffix="%" step={0.01} min={0.05} max={10} digits={0} />
+        <AnimNumber {...anim} channel="rotation" label="旋转" step={1} min={-3600} max={3600} digits={1} suffix="°" />
+        <AnimNumber {...anim} channel="x" label="位移 X" scale={100} suffix="%" step={0.005} min={-2} max={2} digits={1} />
+        <AnimNumber {...anim} channel="y" label="位移 Y" scale={100} suffix="%" step={0.005} min={-2} max={2} digits={1} />
+        <AnimNumber {...anim} channel="opacity" label="不透明度" scale={100} suffix="%" step={0.01} min={0} max={1} digits={0} />
+      </div>
+    </Section>
+  );
+}
+
+export function TextInspector({ o, tab, timeline, now, extra }: { o: Overlay; tab: TextTab; timeline: Timeline; now: number; extra?: React.ReactNode }) {
   const { commit } = useEdit();
   const fps = timeline.meta.fps;
-  const target: Target = { id: o.id, start: o.startSeconds, duration: o.endSeconds - o.startSeconds, animations: o.animations };
+  const target = overlayTarget(o);
   const pu = (patch: Record<string, unknown>): Op[] => [{ op: 'updateOverlay', id: o.id, patch }];
   const set = (patch: Record<string, unknown>, label: string) => commit(pu(patch), label);
-  const anim = { target, fps, now };
   if (tab === 'animation') return <AnimationTab target={target} kind="overlay" effects={o.effects} fps={fps} now={now} />;
   if (tab === 'layout') return (
     <>
@@ -53,22 +83,8 @@ export function TextInspector({ o, tab, timeline, now }: { o: Overlay; tab: Text
           <NumberField label="最大宽度" value={o.maxWidth ?? 0.9} scale={100} suffix="%" step={0.01} min={0.1} max={1} digits={0} ops={(v) => pu({ maxWidth: v })} />
         </div>
       </Section>
-      <Section title="时间">
-        <div className="dj-grid">
-          <NumberField label="开始" value={o.startSeconds} step={1 / fps} min={0} suffix="s" ops={(v) => pu({ startSeconds: v, endSeconds: Math.max(v + 1 / fps, o.endSeconds) })} editLabel="调整开始" />
-          <NumberField label="结束" value={o.endSeconds} step={1 / fps} min={o.startSeconds + 1 / fps} suffix="s" ops={(v) => pu({ endSeconds: v })} editLabel="调整结束" />
-          <NumberField label="时长" value={o.endSeconds - o.startSeconds} step={1 / fps} min={1 / fps} suffix="s" ops={(v) => pu({ endSeconds: o.startSeconds + v })} editLabel="调整时长" />
-        </div>
-      </Section>
-      <Section title="变换">
-        <div className="dj-grid">
-          <AnimNumber {...anim} channel="scale" label="缩放" scale={100} suffix="%" step={0.01} min={0.05} max={10} digits={0} />
-          <AnimNumber {...anim} channel="rotation" label="旋转" step={1} min={-3600} max={3600} digits={1} suffix="°" />
-          <AnimNumber {...anim} channel="x" label="位移 X" scale={100} suffix="%" step={0.005} min={-2} max={2} digits={1} />
-          <AnimNumber {...anim} channel="y" label="位移 Y" scale={100} suffix="%" step={0.005} min={-2} max={2} digits={1} />
-          <AnimNumber {...anim} channel="opacity" label="不透明度" scale={100} suffix="%" step={0.01} min={0} max={1} digits={0} />
-        </div>
-      </Section>
+      <TimeSection o={o} fps={fps} />
+      <TransformSection o={o} fps={fps} now={now} />
     </>
   );
   const stroke = o.stroke;
@@ -78,8 +94,10 @@ export function TextInspector({ o, tab, timeline, now }: { o: Overlay; tab: Text
     <>
       <Section title="文字">
         <TextBox o={o} />
-        <div style={{ marginTop: 8 }}><Seg label="类型" value={o.kind ?? 'subtitle'} options={[['subtitle', '字幕'], ['title', '标题']]} onChange={(v) => set({ kind: v }, v === 'title' ? '设为标题' : '设为字幕')} /></div>
+        {o.kind !== 'shape' && <div style={{ marginTop: 8 }}><Seg label="类型" value={o.kind ?? 'subtitle'} options={[['subtitle', '字幕'], ['title', '标题'], ['text', '文本框']]} onChange={(v) => set(v === 'text' && o.w === undefined ? { kind: v, w: o.maxWidth ?? 0.6, x: o.x ?? 0.5, y: o.y ?? 0.5, align: o.align ?? 'left' } : { kind: v }, v === 'title' ? '设为标题' : v === 'text' ? '设为文本框' : '设为字幕')} /></div>}
+        {(o.kind === 'text' || o.kind === 'shape' || o.kind === 'title') && <p className="dj-hint">支持 **加粗**、==强调色==、[#ff5a5f]自定义颜色[/]；每行一个列表项。</p>}
       </Section>
+      {extra}
       <Section title="预设样式">
         <div className="dj-chips">{STYLES.map((s) => <button key={s.label} type="button" className="dj-chip" onClick={() => set(s.patch, '样式「' + s.label + '」')}>{s.label}</button>)}</div>
       </Section>
@@ -120,14 +138,14 @@ export function TextInspector({ o, tab, timeline, now }: { o: Overlay; tab: Text
           <NumberField label="偏移 Y" value={shadow.y ?? 2} step={1} min={-80} max={80} digits={0} ops={(v) => pu({ shadow: { ...shadow, y: v } })} editLabel="阴影偏移" />
         </div>}
       </Section>
-      <Section title="背景" extra={<Toggle label="" checked={Boolean(bg)} onChange={(v) => set({ background: v ? { color: '#000000', opacity: 0.6, padding: 12, radius: 8 } : null }, v ? '开启背景' : '关闭背景')} />}>
+      {o.kind !== 'shape' && <Section title="背景" extra={<Toggle label="" checked={Boolean(bg)} onChange={(v) => set({ background: v ? { color: '#000000', opacity: 0.6, padding: 12, radius: 8 } : null }, v ? '开启背景' : '关闭背景')} />}>
         {bg && <div className="dj-grid">
           <ColorField label="颜色" value={bg.color} onChange={(v) => set({ background: { ...bg, color: v } }, '背景颜色')} />
           <NumberField label="不透明度" value={bg.opacity ?? 1} scale={100} suffix="%" step={0.01} min={0} max={1} digits={0} ops={(v) => pu({ background: { ...bg, opacity: v } })} editLabel="背景不透明度" />
           <NumberField label="内边距" value={bg.padding ?? 12} step={1} min={0} max={200} digits={0} suffix="px" ops={(v) => pu({ background: { ...bg, padding: v } })} editLabel="背景内边距" />
           <NumberField label="圆角" value={bg.radius ?? 0} step={1} min={0} max={200} digits={0} suffix="px" ops={(v) => pu({ background: { ...bg, radius: v } })} editLabel="背景圆角" />
         </div>}
-      </Section>
+      </Section>}
     </>
   );
 }

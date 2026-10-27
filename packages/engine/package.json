@@ -13,7 +13,8 @@
     "bin",
     "src",
     "fonts",
-    "bundle"
+    "bundle",
+    "licenses"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json"

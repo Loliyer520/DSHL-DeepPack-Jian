@@ -1,16 +1,16 @@
 // 属性面板：按选中对象切换（视频/图片片段 · 音频 · 文字 · 轨道 · 标记 · 多选 · 无选中=项目设置）
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { AudioClip, AudioTrack, Marker, Timeline, VideoTrack } from '../../../../../engine/src/schema';
-import { locateClip, srcLabel } from '../../../../../engine/src/timeline';
+import { elementLabel, groupTitle, isBoxElement, locateClip, srcLabel } from '../../../../../engine/src/timeline';
 import { useEditor, useStore } from '../../context';
 import type { Op } from '../../engine';
 import { useSelection } from '../../selection';
 import { timecode } from '../../geometry';
 import { Icon } from '../../Icon';
-import type { Actions } from '../../actions';
+import { KIND_NAME, selectedGroups, type Actions } from '../../actions';
 import { Field } from '../common';
 import { ClipInspector, clipTabs, type ClipTab } from './ClipInspector';
-import { TEXT_TABS, TextInspector, type TextTab } from './TextInspector';
+import { AlignSection, ElementInspector, GroupInspector, elementTabs, type ElTab } from './ElementInspector';
 import { AnimNumber, ColorField, NumberField, Section, Seg, Toggle, useEdit, useInspectTime, type Target } from './fields';
 
 function Tabs<T extends string>({ tabs, value, onChange }: { tabs: [T, string][]; value: T; onChange: (t: T) => void }) {
@@ -132,7 +132,7 @@ function ProjectInspector({ timeline }: { timeline: Timeline }) {
   const counts = [
     timeline.videoTracks.reduce((n, t) => n + t.clips.length, 0) + ' 段画面',
     timeline.audioTracks.reduce((n, t) => n + t.clips.length, 0) + ' 段音频',
-    timeline.overlays.length + ' 条文字',
+    timeline.overlays.length + ' 个文字/元素',
     (timeline.markers ?? []).length + ' 个标记',
   ];
   const setMeta = (patch: Record<string, unknown>, label: string) => commit([{ op: 'setMeta', patch }], label);
@@ -169,7 +169,7 @@ function MultiInspector({ timeline, actions }: { timeline: Timeline; actions: Ac
   const fadeOps = (key: 'fadeIn' | 'fadeOut', v: number): Op[] => audible.map((l) => ({ op: 'updateClip', id: l.clip.id, patch: { [key]: Math.min(v, l.duration / 2) } }));
   return (
     <>
-      <Header icon="layers" title={'已选 ' + items.length + ' 项'} sub={[clips.length && clips.length + ' 个片段', overlays.length && overlays.length + ' 条文字'].filter(Boolean).join(' · ')} />
+      <Header icon="layers" title={'已选 ' + items.length + ' 项'} sub={[clips.length && clips.length + ' 个片段', overlays.length && overlays.length + ' 个文字/元素'].filter(Boolean).join(' · ')} />
       <Section title="批量操作">
         <div className="dj-chips">
           <button className="dj-chip" onClick={actions.duplicateSelection}>创建副本</button>
@@ -187,6 +187,7 @@ function MultiInspector({ timeline, actions }: { timeline: Timeline; actions: Ac
           </div>
         </Section>
       )}
+      <AlignSection overlays={overlays} timeline={timeline} />
       {overlays.length > 1 && (
         <Section title={'文字（' + overlays.length + ' 条）'}>
           <div className="dj-grid">
@@ -205,18 +206,37 @@ export function Inspector({ actions, section, onSection }: { actions: Actions; s
   const { items, primary } = useSelection(ed.sel);
   const now = useInspectTime();
   const [clipTab, setClipTab] = useState<ClipTab>('picture');
-  const [textTab, setTextTab] = useState<TextTab>('text');
+  const [textTab, setTextTab] = useState<ElTab>('text');
+  // 换到另一类元素时回到它的第一页（形状/图片/图标/图表先看样式，文字先看文本）
+  const selKind = primary?.kind === 'overlay' && items.length === 1 ? timeline?.overlays.find((o) => o.id === primary.id)?.kind ?? 'subtitle' : null;
+  const lastKind = useRef<typeof selKind>(null);
+  useEffect(() => {
+    const prev = lastKind.current;
+    if (selKind && selKind !== prev && (!prev || isBoxElement({ kind: selKind }) !== isBoxElement({ kind: prev }) || selKind === 'shape' || prev === 'shape')) setTextTab(isBoxElement({ kind: selKind }) ? 'style' : 'text');
+    if (selKind) lastKind.current = selKind;
+  }, [selKind]);
   // 外部（时间线双击/右键“转场…”）指定要打开的分页
   useEffect(() => {
     if (!section) return;
     if (section === 'transition' || section === 'animation' || section === 'color' || section === 'speed' || section === 'audio' || section === 'picture') setClipTab(section as ClipTab);
-    if (section === 'text' || section === 'layout') setTextTab(section as TextTab);
+    if (section === 'text' || section === 'layout' || section === 'style') setTextTab(section as ElTab);
     onSection(undefined);
   }, [section, onSection]);
   if (!timeline) return <div className="dj-empty-state">正在加载…</div>;
   const fps = timeline.meta.fps;
   let body: React.ReactNode;
-  if (items.length > 1) body = <MultiInspector timeline={timeline} actions={actions} />;
+  const groups = items.length > 1 ? selectedGroups(timeline, items) : null;
+  const wholeGroup = groups && groups.size === 1 && items.every((s) => s.kind === 'overlay') && [...groups.values()][0].length === items.length ? [...groups][0] : null;
+  if (wholeGroup) {
+    const [group, members] = wholeGroup;
+    const start = Math.min(...members.map((o) => o.startSeconds)), end = Math.max(...members.map((o) => o.endSeconds));
+    body = <>
+      <Header icon="slides" title={groupTitle(members)} sub={'幻灯片 · ' + members.length + ' 个元素 · ' + timecode(start, fps) + ' – ' + timecode(end, fps)}>
+        <button className="dj-icon-btn" title="交给 AI" aria-label="交给 AI" onClick={() => actions.askAi() || ed.store.toast('info', '当前宿主不支持插入到对话框')}><Icon name="sparkle" /></button>
+      </Header>
+      <GroupInspector group={group} members={members} timeline={timeline} actions={actions} />
+    </>;
+  } else if (items.length > 1) body = <MultiInspector timeline={timeline} actions={actions} />;
   else if (!primary) body = <ProjectInspector timeline={timeline} />;
   else if (primary.kind === 'clip') {
     const loc = locateClip(timeline, primary.id);
@@ -244,13 +264,20 @@ export function Inspector({ actions, section, onSection }: { actions: Actions; s
     }
   } else if (primary.kind === 'overlay') {
     const o = timeline.overlays.find((x) => x.id === primary.id);
-    body = !o ? <div className="dj-empty-state">该文字已被删除</div> : <>
-      <Header icon="text" title={o.text.slice(0, 24) || '（空文字）'} sub={(o.kind === 'title' ? '标题' : '字幕') + ' · ' + timecode(o.startSeconds, fps) + ' – ' + timecode(o.endSeconds, fps)}>
-        <button className="dj-icon-btn" title="交给 AI" aria-label="交给 AI" onClick={() => actions.askAi() || ed.store.toast('info', '当前宿主不支持插入到对话框')}><Icon name="sparkle" /></button>
-      </Header>
-      <Tabs tabs={TEXT_TABS} value={textTab} onChange={setTextTab} />
-      <TextInspector o={o} tab={textTab} timeline={timeline} now={now} />
-    </>;
+    if (!o) body = <div className="dj-empty-state">该元素已被删除</div>;
+    else {
+      const tabs = elementTabs(o);
+      const tab = tabs.some(([k]) => k === textTab) ? textTab : tabs[0][0];
+      const icon = o.kind === 'shape' ? 'shapes' : o.kind === 'image' ? 'image' : o.kind === 'icon' ? 'star' : o.kind === 'chart' ? 'chart' : 'text';
+      body = <>
+        <Header icon={icon} title={(o.name && o.text.trim() ? groupTitle([o]) : elementLabel(o)).slice(0, 24) || '（空文字）'} sub={(KIND_NAME[o.kind ?? 'subtitle'] ?? '元素') + (o.name && o.text.trim() ? '「' + o.name + '」' : '') + (o.group ? ' · 幻灯片内' : '') + ' · ' + timecode(o.startSeconds, fps) + ' – ' + timecode(o.endSeconds, fps)}>
+          {o.group && <button className="dj-icon-btn" title="选中整页幻灯片" aria-label="选中整页幻灯片" onClick={() => actions.selectGroup(o.group!)}><Icon name="slides" /></button>}
+          <button className="dj-icon-btn" title="交给 AI" aria-label="交给 AI" onClick={() => actions.askAi() || ed.store.toast('info', '当前宿主不支持插入到对话框')}><Icon name="sparkle" /></button>
+        </Header>
+        <Tabs tabs={tabs} value={tab} onChange={setTextTab} />
+        <ElementInspector o={o} tab={tab} timeline={timeline} now={now} actions={actions} />
+      </>;
+    }
   } else if (primary.kind === 'marker') {
     const m = (timeline.markers ?? []).find((x) => x.id === primary.id);
     body = m ? <MarkerInspector m={m} fps={fps} /> : <div className="dj-empty-state">该标记已被删除</div>;

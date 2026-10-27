@@ -1,7 +1,7 @@
 // 选中状态 + 播放头 + 在场上报（选中/播放头同步给引擎，宿主插件据此告诉 AI“用户现在指的是哪段”）
 import { useSyncExternalStore } from 'react';
 import type { Timeline } from '../../../engine/src/schema';
-import { locateClip, srcLabel } from '../../../engine/src/timeline';
+import { elementLabel, locateClip, srcLabel } from '../../../engine/src/timeline';
 import { api } from './engine';
 
 export type EntityKind = 'clip' | 'overlay' | 'track' | 'marker';
@@ -53,7 +53,7 @@ export function describeSelection(t: Timeline, items: Selected[]) {
     }
     if (s.kind === 'overlay') {
       const o = t.overlays.find((x) => x.id === s.id);
-      return o ? { kind: s.kind, id: s.id, label: o.text.slice(0, 40), track: 'subs', start: o.startSeconds, end: o.endSeconds } : { kind: s.kind, id: s.id };
+      return o ? { kind: s.kind, id: s.id, label: elementLabel(o).slice(0, 40), track: o.kind ?? 'subtitle', ...(o.group ? { group: o.group } : {}), start: o.startSeconds, end: o.endSeconds } : { kind: s.kind, id: s.id };
     }
     if (s.kind === 'marker') {
       const m = (t.markers ?? []).find((x) => x.id === s.id);

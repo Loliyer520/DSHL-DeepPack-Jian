@@ -199,6 +199,12 @@ export function elementLabel(o: Overlay): string {
   return KIND_LABEL[o.kind ?? "subtitle"] ?? "元素";
 }
 
+/** 一组元素（一页幻灯片）的标题：字号最大的那段文字 */
+export function groupTitle(members: readonly Overlay[]): string {
+  const head = members.filter((o) => o.kind !== "subtitle" && o.text?.trim()).sort((a, b) => b.fontSize - a.fontSize)[0];
+  return head ? head.text.trim().replace(/\*\*|==|\[#[0-9a-fA-F]{3,8}\]|\[\/\]/g, "").split("\n")[0] : "幻灯片";
+}
+
 /** 数字格式化（数字滚动、图表数值共用）：定点小数 + 可选千分位 */
 export function formatNumber(v: number, decimals = 0, separator = false): string {
   let s = (Math.round(v * 10 ** decimals) / 10 ** decimals).toFixed(decimals);
