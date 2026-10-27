@@ -1,10 +1,14 @@
+/** 某帧上正在显示的元素（文字/形状/图片/图标/图表；只按时间范围判断，不保证实际可见） */
 export function activeTextLayers(timeline, frame) {
   const fps = timeline.meta.fps;
   return timeline.overlays.flatMap((layer, index) => {
     const start = Math.round(layer.startSeconds * fps);
     const duration = Math.max(1, Math.round((layer.endSeconds - layer.startSeconds) * fps));
-    return frame >= start && frame < start + duration ? [{ index, id: layer.id, text: layer.text, color: layer.color,
+    return frame >= start && frame < start + duration ? [{ index, id: layer.id, kind: layer.kind ?? 'subtitle', ...(layer.name ? { name: layer.name } : {}), text: layer.text, color: layer.color,
       position: layer.position, startSeconds: layer.startSeconds, endSeconds: layer.endSeconds,
+      ...(layer.w !== undefined ? { box: { x: layer.x ?? 0.5, y: layer.y ?? 0.5, w: layer.w, h: layer.h ?? null } } : {}),
+      ...(layer.group ? { group: layer.group } : {}),
+      ...(layer.effects?.length ? { effects: layer.effects.map((e) => e.preset) } : {}),
       ...(layer.animations ? { animations: layer.animations } : {}) }] : [];
   });
 }

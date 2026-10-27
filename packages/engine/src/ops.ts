@@ -5,15 +5,26 @@ import type { Animations, AudioClip, AudioTrack, Clip, Effect, Keyframe, Marker,
 import {
   ANIM_CHANNELS,
   BLEND_MODES,
+  CHART_TYPES,
   DIRECTIONS,
   EASING_NAMES,
+  ELEMENT_KINDS,
   FILTER_RANGES,
+  LINE_SHAPES,
+  LIST_STYLES,
+  SHAPE_TYPES,
+  TEXT_EFFECTS,
   TRANSITION_TYPES,
+  elementLabel,
+  elementOrder,
+  isBoxElement,
   mainTrackStarts,
   secToFrames,
   shiftAnimations,
   srcLabel,
 } from "./timeline.js";
+import { iconByName } from "./icons.js";
+import { SLIDE_TEMPLATES, SLIDE_THEMES, buildSlide } from "./templates.js";
 import { ANIMATION_PRESETS, presetGroup, resolveAnimations } from "./presets.js";
 import { fontById } from "./fonts.js";
 
@@ -51,7 +62,8 @@ export const OP_NAMES = [
   "addClip", "removeClip", "updateClip", "moveClip", "reorderClips", "splitClip", "duplicateClip",
   "addAudio", "removeAudio", "updateAudioTrack",
   "addTrack", "removeTrack", "updateTrack", "moveTrack",
-  "addOverlay", "removeOverlay", "updateOverlay", "splitOverlay",
+  "addOverlay", "removeOverlay", "updateOverlay", "splitOverlay", "arrangeOverlay",
+  "addSlide", "updateGroup", "removeGroup",
   "setMeta",
   "setKeyframe", "removeKeyframe", "clearKeyframes",
   "addMarker", "updateMarker", "removeMarker",
@@ -113,6 +125,7 @@ export function sanitizeEasing(e: unknown): Keyframe["e"] | undefined {
 const CHANNEL_RANGES: Record<string, [number, number]> = {
   opacity: [0, 1], volume: [0, 1], scale: [0, 20], scaleX: [-20, 20], scaleY: [-20, 20],
   x: [-5, 5], y: [-5, 5], rotation: [-3600, 3600], brightness: [0, 3], contrast: [0, 3], saturate: [0, 3], blur: [0, 50],
+  clipL: [0, 1], clipR: [0, 1], clipT: [0, 1], clipB: [0, 1], progress: [0, 1],
 };
 export function sanitizeKeyframes(list: unknown, channel: string): Keyframe[] | undefined {
   if (!Array.isArray(list) || !list.length) return undefined;
@@ -182,6 +195,147 @@ export function sanitizeMetaPatch(p: unknown): Partial<Timeline["meta"]> {
   const bg = sanitizeColor(p.background);
   if (bg) out.background = bg;
   return out;
+}
+
+// ---------- v6 元素字段净化 ----------
+const pick = <T extends string>(list: readonly T[], v: unknown): T | undefined => list.find((x) => x === v);
+const shortStr = (v: unknown, max: number): string | undefined => (typeof v === "string" && v.trim() ? v.slice(0, max) : undefined);
+
+type ShapeFill = NonNullable<NonNullable<Overlay["shape"]>["fill"]>;
+export function sanitizeFill(v: unknown): ShapeFill | undefined {
+  const solid = sanitizeColor(v);
+  if (solid) return solid;
+  if (!isObj(v) || !Array.isArray(v.stops)) return undefined;
+  const stops = v.stops
+    .map((s, i, all) => (isObj(s) ? { offset: clampOr(s.offset, all.length > 1 ? i / (all.length - 1) : 0, 0, 1), color: sanitizeColor(s.color) } : undefined))
+    .filter((s): s is { offset: number; color: string } => Boolean(s?.color))
+    .slice(0, 8);
+  if (stops.length < 2) return stops[0]?.color;
+  return { type: v.type === "radial" ? "radial" : "linear", ...(num(v.angle) !== undefined ? { angle: clampOr(v.angle, 0, -360, 360) } : {}), stops };
+}
+
+function sanitizeOutline(v: unknown, fallbackWidth = 2) {
+  if (!isObj(v)) return undefined;
+  const color = sanitizeColor(v.color);
+  if (!color) return undefined;
+  const dash = pick(["solid", "dashed", "dotted"] as const, v.dash);
+  return { color, width: clampOr(v.width, fallbackWidth, 0, 200), ...(dash && dash !== "solid" ? { dash } : {}) };
+}
+
+export function sanitizeShape(v: unknown, prev?: Overlay["shape"]): Overlay["shape"] | undefined {
+  const raw = typeof v === "string" ? { type: v } : v;
+  if (!isObj(raw)) return undefined;
+  const type = pick(SHAPE_TYPES, raw.type) ?? prev?.type ?? "rect";
+  const out: NonNullable<Overlay["shape"]> = { type };
+  const base: Partial<NonNullable<Overlay["shape"]>> = prev ?? {};
+  const fill = "fill" in raw ? sanitizeFill(raw.fill) : base.fill;
+  const stroke = "stroke" in raw ? sanitizeOutline(raw.stroke, 4) : base.stroke;
+  if (fill !== undefined && raw.fill !== null) out.fill = fill;
+  if (stroke && raw.stroke !== null) out.stroke = stroke;
+  const radius = "radius" in raw ? num(raw.radius) : base.radius;
+  if (radius !== undefined && raw.radius !== null) out.radius = clamp(radius, 0, 2000);
+  const points = "points" in raw ? num(raw.points) : base.points;
+  if (points !== undefined && raw.points !== null) out.points = clamp(Math.round(points), 3, 24);
+  const inner = "inner" in raw ? num(raw.inner) : base.inner;
+  if (inner !== undefined && raw.inner !== null) out.inner = clamp(inner, 0.05, 0.95);
+  // 既无填充也无描边：闭合形状给默认蓝色填充，线条给白色描边
+  if (out.fill === undefined && !out.stroke) {
+    if ((LINE_SHAPES as readonly string[]).includes(type)) out.stroke = { color: "#ffffff", width: 6 };
+    else out.fill = "#3b82f6";
+  }
+  return out;
+}
+
+function sanitizeImageSpec(s: Scope, v: unknown, prev?: Overlay["image"]): Overlay["image"] | undefined {
+  const raw = typeof v === "string" ? { src: v } : v;
+  if (!isObj(raw)) return undefined;
+  const src = "src" in raw ? checkAsset(s, raw.src) : prev?.src;
+  if (!src) fail("图片元素缺少 image.src（素材文件名）");
+  const out: NonNullable<Overlay["image"]> = { src: src! };
+  const fit = "fit" in raw ? pick(["cover", "contain", "fill"] as const, raw.fit) : prev?.fit;
+  if (fit) out.fit = fit;
+  const radius = "radius" in raw ? num(raw.radius) : prev?.radius;
+  if (radius !== undefined && raw.radius !== null) out.radius = clamp(radius, 0, 2000);
+  const border = "border" in raw ? sanitizeOutline(raw.border) : prev?.border;
+  if (border && raw.border !== null) out.border = border;
+  return out;
+}
+
+function sanitizeIcon(s: Scope, v: unknown, prev?: Overlay["icon"]): Overlay["icon"] | undefined {
+  const raw = typeof v === "string" ? { name: v } : v;
+  if (!isObj(raw)) return undefined;
+  const name = "name" in raw ? shortStr(raw.name, 60)?.trim() : prev?.name;
+  if (!name) fail("图标元素缺少 icon.name");
+  if (!iconByName(name)) s.warnings.push("内置图标里没有「" + name + "」，会显示为占位框；可用 djian_catalog{what:\"icons\"} 查看图标名");
+  const out: NonNullable<Overlay["icon"]> = { name: name! };
+  const sw = "strokeWidth" in raw ? num(raw.strokeWidth) : prev?.strokeWidth;
+  if (sw !== undefined && raw.strokeWidth !== null) out.strokeWidth = clamp(sw, 0.25, 6);
+  const fill = "fill" in raw ? sanitizeColor(raw.fill) : prev?.fill;
+  if (fill && raw.fill !== null) out.fill = fill;
+  return out;
+}
+
+export function sanitizeChart(v: unknown, prev?: Overlay["chart"]): Overlay["chart"] | undefined {
+  if (!isObj(v)) return undefined;
+  const type = pick(CHART_TYPES, v.type) ?? prev?.type ?? "column";
+  const rawData = Array.isArray(v.data) ? v.data : prev?.data ?? [];
+  const data = rawData
+    .map((d) => {
+      if (typeof d === "number") return { value: d };
+      if (!isObj(d)) return undefined;
+      const value = num(d.value);
+      if (value === undefined) return undefined;
+      const label = shortStr(d.label, 60), color = sanitizeColor(d.color);
+      return { value, ...(label ? { label } : {}), ...(color ? { color } : {}) };
+    })
+    .filter((d): d is { value: number; label?: string; color?: string } => Boolean(d))
+    .slice(0, 24);
+  if (!data.length) fail("图表需要 data 数组（每项 {label, value}）");
+  const out: NonNullable<Overlay["chart"]> = { type, data };
+  const base = (prev ?? {}) as Record<string, unknown>;
+  const val = (k: string) => (k in v ? v[k] : base[k]);
+  const max = num(val("max"));
+  if (max !== undefined && max > 0) out.max = max;
+  const colors = val("colors");
+  if (Array.isArray(colors)) {
+    const list = colors.map((c) => sanitizeColor(c)).filter((c): c is string => Boolean(c)).slice(0, 12);
+    if (list.length) out.colors = list;
+  }
+  for (const key of ["showValues", "showLabels"] as const) { const b = bool(val(key)); if (b !== undefined) out[key] = b; }
+  for (const key of ["prefix", "unit"] as const) { const t = val(key); if (typeof t === "string" && t) out[key] = t.slice(0, 12); }
+  const dec = num(val("decimals"));
+  if (dec !== undefined) out.decimals = clamp(Math.round(dec), 0, 4);
+  const track = sanitizeColor(val("trackColor"));
+  if (track) out.trackColor = track;
+  const thick = num(val("thickness"));
+  if (thick !== undefined) out.thickness = clamp(thick, 0.02, 1);
+  return out;
+}
+
+function sanitizeCounter(v: unknown): Overlay["counter"] | undefined {
+  if (!isObj(v)) return undefined;
+  const to = num(v.to);
+  if (to === undefined) return undefined;
+  const out: NonNullable<Overlay["counter"]> = { from: num(v.from) ?? 0, to };
+  const dec = num(v.decimals);
+  if (dec !== undefined) out.decimals = clamp(Math.round(dec), 0, 4);
+  for (const key of ["prefix", "suffix"] as const) { const t = v[key]; if (typeof t === "string" && t) out[key] = t.slice(0, 12); }
+  if (bool(v.separator)) out.separator = true;
+  return out;
+}
+
+function sanitizeTextEffect(v: unknown): Overlay["textEffect"] | undefined {
+  const raw = typeof v === "string" ? { type: v } : v;
+  if (!isObj(raw)) return undefined;
+  const type = pick(TEXT_EFFECTS, raw.type);
+  if (!type) return undefined;
+  const by = pick(["char", "word", "line"] as const, raw.by);
+  return {
+    type,
+    ...(by ? { by } : {}),
+    ...(num(raw.interval) !== undefined ? { interval: clampOr(raw.interval, 0.04, 0, 2) } : {}),
+    ...(num(raw.duration) !== undefined ? { duration: clampOr(raw.duration, 0.4, 0.02, 5) } : {}),
+  };
 }
 
 /** 预设名 → 新 effects 列表：同组替换；"none"/"" 返回 null 表示清空；未知名字返回 undefined */
@@ -363,7 +517,7 @@ function checkAsset(s: Scope, src: unknown): string {
   if (typeof src !== "string" || !src.trim()) fail("缺少素材文件名 src");
   const name = (src as string).trim();
   if (s.ctx.assetExists && !s.ctx.assetExists(name)) {
-    fail("素材库里没有「" + name + "」（素材按项目隔离）：先用 asset_list 确认文件名，缺少的素材请导入后再引用");
+    fail("素材库里没有「" + name + "」（素材按项目隔离）：先用 djian_assets 确认文件名，缺少的素材请先 djian_import_asset 导入");
   }
   return name;
 }
@@ -492,11 +646,13 @@ function patchAudioClip(s: Scope, hit: AudioHit, patch: Record<string, unknown>)
   }
 }
 
-const OVERLAY_KEYS = new Set(["text", "startSeconds", "endSeconds", "position", "fontSize", "color", "fontFamily", "fontWeight", "animations", "animationPreset", "effects", "x", "y", "align", "maxWidth", "lineHeight", "letterSpacing", "italic", "underline", "stroke", "shadow", "background", "kind", "track"]);
+const OVERLAY_KEYS = new Set(["text", "startSeconds", "endSeconds", "position", "fontSize", "color", "fontFamily", "fontWeight", "animations", "animationPreset", "effects", "x", "y", "align", "maxWidth", "lineHeight", "letterSpacing", "italic", "underline", "stroke", "shadow", "background", "kind", "track",
+  "name", "group", "w", "h", "rotate", "opacity", "valign", "padding", "list", "accent", "counter", "textEffect", "shape", "image", "icon", "chart"]);
+const BOX_FIELDS = { shape: "shape", image: "image", icon: "icon", chart: "chart" } as const;
 
 function patchOverlay(s: Scope, ov: Overlay, patch: Record<string, unknown>) {
   const frame = frameOf(s.t);
-  for (const key of Object.keys(patch)) if (!OVERLAY_KEYS.has(key)) s.warnings.push("字幕忽略字段「" + key + "」");
+  for (const key of Object.keys(patch)) if (!OVERLAY_KEYS.has(key)) s.warnings.push("元素忽略字段「" + key + "」");
   if ("text" in patch) ov.text = String(patch.text ?? "").slice(0, 2000);
   if ("startSeconds" in patch) ov.startSeconds = clampOr(patch.startSeconds, ov.startSeconds, 0, 86400);
   if ("endSeconds" in patch) ov.endSeconds = clampOr(patch.endSeconds, ov.endSeconds, 0, 86400);
@@ -518,7 +674,7 @@ function patchOverlay(s: Scope, ov: Overlay, patch: Record<string, unknown>) {
     setOpt(ov, "effects", fx && fx.length ? fx : null);
   }
   if ("animationPreset" in patch) applyPresetPatch(s, ov, patch.animationPreset);
-  for (const key of ["x", "y"] as const) if (key in patch) setOpt(ov, key, patch[key] === null ? null : clampOr(patch[key], 0.5, 0, 1));
+  for (const key of ["x", "y"] as const) if (key in patch) setOpt(ov, key, patch[key] === null ? null : Math.round(clampOr(patch[key], 0.5, -1, 2) * 10000) / 10000);
   if ("align" in patch) setOpt(ov, "align", ["left", "center", "right"].includes(patch.align as string) ? (patch.align as Overlay["align"]) : null);
   if ("maxWidth" in patch) setOpt(ov, "maxWidth", patch.maxWidth === null ? null : clampOr(patch.maxWidth, 0.9, 0.1, 1));
   if ("lineHeight" in patch) setOpt(ov, "lineHeight", patch.lineHeight === null ? null : clampOr(patch.lineHeight, 1.3, 0.8, 3));
@@ -546,8 +702,32 @@ function patchOverlay(s: Scope, ov: Overlay, patch: Record<string, unknown>) {
       ...(num(bg.radius) !== undefined ? { radius: clampOr(bg.radius, 8, 0, 200) } : {}),
     } : null);
   }
-  if ("kind" in patch) setOpt(ov, "kind", patch.kind === "title" || patch.kind === "subtitle" ? patch.kind : null);
   if ("track" in patch) setOpt(ov, "track", patch.track === null ? null : clamp(Math.round(num(patch.track) ?? 0), 0, 31));
+  // ---- v6 元素 ----
+  if ("name" in patch) setOpt(ov, "name", shortStr(patch.name, 40) ?? null);
+  if ("group" in patch) setOpt(ov, "group", typeof patch.group === "string" && ID_RE.test(patch.group) ? patch.group : null);
+  for (const key of ["w", "h"] as const) if (key in patch) setOpt(ov, key, patch[key] === null ? null : Math.round(clampOr(patch[key], 0.2, 0.002, 4) * 10000) / 10000);
+  if ("rotate" in patch) { const r = num(patch.rotate); setOpt(ov, "rotate", r === undefined || r === 0 ? null : clamp(r, -3600, 3600)); }
+  if ("opacity" in patch) { const o = num(patch.opacity); setOpt(ov, "opacity", o === undefined || o >= 1 ? null : clamp(o, 0, 1)); }
+  if ("valign" in patch) setOpt(ov, "valign", pick(["top", "middle", "bottom"] as const, patch.valign) ?? null);
+  if ("padding" in patch) setOpt(ov, "padding", patch.padding === null ? null : clampOr(patch.padding, 0, 0, 1000));
+  if ("list" in patch) setOpt(ov, "list", pick(LIST_STYLES, patch.list) ?? null);
+  if ("accent" in patch) setOpt(ov, "accent", sanitizeColor(patch.accent) ?? null);
+  if ("counter" in patch) setOpt(ov, "counter", sanitizeCounter(patch.counter) ?? null);
+  if ("textEffect" in patch) setOpt(ov, "textEffect", sanitizeTextEffect(patch.textEffect) ?? null);
+  if ("shape" in patch) setOpt(ov, "shape", patch.shape === null ? null : sanitizeShape(patch.shape, ov.shape) ?? ov.shape);
+  if ("image" in patch) setOpt(ov, "image", patch.image === null ? null : sanitizeImageSpec(s, patch.image, ov.image) ?? ov.image);
+  if ("icon" in patch) setOpt(ov, "icon", patch.icon === null ? null : sanitizeIcon(s, patch.icon, ov.icon) ?? ov.icon);
+  if ("chart" in patch) setOpt(ov, "chart", patch.chart === null ? null : sanitizeChart(patch.chart, ov.chart) ?? ov.chart);
+  if ("kind" in patch) setOpt(ov, "kind", pick(ELEMENT_KINDS, patch.kind) ?? null);
+  // 给了 shape/image/icon/chart 却没指定 kind：按内容推断
+  if (!("kind" in patch) && !isBoxElement(ov)) {
+    for (const key of Object.keys(BOX_FIELDS) as (keyof typeof BOX_FIELDS)[]) if (key in patch && ov[key]) { ov.kind = key; break; }
+  }
+  if (ov.kind === "shape" && !ov.shape) ov.shape = sanitizeShape({ type: "rect" });
+  if (ov.kind === "image" && !ov.image) fail("图片元素需要 image:{src}（素材文件名）");
+  if (ov.kind === "icon" && !ov.icon) fail("图标元素需要 icon:{name}");
+  if (ov.kind === "chart" && !ov.chart) fail("图表元素需要 chart:{type, data}");
 }
 
 /** 分割偏移（相对片段起点），对齐帧网格，两侧各留至少一帧；不合法返回 null */
@@ -841,28 +1021,170 @@ function moveTrackOp(s: Scope, op: Record<string, unknown>) {
   s.touched.add("track:" + hit.track.id);
 }
 
-function addOverlayOp(s: Scope, op: Record<string, unknown>) {
-  if (typeof op.text !== "string") fail("addOverlay 缺少 text");
+const BOX_KIND_DEFAULT_W: Record<string, number> = { shape: 0.25, image: 0.4, icon: 0.08, chart: 0.5, text: 0.5 };
+
+/** 新建一个元素（addOverlay 与幻灯片模板共用）：按 kind 补缺省尺寸与样式，插到 index（缺省末尾 = 最上层） */
+function createOverlay(s: Scope, op: Record<string, unknown>, index?: number): Overlay {
+  const inferred = pick(ELEMENT_KINDS, op.kind)
+    ?? (op.shape !== undefined ? "shape" : op.image !== undefined ? "image" : op.icon !== undefined ? "icon" : op.chart !== undefined ? "chart" : undefined);
+  const boxKind = inferred === "shape" || inferred === "image" || inferred === "icon" || inferred === "chart";
+  if (typeof op.text !== "string" && !boxKind && !isObj(op.counter)) fail("addOverlay 缺少 text（形状/图片/图标/图表元素可省略）");
   const start = clampOr(op.startSeconds, 0, 0, 86400);
+  const { width: W, height: H } = s.t.meta;
   const ov: Overlay = {
     id: takeId(s, op.id, "o"),
-    text: String(op.text).slice(0, 2000),
+    text: typeof op.text === "string" ? op.text.slice(0, 2000) : "",
     startSeconds: start,
     endSeconds: clampOr(op.endSeconds, start + 3, 0, 86400),
     position: ["top", "center", "bottom"].includes(op.position as string) ? (op.position as Overlay["position"]) : "bottom",
-    fontSize: clampOr(op.fontSize, 48, 4, 2000),
+    fontSize: clampOr(op.fontSize, inferred === "chart" ? 28 : inferred === "text" ? 40 : 48, 4, 2000),
     color: sanitizeColor(op.color) ?? "#ffffff",
   };
   const patch: Record<string, unknown> = {};
   for (const key of OVERLAY_KEYS) if (key in op && !["text", "startSeconds", "position", "fontSize", "color"].includes(key)) patch[key] = op[key];
   patch.endSeconds = ov.endSeconds;
-  const at = num(op.index);
+  if (inferred && !("kind" in op)) patch.kind = inferred;
+  if (boxKind || inferred === "text") {
+    if (!("x" in op)) patch.x = 0.5;
+    if (!("y" in op)) patch.y = 0.5;
+    if (!("w" in op)) patch.w = BOX_KIND_DEFAULT_W[inferred!] ?? 0.25;
+    if (!("h" in op) && boxKind) {
+      const w = clampOr(patch.w, 0.25, 0.002, 4);
+      const shapeType = typeof op.shape === "string" ? op.shape : isObj(op.shape) ? op.shape.type : undefined;
+      patch.h = (LINE_SHAPES as readonly string[]).includes(String(shapeType)) ? Math.max(0.004, 24 / H)
+        : inferred === "chart" ? 0.45 : inferred === "image" ? 0.4 : Math.min(4, (w * W) / H); // 缺省按像素等宽（正方形/圆）
+    }
+  }
+  const at = index ?? num(op.index);
   if (at !== undefined) s.t.overlays.splice(clamp(Math.round(at), 0, s.t.overlays.length), 0, ov);
   else s.t.overlays.push(ov);
   patchOverlay(s, ov, patch);
   trackOfOverlayTouch(s, ov.id);
+  return ov;
 }
 
+function addOverlayOp(s: Scope, op: Record<string, unknown>) {
+  createOverlay(s, op);
+}
+
+/** 叠放顺序：front 置顶 / back 置底 / forward 上移一层 / backward 下移一层（只与时间上重叠的元素比较） */
+function arrangeOverlayOp(s: Scope, op: Record<string, unknown>) {
+  const hit = findOverlay(s.t, op);
+  if (!hit) { s.warnings.push("元素「" + String(op.id) + "」不存在"); return; }
+  const to = pick(["front", "back", "forward", "backward"] as const, op.to);
+  if (!to) fail("arrangeOverlay 需要 to：front/back/forward/backward");
+  const ov = hit.overlay;
+  if (ov.kind === "subtitle") s.warnings.push("字幕始终显示在最上层，层级只在字幕之间生效");
+  const peers = (o: Overlay) => o !== ov && (o.kind === "subtitle") === (ov.kind === "subtitle") && o.startSeconds < ov.endSeconds && o.endSeconds > ov.startSeconds;
+  const order = elementOrder(s.t.overlays);
+  const idx = order.indexOf(ov);
+  const place = (track: number, ref: Overlay | null, after: boolean) => {
+    s.t.overlays.splice(s.t.overlays.indexOf(ov), 1);
+    setOpt(ov, "track", track ? track : null);
+    if (!ref) { if (after) s.t.overlays.push(ov); else s.t.overlays.unshift(ov); return; }
+    const ri = s.t.overlays.indexOf(ref);
+    s.t.overlays.splice(after ? ri + 1 : ri, 0, ov);
+  };
+  const others = s.t.overlays.filter(peers);
+  if (!others.length) { s.warnings.push("这段时间里没有与它重叠的元素，层级不变"); return; }
+  if (to === "front") place(Math.max(ov.track ?? 0, ...others.map((o) => o.track ?? 0)), null, true);
+  else if (to === "back") place(Math.min(ov.track ?? 0, ...others.map((o) => o.track ?? 0)), null, false);
+  else {
+    const next = to === "forward" ? order.slice(idx + 1).find(peers) : order.slice(0, idx).reverse().find(peers);
+    if (!next) { s.warnings.push(to === "forward" ? "已经在最上层" : "已经在最下层"); return; }
+    place(next.track ?? 0, next, to === "forward");
+  }
+  trackOfOverlayTouch(s, ov.id);
+}
+
+const slideStr = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : typeof v === "number" ? String(v) : undefined);
+function sanitizeSlideItems(v: unknown) {
+  if (!Array.isArray(v)) return undefined;
+  return v.slice(0, 8).map((it) => {
+    if (typeof it === "string" || typeof it === "number") return { title: String(it).slice(0, 120) };
+    if (!isObj(it)) return {};
+    const out: Record<string, unknown> = {};
+    for (const [k, max] of [["title", 120], ["text", 600], ["prefix", 12], ["suffix", 12], ["icon", 60], ["image", 200], ["label", 60]] as const) {
+      const sv = slideStr(it[k], max);
+      if (sv !== undefined) out[k] = sv;
+    }
+    const value = num(it.value);
+    if (value !== undefined) out.value = value;
+    return out;
+  });
+}
+
+/** 插入一页幻灯片：模板展开成一组元素（同 group），缺省放在最下层，作为“背景层” */
+function addSlideOp(s: Scope, op: Record<string, unknown>) {
+  const template = typeof op.template === "string" ? op.template : "";
+  if (!SLIDE_TEMPLATES[template]) fail("未知幻灯片模板「" + template + "」，可用：" + Object.keys(SLIDE_TEMPLATES).join("/"));
+  const theme = typeof op.theme === "string" && SLIDE_THEMES[op.theme] ? op.theme : "light";
+  if (op.theme !== undefined && theme !== op.theme) s.warnings.push("未知主题「" + String(op.theme) + "」，已用 light；可用：" + Object.keys(SLIDE_THEMES).join("/"));
+  const start = snapToFrame(s.t, clampOr(op.startSeconds ?? op.atSeconds, 0, 0, 86400));
+  const end = start + Math.max(frameOf(s.t) * 2, clampOr(op.duration, 5, 0.2, 3600));
+  let image = typeof op.image === "string" ? op.image : undefined;
+  if (image && s.ctx.assetExists && !s.ctx.assetExists(image)) {
+    s.warnings.push("素材库里没有「" + image + "」，图片位置先放占位框");
+    image = undefined;
+  }
+  const items = sanitizeSlideItems(op.items)?.map((it) => {
+    if (it.image && s.ctx.assetExists && !s.ctx.assetExists(String(it.image))) delete it.image;
+    return it;
+  });
+  const elements = buildSlide({
+    template, theme,
+    title: slideStr(op.title, 200), subtitle: slideStr(op.subtitle, 300), kicker: slideStr(op.kicker, 80),
+    items, background: op.background !== false, accent: sanitizeColor(op.accent),
+    chart: typeof op.chart === "string" ? op.chart : undefined, image, icon: typeof op.icon === "string" ? op.icon : undefined,
+  }, s.t.meta);
+  const group = takeId(s, op.id, "s");
+  const track = clamp(Math.round(num(op.track) ?? 0), 0, 31);
+  let at = op.layer === "top" ? s.t.overlays.length : 0;
+  elements.forEach((el, i) => {
+    const { delay, ...fields } = el;
+    const elStart = snapToFrame(s.t, Math.min(start + delay, end - frameOf(s.t)));
+    createOverlay(s, { ...fields, id: group + "e" + i, group, track, startSeconds: elStart, endSeconds: end }, at++);
+  });
+}
+
+/** 整组（如一页幻灯片）移动/改时长/解组 */
+function updateGroupOp(s: Scope, op: Record<string, unknown>) {
+  const group = typeof op.group === "string" ? op.group : typeof op.id === "string" ? op.id : "";
+  const els = s.t.overlays.filter((o) => o.group === group);
+  if (!els.length) { s.warnings.push("没有 group 为「" + group + "」的元素"); return; }
+  const frame = frameOf(s.t);
+  const gStart = Math.min(...els.map((o) => o.startSeconds));
+  const gEnd = Math.max(...els.map((o) => o.endSeconds));
+  const newStart = num(op.startSeconds);
+  if (newStart !== undefined) {
+    const delta = snapToFrame(s.t, Math.max(0, newStart)) - gStart;
+    for (const o of els) { o.startSeconds = Math.max(0, o.startSeconds + delta); o.endSeconds = Math.max(o.startSeconds + frame, o.endSeconds + delta); }
+  }
+  const newEnd = num(op.endSeconds);
+  if (newEnd !== undefined) {
+    const curStart = Math.min(...els.map((o) => o.startSeconds)), curEnd = Math.max(...els.map((o) => o.endSeconds));
+    const ne = Math.max(curStart + frame, snapToFrame(s.t, newEnd));
+    for (const o of els) {
+      if (o.endSeconds >= curEnd - frame / 2 || o.endSeconds > ne) o.endSeconds = ne;
+      if (o.startSeconds > o.endSeconds - frame) o.startSeconds = Math.max(curStart, o.endSeconds - frame);
+    }
+  }
+  if (op.ungroup === true) for (const o of els) delete o.group;
+  if (isObj(op.patch)) for (const o of els) patchOverlay(s, o, op.patch as Record<string, unknown>);
+  for (const o of els) trackOfOverlayTouch(s, o.id);
+  void gEnd;
+}
+
+function removeGroupOp(s: Scope, op: Record<string, unknown>) {
+  const group = typeof op.group === "string" ? op.group : typeof op.id === "string" ? op.id : "";
+  const before = s.t.overlays.length;
+  s.t.overlays = s.t.overlays.filter((o) => {
+    if (o.group !== group) return true;
+    trackOfOverlayTouch(s, o.id);
+    return false;
+  });
+  if (s.t.overlays.length === before) s.warnings.push("没有 group 为「" + group + "」的元素");
+}
 function keyframeOp(s: Scope, op: Record<string, unknown>, mode: "set" | "remove" | "clear") {
   const target = keyframeTarget(s, op.id);
   if (target.lock) assertUnlocked(s, target.lock);
@@ -1035,6 +1357,10 @@ function applyOne(s: Scope, op: Op) {
       return;
     }
     case "splitOverlay": return splitOverlayOp(s, o);
+    case "arrangeOverlay": return arrangeOverlayOp(s, o);
+    case "addSlide": return addSlideOp(s, o);
+    case "updateGroup": return updateGroupOp(s, o);
+    case "removeGroup": return removeGroupOp(s, o);
     case "setMeta": {
       const patch = sanitizeMetaPatch(isObj(o.patch) ? o.patch : o);
       if (!Object.keys(patch).length) fail("setMeta 缺少有效的 fps/width/height/background");
@@ -1106,7 +1432,7 @@ export function applyOps(timeline: Timeline, rawOps: readonly unknown[], ctx: Op
       op: op.op,
       status: !effective ? "ignored" : s.warnings.length ? "partial" : "applied",
       ...(s.newIds.length === 1 ? { id: s.newIds[0] } : s.newIds.length ? { ids: s.newIds } : id ? { id } : {}),
-      ...(s.newIds.length > 1 ? { id: op.op === "addClip" ? s.newIds[0] : s.newIds[s.newIds.length - 1] } : {}),
+      ...(s.newIds.length > 1 ? { id: op.op === "addClip" || op.op === "addSlide" ? s.newIds[0] : s.newIds[s.newIds.length - 1] } : {}),
       ...(s.warnings.length ? { warnings: s.warnings } : !effective ? { reason: "没有产生变化" } : {}),
     });
   });

@@ -13,20 +13,20 @@ import {
   continueRender,
 } from "remotion";
 import type { Animations, AudioClip, AudioTrack, Clip, Filter, Overlay, Timeline, TransitionObject } from "./schema";
-import { clipBox, evalKeyframes, mainTrackStarts, secToFrames } from "./timeline";
+import { clipBox, elementOrder, evalKeyframes, secToFrames } from "./timeline";
 import { resolveAnimations } from "./presets";
-import { fontById, injectFontFaceStyle, overlayFontFamily } from "./fonts";
+import { fontById, injectFontFaceStyle } from "./fonts";
+import { AssetResolver, MediaErrorHandler, type Resolver } from "./renderContext";
+import { ElementView } from "./elements";
 
 // 预览与导出共用的合成组件。素材地址由 assetBase（引擎 HTTP 地址）解析；旧调用可传 directSources。
-type Resolver = (src: string) => string;
-const AssetResolver = React.createContext<Resolver>(staticFile);
-const MediaErrorHandler = React.createContext<((src: string) => void) | undefined>(undefined);
 
 // ---------- 动画求值 ----------
 interface AnimState {
   transform?: string;
   opacity?: number;
   filter?: string;
+  clipPath?: string;
 }
 
 const FILTER_KEYS: [keyof Filter, string, string][] = [
@@ -60,9 +60,12 @@ export const animState = (a: Animations | undefined, sec: number): AnimState => 
   if (scale !== undefined && scale !== 1) tf.push("scale(" + scale + ")");
   if ((sx !== undefined && sx !== 1) || (sy !== undefined && sy !== 1)) tf.push("scale(" + (sx ?? 1) + ", " + (sy ?? 1) + ")");
   if (rot !== undefined && rot !== 0) tf.push("rotate(" + rot + "deg)");
+  const c = (v: number | undefined) => Math.max(0, Math.min(1, v ?? 0)) * 100;
+  const cl = c(evalKeyframes(a.clipL, sec)), cr = c(evalKeyframes(a.clipR, sec)), ct = c(evalKeyframes(a.clipT, sec)), cb = c(evalKeyframes(a.clipB, sec));
   return {
     ...(tf.length ? { transform: tf.join(" ") } : {}),
     ...(opacity !== undefined ? { opacity: Math.max(0, Math.min(1, opacity)) } : {}),
+    ...(cl || cr || ct || cb ? { clipPath: "inset(" + ct + "% " + cr + "% " + cb + "% " + cl + "%)" } : {}),
   };
 };
 
@@ -128,6 +131,7 @@ const MediaLayer: React.FC<{
       filter: filterCss(clip.filter, anims, local),
       opacity: layerOpacity,
       ...(applyTransform && anim.transform ? { transform: anim.transform } : {}),
+      ...(applyTransform && anim.clipPath ? { clipPath: anim.clipPath } : {}),
     }}>
       {media}
     </AbsoluteFill>
@@ -254,6 +258,7 @@ const PipBox: React.FC<{ clip: Clip; anims: Animations | undefined; box: { x: nu
       overflow: "hidden", borderRadius: radiusPx, boxShadow: shadow,
       opacity: (clip.opacity ?? 1) * (anim.opacity ?? 1),
       transform: anim.transform,
+      clipPath: anim.clipPath,
       mixBlendMode: clip.blendMode as React.CSSProperties["mixBlendMode"],
     }}>
       {children}
@@ -312,57 +317,9 @@ const FontGate: React.FC<{ timeline: Timeline; fontsBase?: string }> = ({ timeli
   return null;
 };
 
-// ---------- 文字层 ----------
-const LEGACY_POS: Record<string, React.CSSProperties> = {
-  top: { top: 60, left: 0, right: 0 },
-  center: { top: "50%", left: 0, right: 0, transform: "translateY(-50%)" },
-  bottom: { bottom: 80, left: 0, right: 0 },
-};
-const DEFAULT_SHADOW = "0 2px 8px rgba(0,0,0,0.85)";
-const justify = (align: string) => (align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center");
-
-export const OverlayView: React.FC<{ ov: Overlay }> = ({ ov }) => {
-  const { fps } = useVideoConfig();
-  const sec = useCurrentFrame() / fps;
-  const anims = resolveAnimations(ov, ov.endSeconds - ov.startSeconds);
-  const anim = animState(anims, sec);
-  const free = ov.x !== undefined || ov.y !== undefined;
-  const align = ov.align ?? "center";
-  const width = (ov.maxWidth ?? 0.9) * 100;
-  const outer: React.CSSProperties = free
-    ? { position: "absolute", left: (ov.x ?? 0.5) * 100 + "%", top: (ov.y ?? 0.85) * 100 + "%", transform: "translate(-50%, -50%)", width: width + "%", textAlign: align, display: "flex", justifyContent: justify(align) }
-    : { position: "absolute", ...LEGACY_POS[ov.position], display: "flex", justifyContent: justify(align), paddingInline: (100 - width) / 2 + "%", textAlign: align };
-  const shadow = ov.shadow === false ? "none" : ov.shadow ? (ov.shadow.x ?? 0) + "px " + (ov.shadow.y ?? 2) + "px " + ov.shadow.blur + "px " + ov.shadow.color : DEFAULT_SHADOW;
-  const bg = ov.background;
-  const pad = bg ? bg.padding ?? 12 : 0;
-  return (
-    <div style={outer}>
-      <div style={{
-        position: "relative",
-        display: "inline-block",
-        maxWidth: "100%",
-        fontSize: ov.fontSize,
-        color: ov.color,
-        fontFamily: overlayFontFamily(ov.fontFamily),
-        ...(ov.fontWeight ? { fontWeight: ov.fontWeight } : {}),
-        fontStyle: ov.italic ? "italic" : undefined,
-        textDecoration: ov.underline ? "underline" : undefined,
-        letterSpacing: ov.letterSpacing !== undefined ? ov.letterSpacing + "em" : undefined,
-        lineHeight: ov.lineHeight ?? 1.3,
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
-        textShadow: shadow,
-        ...(ov.stroke && ov.stroke.width > 0 ? { WebkitTextStroke: ov.stroke.width + "px " + ov.stroke.color, paintOrder: "stroke fill" } : {}),
-        padding: bg ? pad + "px " + Math.round(pad * 1.4) + "px" : undefined,
-        filter: filterCss(undefined, anims, sec),
-        ...anim,
-      }}>
-        {bg && <span aria-hidden style={{ position: "absolute", inset: 0, background: bg.color, opacity: bg.opacity ?? 0.75, borderRadius: bg.radius ?? 8, zIndex: -1 }} />}
-        <span style={{ position: "relative" }}>{ov.text}</span>
-      </div>
-    </div>
-  );
-};
+// ---------- 元素层（文字/形状/图片/图标/图表）见 elements.tsx ----------
+/** @deprecated 旧名，等同 ElementView */
+export const OverlayView = ElementView;
 
 // ---------- 主合成 ----------
 export interface TimelineVideoProps {
@@ -385,7 +342,7 @@ export const TimelineVideo: React.FC<TimelineVideoProps> = ({ timeline, assetBas
   }, [assetBase, directSources]);
   const voice = React.useMemo(() => voiceIntervals(timeline), [timeline]);
   const [mainTrack, ...overlayTracks] = timeline.videoTracks;
-  const overlays = React.useMemo(() => [...timeline.overlays].sort((a, b) => (a.track ?? 0) - (b.track ?? 0)), [timeline.overlays]);
+  const overlays = React.useMemo(() => elementOrder(timeline.overlays), [timeline.overlays]);
   return (
     <MediaErrorHandler.Provider value={onMediaError}>
       <AssetResolver.Provider value={resolver}>
@@ -400,7 +357,7 @@ export const TimelineVideo: React.FC<TimelineVideoProps> = ({ timeline, assetBas
           {timeline.audioTracks.map((tr) => tr.clips.map((clip) => <AudioSegment key={clip.id} clip={clip} track={tr} voice={voice} />))}
           {overlays.map((ov) => (
             <Sequence key={ov.id} from={secToFrames(fps, ov.startSeconds)} durationInFrames={Math.max(1, secToFrames(fps, ov.endSeconds) - secToFrames(fps, ov.startSeconds))}>
-              <AbsoluteFill><OverlayView ov={ov} /></AbsoluteFill>
+              <AbsoluteFill><ElementView ov={ov} /></AbsoluteFill>
             </Sequence>
           ))}
         </AbsoluteFill>

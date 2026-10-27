@@ -212,6 +212,8 @@ async function admitAsset(store, pid, temp, wantedName) {
 function usageMap(timeline) {
   const m = new Map();
   for (const tr of [...timeline.videoTracks, ...timeline.audioTracks]) for (const c of tr.clips) m.set(c.src, (m.get(c.src) ?? 0) + 1);
+  // 图片元素也算引用：正在用的素材不能删
+  for (const o of timeline.overlays) if (o.image?.src) m.set(o.image.src, (m.get(o.image.src) ?? 0) + 1);
   return m;
 }
 
