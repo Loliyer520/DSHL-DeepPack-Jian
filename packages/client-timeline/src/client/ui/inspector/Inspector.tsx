@@ -1,7 +1,8 @@
 // 属性面板：按选中对象切换（视频/图片片段 · 音频 · 文字 · 轨道 · 标记 · 多选 · 无选中=项目设置）
 import React, { useEffect, useRef, useState } from 'react';
-import type { AudioClip, AudioTrack, Marker, Timeline, VideoTrack } from '../../../../../engine/src/schema';
+import type { AudioClip, AudioTrack, Marker, Overlay, Timeline, VideoTrack } from '../../../../../engine/src/schema';
 import { elementLabel, groupTitle, isBoxElement, locateClip, srcLabel } from '../../../../../engine/src/timeline';
+import { displayText, stripMarkup } from '../../../../../engine/src/elements';
 import { useEditor, useStore } from '../../context';
 import type { Op } from '../../engine';
 import { useSelection } from '../../selection';
@@ -12,6 +13,9 @@ import { Field } from '../common';
 import { ClipInspector, clipTabs, type ClipTab } from './ClipInspector';
 import { AlignSection, ElementInspector, GroupInspector, elementTabs, type ElTab } from './ElementInspector';
 import { AnimNumber, ColorField, NumberField, Section, Seg, Toggle, useEdit, useInspectTime, type Target } from './fields';
+
+/** 元素此刻显示的文字（数字滚动取终值，去掉富文本标记，取第一行） */
+const shownText = (o: Overlay) => stripMarkup(displayText(o, 1)).trim().split('\n')[0];
 
 function Tabs<T extends string>({ tabs, value, onChange }: { tabs: [T, string][]; value: T; onChange: (t: T) => void }) {
   if (tabs.length < 2) return null;
@@ -270,7 +274,7 @@ export function Inspector({ actions, section, onSection }: { actions: Actions; s
       const tab = tabs.some(([k]) => k === textTab) ? textTab : tabs[0][0];
       const icon = o.kind === 'shape' ? 'shapes' : o.kind === 'image' ? 'image' : o.kind === 'icon' ? 'star' : o.kind === 'chart' ? 'chart' : 'text';
       body = <>
-        <Header icon={icon} title={(o.name && o.text.trim() ? groupTitle([o]) : elementLabel(o)).slice(0, 24) || '（空文字）'} sub={(KIND_NAME[o.kind ?? 'subtitle'] ?? '元素') + (o.name && o.text.trim() ? '「' + o.name + '」' : '') + (o.group ? ' · 幻灯片内' : '') + ' · ' + timecode(o.startSeconds, fps) + ' – ' + timecode(o.endSeconds, fps)}>
+        <Header icon={icon} title={(shownText(o) || elementLabel(o)).slice(0, 24) || '（空文字）'} sub={(KIND_NAME[o.kind ?? 'subtitle'] ?? '元素') + (o.name && shownText(o) ? '「' + o.name + '」' : '') + (o.group ? ' · 幻灯片内' : '') + ' · ' + timecode(o.startSeconds, fps) + ' – ' + timecode(o.endSeconds, fps)}>
           {o.group && <button className="dj-icon-btn" title="选中整页幻灯片" aria-label="选中整页幻灯片" onClick={() => actions.selectGroup(o.group!)}><Icon name="slides" /></button>}
           <button className="dj-icon-btn" title="交给 AI" aria-label="交给 AI" onClick={() => actions.askAi() || ed.store.toast('info', '当前宿主不支持插入到对话框')}><Icon name="sparkle" /></button>
         </Header>

@@ -199,9 +199,10 @@ export function elementLabel(o: Overlay): string {
   return KIND_LABEL[o.kind ?? "subtitle"] ?? "元素";
 }
 
-/** 一组元素（一页幻灯片）的标题：字号最大的那段文字 */
+/** 一组元素（一页幻灯片）的标题：名为「标题」或 kind=title 的文字，否则字号最大的文字（数字滚动不算） */
 export function groupTitle(members: readonly Overlay[]): string {
-  const head = members.filter((o) => o.kind !== "subtitle" && o.text?.trim()).sort((a, b) => b.fontSize - a.fontSize)[0];
+  const texts = members.filter((o) => o.kind !== "subtitle" && !o.counter && o.text?.trim());
+  const head = texts.find((o) => o.name === "标题" || o.kind === "title") ?? [...texts].sort((a, b) => b.fontSize - a.fontSize)[0];
   return head ? head.text.trim().replace(/\*\*|==|\[#[0-9a-fA-F]{3,8}\]|\[\/\]/g, "").split("\n")[0] : "幻灯片";
 }
 
