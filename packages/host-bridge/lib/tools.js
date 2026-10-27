@@ -119,6 +119,29 @@ export const TOOLS = [
     },
   },
   {
+    name: 'djian_catalog',
+    description: '查询可用的幻灯片资源：icons 内置图标（可按 keyword 过滤，中文名或英文名）、shapes 形状、charts 图表、templates 幻灯片模板、themes 配色主题、presets 动画预设、fonts 字体。做 PPT 式画面前先查这里，用原生元素而不是生成图片。',
+    parameters: { type: 'object', properties: { what: { type: 'string', enum: ['icons', 'shapes', 'charts', 'templates', 'themes', 'presets', 'fonts', 'all'] }, keyword: { type: 'string', description: '过滤图标：如 “数据”“rocket”“箭头”' } }, required: ['what'] },
+    async execute(client, ctx, args) {
+      const c = await client.get('/api/catalog', { timeoutMs: 10_000 });
+      const kw = str(args.keyword)?.trim().toLowerCase();
+      const parts = [];
+      const want = (k) => args.what === k || args.what === 'all';
+      if (want('icons')) {
+        const icons = kw ? c.icons.filter((i) => i.name.includes(kw) || i.label.includes(kw) || i.group.includes(kw)) : c.icons;
+        const byGroup = new Map();
+        for (const i of icons) byGroup.set(i.group, [...(byGroup.get(i.group) ?? []), i.name + ' ' + i.label]);
+        parts.push('图标（' + icons.length + ' 个，icon:{name}）：\n' + ([...byGroup].map(([g, l]) => g + '：' + l.join('、')).join('\n') || '没有匹配的图标'));
+      }
+      if (want('shapes')) parts.push('形状 shape.type：' + c.shapes.map((x) => x.type + ' ' + x.label).join('、'));
+      if (want('charts')) parts.push('图表 chart.type：' + c.charts.map((x) => x.type + ' ' + x.label).join('、'));
+      if (want('templates')) parts.push('幻灯片模板 addSlide.template：\n' + c.templates.map((x) => x.key + ' ' + x.label + '：' + x.hint).join('\n'));
+      if (want('themes')) parts.push('配色主题 addSlide.theme：' + c.themes.map((x) => x.key + ' ' + x.label + (x.dark ? '（深色）' : '（浅色）') + ' 强调色 ' + x.accent).join('、'));
+      if (want('presets')) parts.push('动画预设：\n' + Object.entries(c.presets.reduce((m, p) => ({ ...m, [p.group]: [...(m[p.group] ?? []), p.key + ' ' + p.label] }), {})).map(([g, l]) => g + '：' + l.join('、')).join('\n') + '\n逐字/逐词/逐行 textEffect.type：' + c.textEffects.join('、'));
+      if (want('fonts')) parts.push('字体 fontFamily：' + c.fonts.map((f) => f.id + ' ' + f.label).join('、'));
+      return { value: args.what === 'all' ? c : { [args.what]: c[args.what] }, text: parts.join('\n\n') };
+    },
+  },  {
     name: 'djian_subtitles',
     description: '字幕文件（SRT / WebVTT）：action=import 把字幕文件导入为时间线字幕（path 本地文件或 text 文本；与已有字幕重叠时自动放到新的字幕层，整批一步可撤销）；action=export 返回当前时间线字幕的 SRT 文本（titles=true 连标题一起）。逐条改字幕用 djian_apply_ops。',
     parameters: { type: 'object', properties: { action: { type: 'string', enum: ['import', 'export'] }, path: { type: 'string', description: '字幕文件绝对路径（import）' }, text: { type: 'string', description: '字幕文本（import，与 path 二选一）' }, titles: { type: 'boolean' } }, required: ['action'] },
