@@ -67,7 +67,7 @@ function Waveform({ pid, src, inPoint, duration, speed, width }: { pid: string; 
   return <canvas ref={ref} className="dj-wave" style={{ width: '100%' }} />;
 }
 
-const KIND_GLYPH: Record<string, string> = { subtitle: 'T ', title: 'T ', text: '¶ ', shape: '◆ ', image: '▣ ', icon: '★ ', chart: '▥ ', slide: '▤ ' };
+const KIND_GLYPH: Record<string, string> = { subtitle: 'T ', title: 'T ', text: '¶ ', shape: '◆ ', image: '▣ ', icon: '★ ', chart: '▥ ', math: '∑ ', plot: '⌇ ', camera: '◎ ', slide: '▤ ' };
 
 const kfTimes = (a: Animations | undefined) => {
   const set = new Set<number>();

@@ -57,6 +57,9 @@ export const CSS_STAGE = String.raw`
 .dj-gizmo .dj-rot{position:absolute;left:calc(50% - 6px);top:-30px;width:12px;height:12px;border-radius:50%;background:#fff;border:1.5px solid var(--dj-hl);cursor:grab}
 .dj-gizmo .dj-rot::after{content:"";position:absolute;left:4.5px;top:11px;width:1.5px;height:17px;background:var(--dj-hl)}
 .dj-gizmo.dj-multi{outline-style:dashed;outline-width:1px}
+.dj-gizmo.dj-camframe{outline:2px dashed #fbbf24}
+.dj-gizmo.dj-camframe b{border-color:#fbbf24}
+.dj-camlabel{position:absolute;left:6px;top:6px;padding:1px 6px;border-radius:4px;background:#fbbf24;color:#111;font-size:11px;font-weight:600;white-space:nowrap;pointer-events:none}
 .dj-picker{position:absolute;pointer-events:auto;touch-action:none}
 .dj-guide{position:absolute;background:#f0f;pointer-events:none;opacity:.8}
 .dj-guide.dj-v{top:0;bottom:0;width:1px}.dj-guide.dj-h{left:0;right:0;height:1px}
@@ -252,6 +255,9 @@ export const CSS_PANELS = String.raw`
 .dj-tile{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-height:48px;padding:7px 9px;border:0;border-radius:var(--dj-r2);background:var(--dj-s2);color:var(--dj-t1);font:inherit;text-align:left;cursor:pointer}
 .dj-tile:hover{background:var(--dj-s3)}
 .dj-tile b{font-size:12.5px;font-weight:600}.dj-tile small{font-size:11px;color:var(--dj-t3);line-height:1.35}
+.dj-tile small code{font:10.5px ui-monospace,Consolas,monospace;word-break:break-all}
+.dj-texpreview{display:block;max-width:100%;margin-top:3px;color:var(--dj-t1)}
+.dj-insert-h{margin:10px 0 6px;font-size:11.5px;font-weight:600;color:var(--dj-t2)}.dj-insert-h:first-child{margin-top:0}
 .dj-pickgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(34px,1fr));gap:4px}
 .dj-pickgrid-lg{grid-template-columns:repeat(auto-fill,minmax(44px,1fr))}
 .dj-pickgrid button{display:flex;align-items:center;justify-content:center;aspect-ratio:1;border:0;border-radius:var(--dj-r2);background:var(--dj-s2);color:var(--dj-t2);cursor:pointer;padding:0}
@@ -267,6 +273,10 @@ export const CSS_PANELS = String.raw`
 .dj-datalist{display:flex;flex-direction:column;gap:4px}
 .dj-datarow{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) 28px 24px;gap:4px;align-items:center}
 .dj-chip.dj-palette{display:inline-flex;align-items:center;gap:3px}
+.dj-snippets{margin-top:6px}.dj-snippets .dj-chip{height:24px;padding:0 8px;font-family:"Cambria Math","STIX Two Math","Times New Roman",serif}
+.dj-plotitem{display:flex;flex-direction:column;gap:6px;padding:8px;border-radius:var(--dj-r2);background:var(--dj-s2)}
+.dj-plotitem .dj-input,.dj-plotitem .dj-select{background:var(--dj-s1,var(--dj-s3))}
+.dj-plotitem-head{display:flex;align-items:center;gap:4px}.dj-plotitem-head .dj-select{flex:1}.dj-plotitem-head .dj-seg{flex:1}
 .dj-chip.dj-palette i{width:9px;height:9px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(255,255,255,.25)}
 .dj-elrow{cursor:pointer;font-size:12px}
 .dj-elrow:hover{background:var(--dj-s3)!important}

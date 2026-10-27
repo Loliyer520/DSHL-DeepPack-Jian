@@ -14,10 +14,13 @@ import { Field, ScrubNumber } from '../common';
 import { AnimationTab } from './ClipInspector';
 import { TextInspector, TimeSection, TransformSection, overlayTarget } from './TextInspector';
 import { ColorField, NumberField, Section, Seg, Toggle, useEdit } from './fields';
+import { CameraPanel, MathPanel, MorphSection, PathSection, PlotPanel } from './MathInspector';
 
 export type ElTab = 'style' | 'text' | 'layout' | 'animation';
-const STYLE_TAB: Record<string, string> = { shape: '形状', image: '图片', icon: '图标', chart: '图表' };
+const STYLE_TAB: Record<string, string> = { shape: '形状', image: '图片', icon: '图标', chart: '图表', plot: '坐标系' };
 export function elementTabs(o: Overlay): [ElTab, string][] {
+  if (o.kind === 'math') return [['style', '公式'], ['layout', '位置'], ['animation', '动画']];
+  if (o.kind === 'camera') return [['style', '镜头'], ['animation', '动画']];
   if (!isBoxElement(o)) return [['text', '文本'], ['layout', '位置'], ['animation', '动画']];
   const style: [ElTab, string] = ['style', STYLE_TAB[o.kind ?? ''] ?? '样式'];
   return o.kind === 'shape' ? [style, ['text', '文字'], ['layout', '位置'], ['animation', '动画']] : [style, ['layout', '位置'], ['animation', '动画']];
@@ -80,7 +83,8 @@ function ShadowSection({ o }: { o: Overlay }) {
 // ---------- 形状 ----------
 export function ShapeThumb({ type, size = 24 }: { type: string; size?: number }) {
   const line = (LINE_SHAPES as readonly string[]).includes(type);
-  const spec = (line ? { type, stroke: { color: 'currentColor', width: 2 } } : { type, fill: 'currentColor', radius: 4 }) as NonNullable<Overlay['shape']>;
+  const spec = (type === 'path' ? { type, path: 'M4,85 C30,-10 70,110 96,15', stroke: { color: 'currentColor', width: 2 } }
+    : line ? { type, stroke: { color: 'currentColor', width: 2 } } : { type, fill: 'currentColor', radius: 4 }) as NonNullable<Overlay['shape']>;
   return <span className="dj-thumb" style={{ width: size, height: size }}><ShapeSvg spec={spec} w={size} h={size} progress={1} uid={'thumb-' + type} /></span>;
 }
 
@@ -98,6 +102,8 @@ function ShapePanel({ o, timeline }: { o: Overlay; timeline: Timeline }) {
             <button key={t} type="button" title={SHAPE_LABEL[t] ?? t} aria-label={SHAPE_LABEL[t] ?? t} aria-pressed={s.type === t}
               onClick={() => {
                 const toLine = (LINE_SHAPES as readonly string[]).includes(t);
+                // 自由路径缺省是一条开放曲线：用描边，不填充
+                if (t === 'path' && s.type !== 'path') { set({ type: t, fill: null, stroke: { color: stroke?.color ?? (typeof s.fill === 'string' ? s.fill : '#ffffff'), width: stroke?.width ?? 6 } }, '形状：自由路径'); return; }
                 if (toLine === line) { set({ type: t }, '形状：' + (SHAPE_LABEL[t] ?? t)); return; }
                 // 线条 ↔ 闭合形状：换掉不适用的填充/描边，并给出合适的高度（闭合形状按像素等宽）
                 const { width: W, height: H } = timeline.meta;
@@ -108,6 +114,7 @@ function ShapePanel({ o, timeline }: { o: Overlay; timeline: Timeline }) {
           ))}
         </div>
       </Section>
+      {s.type === 'path' && <PathSection o={o} />}
       {!line && <Section title="填充"><FillField value={s.fill} onChange={(f, label) => set({ fill: f }, label)} /></Section>}
       <Section title={line ? '线条' : '描边'} extra={!line && <Toggle label="" checked={Boolean(stroke)} onChange={(v) => set({ stroke: v ? { color: '#ffffff', width: 4 } : null }, v ? '开启描边' : '关闭描边')} />}>
         {(stroke || line) && <>
@@ -381,11 +388,13 @@ function BoxLayout({ o, timeline, now, actions }: { o: Overlay; timeline: Timeli
         <div className="dj-grid">
           <NumberField label="中心 X" value={box.x} scale={100} suffix="%" step={0.002} min={-1} max={2} digits={1} ops={(v) => pu(o, { x: v, ...(o.y === undefined ? { y: box.y } : {}) })} editLabel="移动元素" />
           <NumberField label="中心 Y" value={box.y} scale={100} suffix="%" step={0.002} min={-1} max={2} digits={1} ops={(v) => pu(o, { y: v, ...(o.x === undefined ? { x: box.x } : {}) })} editLabel="移动元素" />
-          <NumberField label="宽" value={box.w} scale={100} suffix="%" step={0.002} min={0.002} max={4} digits={1} ops={(v) => pu(o, { w: v })} editLabel="调整宽度" />
-          {!autoH && <NumberField label="高" value={box.h} scale={100} suffix="%" step={0.002} min={0.002} max={4} digits={1} ops={(v) => pu(o, { h: v })} editLabel="调整高度" />}
+          {o.kind === 'math'
+            ? <NumberField label="字号" value={o.fontSize} step={1} min={8} max={600} digits={0} suffix="px" ops={(v) => pu(o, { fontSize: Math.round(v) })} editLabel="公式字号" />
+            : <NumberField label="宽" value={box.w} scale={100} suffix="%" step={0.002} min={0.002} max={4} digits={1} ops={(v) => pu(o, { w: v })} editLabel="调整宽度" />}
+          {!autoH && o.kind !== 'math' && <NumberField label="高" value={box.h} scale={100} suffix="%" step={0.002} min={0.002} max={4} digits={1} ops={(v) => pu(o, { h: v })} editLabel="调整高度" />}
           <NumberField label="旋转" value={o.rotate ?? 0} step={1} min={-360} max={360} digits={1} suffix="°" ops={(v) => pu(o, { rotate: v })} editLabel="旋转" />
           <NumberField label="不透明度" value={o.opacity ?? 1} scale={100} suffix="%" step={0.01} min={0} max={1} digits={0} ops={(v) => pu(o, { opacity: v })} editLabel="不透明度" />
-          {!isBoxElement(o) && <Toggle label="固定高度" checked={o.h !== undefined} onChange={(v) => set({ h: v ? Math.round(box.h * 1000) / 1000 : null }, v ? '固定高度' : '自动高度')} />}
+          {!isBoxElement(o) && o.kind !== 'math' && <Toggle label="固定高度" checked={o.h !== undefined} onChange={(v) => set({ h: v ? Math.round(box.h * 1000) / 1000 : null }, v ? '固定高度' : '自动高度')} />}
         </div>
       </Section>
       <Section title="对齐画布">
@@ -396,6 +405,7 @@ function BoxLayout({ o, timeline, now, actions }: { o: Overlay; timeline: Timeli
       </Section>
       <ArrangeSection o={o} actions={actions} />
       <TimeSection o={o} fps={fps} />
+      <MorphSection o={o} timeline={timeline} now={now} actions={actions} />
       <TransformSection o={o} fps={fps} now={now} title="动画变换（关键帧）" />
     </>
   );
@@ -405,7 +415,7 @@ export function ElementInspector({ o, tab, timeline, now, actions }: { o: Overla
   const fps = timeline.meta.fps;
   if (tab === 'animation') return <AnimationTab target={overlayTarget(o)} kind="overlay" effects={o.effects} fps={fps} now={now} />;
   if (tab === 'layout') {
-    if (o.w !== undefined || isBoxElement(o)) return <BoxLayout o={o} timeline={timeline} now={now} actions={actions} />;
+    if (o.w !== undefined || isBoxElement(o) || o.kind === 'math') return <BoxLayout o={o} timeline={timeline} now={now} actions={actions} />;
     return <><TextInspector o={o} tab="layout" timeline={timeline} now={now} /><ArrangeSection o={o} actions={actions} /></>;
   }
   if (tab === 'text') return <TextInspector o={o} tab="text" timeline={timeline} now={now} extra={<TextBoxSection o={o} />} />;
@@ -413,6 +423,9 @@ export function ElementInspector({ o, tab, timeline, now, actions }: { o: Overla
   if (o.kind === 'image' && o.image) return <ImagePanel o={o} />;
   if (o.kind === 'icon' && o.icon) return <IconPanel o={o} />;
   if (o.kind === 'chart' && o.chart) return <ChartPanel o={o} />;
+  if (o.kind === 'math') return <MathPanel o={o} actions={actions} now={now} />;
+  if (o.kind === 'plot' && o.plot) return <PlotPanel o={o} />;
+  if (o.kind === 'camera') return <><CameraPanel o={o} timeline={timeline} now={now} /><TimeSection o={o} fps={fps} /></>;
   return <div className="dj-empty-state">这个元素缺少样式数据</div>;
 }
 

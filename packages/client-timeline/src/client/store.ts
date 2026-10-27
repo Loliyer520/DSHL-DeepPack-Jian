@@ -33,7 +33,7 @@ interface UndoEntry { label: string; before: Timeline; after: Timeline }
 
 const uid = (p: string) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const ADD_OPS = new Set(['addClip', 'addAudio', 'addOverlay', 'addTrack', 'addMarker', 'addSlide']);
-const NEW_ID_OPS = new Set(['splitClip', 'splitOverlay', 'duplicateClip']);
+const NEW_ID_OPS = new Set(['splitClip', 'splitOverlay', 'duplicateClip', 'transform']);
 
 /** 把乐观应用时本地生成的 id 写回操作，保证服务端使用同一批 id（选中/引用不丢失） */
 export function pinIds(ops: Op[], receipts: LocalReceipt[]): Op[] {

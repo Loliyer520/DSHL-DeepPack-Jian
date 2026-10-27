@@ -9,11 +9,33 @@ import type { Actions } from '../actions';
 import { Icon, type IconName } from '../Icon';
 import { readPref, writePref } from '../prefs';
 import { IconPicker, ShapeThumb } from './inspector/ElementInspector';
+import { TexPreview } from './inspector/MathInspector';
 
-type Tab = 'text' | 'shape' | 'icon' | 'chart' | 'image' | 'slide';
-const TABS: [Tab, string, IconName][] = [['slide', '幻灯片', 'slides'], ['text', '文字', 'text'], ['shape', '形状', 'shapes'], ['icon', '图标', 'star'], ['chart', '图表', 'chart'], ['image', '图片', 'image']];
+type Tab = 'text' | 'shape' | 'icon' | 'chart' | 'image' | 'slide' | 'math';
+const TABS: [Tab, string, IconName][] = [['slide', '幻灯片', 'slides'], ['text', '文字', 'text'], ['shape', '形状', 'shapes'], ['math', '数学', 'sigma'], ['icon', '图标', 'star'], ['chart', '图表', 'chart'], ['image', '图片', 'image']];
 
-const TEMPLATE_HINT: Record<string, string> = { cover: '主标题、副标题、眉题', section: '章节号 + 标题', cards: '2–4 张卡片，带图标', bullets: '要点列表 + 配图图标', stats: '1–4 个数字滚动', quote: '大号引文 + 出处', compare: '左右两栏对比', timeline: '2–6 个时间节点', steps: '2–5 步流程', chart: '标题 + 柱状/折线/饼图', imageText: '图片 + 文字要点', ending: '结尾致谢页' };
+const TEMPLATE_HINT: Record<string, string> = { cover: '主标题、副标题、眉题', section: '章节号 + 标题', cards: '2–4 张卡片，带图标', bullets: '要点列表 + 配图图标', stats: '1–4 个数字滚动', quote: '大号引文 + 出处', compare: '左右两栏对比', timeline: '2–6 个时间节点', steps: '2–5 步流程', chart: '标题 + 柱状/折线/饼图', imageText: '图片 + 文字要点', formula: '标题 + 逐笔书写的公式', graph: '标题 + 函数图像', ending: '结尾致谢页' };
+
+const FORMULAS: [string, string][] = [
+  ['欧拉公式', 'e^{i\\pi} + 1 = 0'],
+  ['勾股定理', 'a^2 + b^2 = c^2'],
+  ['求根公式', 'x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}'],
+  ['导数定义', "f'(x) = \\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h}"],
+  ['高斯积分', '\\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx = \\sqrt{\\pi}'],
+  ['巴塞尔问题', '\\sum_{n=1}^{\\infty} \\frac{1}{n^2} = \\frac{\\pi^2}{6}'],
+  ['矩阵乘向量', '\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix} \\begin{pmatrix} x \\\\ y \\end{pmatrix}'],
+  ['彩色变量', '{\\color{#58C4DD} x}^2 + {\\color{#F7D96F} y}^2 = 1'],
+];
+const kf = (t: number, v: number, e?: string) => ({ t, v, ...(e ? { e } : {}) });
+// 坐标系示例：插入后在属性面板里改函数、加点/切线/面积、给参数打动画
+const PLOTS: [string, string, Record<string, unknown>][] = [
+  ['函数图像', '正弦与余弦，依次画出', { x: [-6.5, 6.5], y: [-1.8, 1.8], grid: true, items: [{ type: 'fn', id: 'f', fn: 'sin(x)', label: '$\\sin x$' }, { type: 'fn', fn: 'cos(x)', label: '$\\cos x$' }] }],
+  ['切线与导数', '点沿曲线移动，切线跟着转', { x: [-3, 3], y: [-1, 5], grid: true, params: { a: [kf(0.8, -2, 'inOut'), kf(3.6, 2)] }, items: [{ type: 'fn', id: 'f', fn: 'x^2/2', label: '$y=\\frac{x^2}{2}$' }, { type: 'tangent', of: 'f', x: 'a', length: 2.5, start: 0.6 }, { type: 'point', of: 'f', x: 'a', label: '斜率 = {a}', start: 0.6 }] }],
+  ['曲线下面积', '面积随上限增长 + 黎曼和', { x: [-0.5, 4.5], y: [-0.5, 4.5], grid: true, params: { b: [kf(0.8, 0.5, 'inOut'), kf(3.6, 4)] }, items: [{ type: 'fn', id: 'f', fn: 'sqrt(x)*1.8', label: '$y=1.8\\sqrt{x}$' }, { type: 'area', of: 'f', from: 0, to: 'b', start: 0.6 }, { type: 'riemann', of: 'f', from: 0, to: 4, n: 8, start: 2.6, opacity: 0.35 }] }],
+  ['参数曲线', '利萨如图形一笔画出', { x: [-1.6, 1.6], y: [-1.2, 1.2], grid: true, items: [{ type: 'param', fx: 'sin(3t)', fy: 'sin(2t)', t: [0, '2*pi'], label: '' }] }],
+  ['极坐标', '四叶玫瑰线', { x: [-1.4, 1.4], y: [-1.2, 1.2], grid: true, items: [{ type: 'polar', fn: 'cos(2t)', t: [0, '2*pi'] }] }],
+  ['向量', '数轴平面上的向量与和', { x: [-1, 5], y: [-1, 4], grid: true, items: [{ type: 'vector', x: 3, y: 1, label: '$\\vec{u}$' }, { type: 'vector', x: 1, y: 2, label: '$\\vec{v}$' }, { type: 'vector', x: 4, y: 3, label: '$\\vec{u}+\\vec{v}$', start: 1.5 }, { type: 'segment', x0: 3, y0: 1, x: 4, y: 3, dash: true, start: 1.2 }] }],
+];
 
 const CHART_SAMPLE: Record<string, { data: { label: string; value: number }[]; w: number; h: number }> = {
   progress: { data: [{ label: '完成度', value: 72 }], w: 0.45, h: 0.1 },
@@ -93,6 +115,26 @@ export function InsertPanel({ x, y, actions, onClose, scope }: { x: number; y: n
           return <button key={t} type="button" className="dj-tile" onClick={done(() => actions.addElement('chart', s ? { chart: { type: t, data: s.data }, w: s.w, h: s.h || sq(s.w) } : { chart: { type: t } }))}><b>{CHART_LABEL[t] ?? t}</b><small>{s ? '单个数值' : '多组数据，可在属性里编辑'}</small></button>;
         })}
       </div>
+    );
+  } else if (tab === 'math') {
+    const tile = (key: string, title: string, hint: React.ReactNode, run: () => void) => <button key={key} type="button" className="dj-tile" onClick={done(run)}><b>{title}</b><small>{hint}</small></button>;
+    body = (
+      <>
+        <h5 className="dj-insert-h">公式 · 逐笔书写</h5>
+        <div className="dj-tiles">
+          {FORMULAS.map(([title, tex]) => tile(title, title, <TexPreview tex={tex} />, () => actions.addElement('math', { text: tex })))}
+        </div>
+        <h5 className="dj-insert-h">坐标系 · 依次画出</h5>
+        <div className="dj-tiles">
+          {PLOTS.map(([title, hint, plot]) => tile(title, title, hint, () => actions.addElement('plot', { plot, name: title })))}
+        </div>
+        <h5 className="dj-insert-h">其他</h5>
+        <div className="dj-tiles">
+          {tile('arrow', '曲线箭头', '自由路径，描边绘制', () => actions.addElement('shape', { shape: { type: 'path', path: 'M0,100 C20,10 80,10 100,100', arrow: 'end', stroke: { color: '#F7D96F', width: px(6) } }, w: 0.3, h: sq(0.3) * 0.5, animationPreset: 'drawIn' }))}
+          {tile('camera', '镜头', '推近、拉远、平移这一页', () => actions.addCamera())}
+        </div>
+        <p className="dj-hint">相同元素在播放头处“变形”（右键菜单）：公式按字符平滑移动，形状逐点变形，坐标系里的函数连续变化。</p>
+      </>
     );
   } else if (tab === 'image') {
     body = (

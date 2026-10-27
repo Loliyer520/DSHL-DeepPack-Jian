@@ -13,8 +13,8 @@ const snapT = (t: Timeline, s: number) => Math.round(s * t.meta.fps) / t.meta.fp
 /** 复制/粘贴整页时给副本一个新分组，避免和原页合并成一块 */
 const newGroupId = () => 'g' + Date.now().toString(36).slice(-5) + Math.random().toString(36).slice(2, 5);
 
-export type ElementKind = 'text' | 'title' | 'counter' | 'shape' | 'icon' | 'image' | 'chart';
-export const KIND_NAME: Record<string, string> = { subtitle: '字幕', title: '标题', text: '文本框', shape: '形状', image: '图片', icon: '图标', chart: '图表' };
+export type ElementKind = 'text' | 'title' | 'counter' | 'shape' | 'icon' | 'image' | 'chart' | 'math' | 'plot';
+export const KIND_NAME: Record<string, string> = { subtitle: '字幕', title: '标题', text: '文本框', shape: '形状', image: '图片', icon: '图标', chart: '图表', math: '公式', plot: '坐标系', camera: '镜头' };
 
 /** 完整选中的分组（整页幻灯片）：组 id → 成员 */
 export function selectedGroups(t: Timeline, items: Selected[]): Map<string, Overlay[]> {
@@ -73,12 +73,14 @@ export function createActions(ed: Editor) {
       icon: { kind: 'icon', icon: { name: 'star' }, w: 0.08, animationPreset: 'popIn' },
       image: { kind: 'image', w: 0.4, animationPreset: 'fadeIn' },
       chart: { kind: 'chart', chart: { type: 'column', data: [{ label: '一月', value: 32 }, { label: '二月', value: 48 }, { label: '三月', value: 41 }, { label: '四月', value: 66 }], showValues: true }, w: 0.5, h: 0.45, fontSize: px(26), animationPreset: 'growIn' },
+      math: { kind: 'math', text: 'e^{i\\pi} + 1 = 0', fontSize: px(96), animationPreset: 'write' },
+      plot: { kind: 'plot', plot: { x: [-5, 5], y: [-3, 3], grid: true, items: [{ type: 'fn', id: 'f', fn: 'sin(x)', label: '$y=\\sin x$' }] }, w: 0.7, h: (0.7 * tl.meta.width) / tl.meta.height / 1.6, fontSize: px(26), animationPreset: 'create' },
     };
     const merged: Record<string, unknown> = { ...defaults[kind], ...spec };
     if (kind === 'shape') merged.shape = { ...(defaults.shape.shape as object), ...(spec.shape as object | undefined) };
     if (kind === 'chart' && spec.chart) merged.chart = { ...(defaults.chart.chart as object), ...(spec.chart as object) };
     const op: Op = { op: 'addOverlay', startSeconds: at, endSeconds: at + 4, x: 0.5, y: 0.5, ...merged };
-    const LABEL: Record<ElementKind, string> = { text: '文本框', title: '标题', counter: '数字', shape: '形状', icon: '图标', image: '图片', chart: '图表' };
+    const LABEL: Record<ElementKind, string> = { text: '文本框', title: '标题', counter: '数字', shape: '形状', icon: '图标', image: '图片', chart: '图表', math: '公式', plot: '坐标系' };
     const r = run([op], '插入' + LABEL[kind]);
     if (r[0]?.id) ed.sel.select({ kind: 'overlay', id: r[0].id });
   };
@@ -235,6 +237,33 @@ export function createActions(ed: Editor) {
       const group = r[0]?.id;
       const after = t();
       if (group && after) ed.sel.selectMany(after.overlays.filter((o) => o.group === group).map((o) => ({ kind: 'overlay' as const, id: o.id })));
+    },
+    /**
+     * 加镜头：选中元素所在的那页（或播放头处的那页）加一个覆盖整页的镜头；没有幻灯片时加一个全局镜头。
+     * 新镜头取景整个画面，选中后在画布上拖镜头框、在属性里套用推拉平移。
+     */
+    addCamera() {
+      const tl = t(); if (!tl) return;
+      const at = snapT(tl, now());
+      const picked = sel().map((s) => tl.overlays.find((o) => o.id === s.id)).find((o) => o?.group);
+      const group = picked?.group ?? tl.overlays.find((o) => o.group && at >= o.startSeconds && at < o.endSeconds)?.group;
+      if (group && tl.overlays.some((o) => o.kind === 'camera' && o.group === group)) { ed.store.toast('info', '这一页已经有镜头了'); return; }
+      const r = run([group ? { op: 'addOverlay', kind: 'camera', group, name: '镜头' } : { op: 'addOverlay', kind: 'camera', name: '镜头', startSeconds: at, endSeconds: at + 4 }], '添加镜头');
+      if (r[0]?.id) ed.sel.select({ kind: 'overlay', id: r[0].id });
+    },
+    /** 变形：在播放头处把元素切成“变形前/变形后”两段，选中变形后的那段去改样子 */
+    transformAtPlayhead(id: string) {
+      const tl = t(); if (!tl) return;
+      const o = tl.overlays.find((x) => x.id === id);
+      if (!o) return;
+      const at = snapT(tl, now());
+      if (at <= o.startSeconds || at >= o.endSeconds) { ed.store.toast('info', '把播放头移到元素显示期间再变形'); return; }
+      // 变形最多占剩余时长的一半，变完还能停留看清
+      const r = run([{ op: 'transform', id, atSeconds: at, duration: Math.max(0.1, Math.min(1, (o.endSeconds - at) / 2)) }], '变形');
+      if (r[0]?.id) {
+        ed.sel.select({ kind: 'overlay', id: r[0].id });
+        ed.store.toast('info', '已在 ' + at.toFixed(2) + 's 切出变形后的元素：现在改它的文字、形状或位置，播放时会从原来的样子平滑变过来');
+      }
     },
     /** 叠放顺序（置顶/置底/上移/下移） */
     arrange(id: string, to: 'front' | 'back' | 'forward' | 'backward') {

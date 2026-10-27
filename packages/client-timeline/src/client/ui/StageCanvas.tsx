@@ -4,6 +4,7 @@ import React, { useEffect, useReducer, useState } from 'react';
 import type { Overlay, Timeline } from '../../../../engine/src/schema';
 import { clipBox, elementLabel, isBoxElement, LINE_SHAPES, locateClip } from '../../../../engine/src/timeline';
 import { elementBoxPx } from '../../../../engine/src/elements';
+import { activeCamera, cameraState } from '../../../../engine/src/camera';
 import { useEditor, usePlayhead, usePlaying } from '../context';
 import { useSelection, type Selected } from '../selection';
 import type { Op } from '../engine';
@@ -12,8 +13,22 @@ import { ContextMenu, type MenuItem } from './common';
 
 export type Rect = { left: number; top: number; width: number; height: number };
 type Guides = { v: number[]; h: number[] };
-/** 元素在舞台上的静态外框（舞台像素：中心 + 尺寸 + 旋转），不含动画 */
-interface Geo { cx: number; cy: number; w: number; h: number; rot: number; box: boolean; autoH: boolean; live: boolean }
+/** 镜头视图（画布像素）：画面中心对准 (cx, cy)，放大 zoom 倍；没有镜头时是恒等视图 */
+type View = { cx: number; cy: number; zoom: number };
+/** 元素在舞台上的静态外框（舞台像素：中心 + 尺寸 + 旋转），不含动画；view 为它所在的镜头视图 */
+interface Geo { cx: number; cy: number; w: number; h: number; rot: number; box: boolean; autoH: boolean; live: boolean; view: View }
+
+const identity = (t: Timeline): View => ({ cx: t.meta.width / 2, cy: t.meta.height / 2, zoom: 1 });
+/** 画布像素 → 舞台像素（经过镜头） */
+const toStage = (t: Timeline, rect: Rect, v: View, X: number, Y: number): [number, number] => {
+  const sc = rect.width / t.meta.width;
+  return [rect.left + (t.meta.width / 2 + (X - v.cx) * v.zoom) * sc, rect.top + (t.meta.height / 2 + (Y - v.cy) * v.zoom) * sc];
+};
+/** 舞台像素 → 画布比例（经过镜头的逆变换） */
+const toFrac = (t: Timeline, rect: Rect, v: View, sx: number, sy: number): [number, number] => {
+  const sc = rect.width / t.meta.width;
+  return [(v.cx + ((sx - rect.left) / sc - t.meta.width / 2) / v.zoom) / t.meta.width, (v.cy + ((sy - rect.top) / sc - t.meta.height / 2) / v.zoom) / t.meta.height];
+};
 
 const SNAP_PX = 6;
 const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
@@ -21,30 +36,34 @@ type Handle = typeof HANDLES[number];
 const r4 = (v: number) => Math.round(v * 10000) / 10000;
 const rad = (deg: number) => (deg * Math.PI) / 180;
 const isLine = (o: Overlay) => o.kind === 'shape' && (LINE_SHAPES as readonly string[]).includes(o.shape?.type ?? '');
-const editable = (o: Overlay) => !o.counter && (!isBoxElement(o) || o.kind === 'shape');
+const editable = (o: Overlay) => !o.counter && o.kind !== 'camera' && (!isBoxElement(o) || o.kind === 'shape');
 
 const nodeOf = (stage: HTMLElement | null, id: string) => stage?.querySelector<HTMLElement>('[data-el="' + CSS.escape(id) + '"]') ?? null;
 const estimateH = (o: Overlay) => Math.max(1, (o.text || ' ').split('\n').length) * o.fontSize * (o.lineHeight ?? 1.3) + (o.background ? 2 * (o.background.padding ?? 12) : 0) + 2 * (o.padding ?? 0);
 
-export function measure(o: Overlay, t: Timeline, rect: Rect, stage: HTMLElement | null): Geo {
+export function measure(o: Overlay, t: Timeline, rect: Rect, stage: HTMLElement | null, view: View = identity(t)): Geo {
   const W = t.meta.width, H = t.meta.height, sc = rect.width / W;
   const node = nodeOf(stage, o.id);
-  if (isBoxElement(o) || o.w !== undefined) {
-    const { w, h } = elementBoxPx(o, W, H);
-    // 自动高度的文本框：读渲染出的版面高度（offsetHeight 不受 Player 缩放与动画影响）
+  const k = sc * view.zoom;
+  if (isBoxElement(o) || o.w !== undefined || o.kind === 'math') {
+    // 公式按字号自然大小：读渲染出的尺寸（offsetWidth 不受 Player 缩放、镜头与动画影响）
+    const { w, h } = o.kind === 'math' ? { w: node?.offsetWidth ?? o.fontSize * 3, h: node?.offsetHeight ?? o.fontSize } : elementBoxPx(o, W, H);
+    // 自动高度的文本框：读渲染出的版面高度
     const hh = h ?? (node ? node.offsetHeight : estimateH(o));
-    return { cx: rect.left + (o.x ?? 0.5) * rect.width, cy: rect.top + (o.y ?? 0.5) * rect.height, w: w * sc, h: hh * sc, rot: o.rotate ?? 0, box: true, autoH: h === undefined, live: Boolean(node) };
+    const [cx, cy] = toStage(t, rect, view, (o.x ?? 0.5) * W, (o.y ?? 0.5) * H);
+    return { cx, cy, w: w * k, h: hh * k, rot: o.rotate ?? 0, box: true, autoH: h === undefined, live: Boolean(node), view };
   }
   if (node && stage) {
     const r = node.getBoundingClientRect(), s = stage.getBoundingClientRect();
-    return { cx: r.left - s.left + r.width / 2, cy: r.top - s.top + r.height / 2, w: r.width, h: r.height, rot: 0, box: false, autoH: true, live: true };
+    return { cx: r.left - s.left + r.width / 2, cy: r.top - s.top + r.height / 2, w: r.width, h: r.height, rot: 0, box: false, autoH: true, live: true, view };
   }
   // 不在播放头处的旧版字幕：按字号粗估
   const longest = Math.max(1, ...(o.text || ' ').split('\n').map((l) => [...l].reduce((n, ch) => n + (ch.charCodeAt(0) > 255 ? 1 : 0.55), 0)));
   const w = Math.min((o.maxWidth ?? 0.9) * W, longest * o.fontSize * 1.02 + (o.background ? 40 : 0));
   const h = estimateH(o);
-  const cy = o.y !== undefined ? o.y * H : o.position === 'top' ? 60 + h / 2 : o.position === 'center' ? H / 2 : H - 80 - h / 2;
-  return { cx: rect.left + (o.x ?? 0.5) * rect.width, cy: rect.top + cy * sc, w: w * sc, h: h * sc, rot: 0, box: false, autoH: true, live: false };
+  const cyc = o.y !== undefined ? o.y * H : o.position === 'top' ? 60 + h / 2 : o.position === 'center' ? H / 2 : H - 80 - h / 2;
+  const [cx, cy] = toStage(t, rect, view, (o.x ?? 0.5) * W, cyc);
+  return { cx, cy, w: w * k, h: h * k, rot: 0, box: false, autoH: true, live: false, view };
 }
 
 /** 指针下的元素/画中画，按画面叠放从上到下 */
@@ -111,7 +130,7 @@ function drag(e: React.PointerEvent, onMove: (ev: PointerEvent, dx: number, dy: 
   el.addEventListener('pointermove', move); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
 }
 
-export function StageCanvas({ rect, timeline, stage, actions }: { rect: Rect; timeline: Timeline; stage: React.RefObject<HTMLDivElement | null>; actions: Actions }) {
+export function StageCanvas({ rect, timeline, stage, actions, cameraOff = false }: { rect: Rect; timeline: Timeline; stage: React.RefObject<HTMLDivElement | null>; actions: Actions; cameraOff?: boolean }) {
   const ed = useEditor();
   const { primary, items } = useSelection(ed.sel);
   const now = usePlayhead();
@@ -134,12 +153,19 @@ export function StageCanvas({ rect, timeline, stage, actions }: { rect: Rect; ti
   const commit = (label: string) => (ops: Op[]) => { clearGuides(); ed.store.dispatch(ops, { label }); };
   const overlayOf = (id: string) => timeline.overlays.find((o) => o.id === id);
   const selOverlays = items.filter((s) => s.kind === 'overlay').map((s) => overlayOf(s.id)).filter((o): o is Overlay => Boolean(o));
+  // 镜头：元素在镜头画面里显示（被放大/平移），外框与拖动都要按镜头换算
+  const cameras = timeline.overlays.filter((o) => o.kind === 'camera');
+  const viewOf = (o: Overlay): View => {
+    const cam = cameraOff || !cameras.length ? undefined : activeCamera(cameras, o, now);
+    return cam ? cameraState(cam, now - cam.startSeconds, timeline.meta.width, timeline.meta.height) : identity(timeline);
+  };
+  const geoOf = (o: Overlay) => measure(o, timeline, rect, stageEl, viewOf(o));
 
   // ---------- 移动 ----------
   function moveElements(e: React.PointerEvent, ids: string[], primaryId: string, onClick?: () => void) {
     ed.clock.pause();
-    const els = ids.map(overlayOf).filter((o): o is Overlay => Boolean(o));
-    const geos = new Map(els.map((o) => [o.id, measure(o, timeline, rect, stageEl)]));
+    const els = ids.map(overlayOf).filter((o): o is Overlay => Boolean(o && o.kind !== 'camera'));
+    const geos = new Map(els.map((o) => [o.id, geoOf(o)]));
     const base = new Map(els.map((o) => [o.id, { x: o.x ?? 0.5, y: o.y ?? (geos.get(o.id)!.cy - rect.top) / rect.height }]));
     const pg = geos.get(primaryId) ?? [...geos.values()][0];
     if (!pg) return;
@@ -156,43 +182,47 @@ export function StageCanvas({ rect, timeline, stage, actions }: { rect: Rect; ti
         if (sy) { dy += sy.off; g.h.push(sy.at); }
       }
       setGuides(g);
-      return els.map((o) => { const b = base.get(o.id)!; return { op: 'updateOverlay', id: o.id, patch: { x: r4(b.x + dx / rect.width), y: r4(b.y + dy / rect.height) } }; });
+      return els.map((o) => { const b = base.get(o.id)!, z = geos.get(o.id)!.view.zoom; return { op: 'updateOverlay', id: o.id, patch: { x: r4(b.x + dx / (rect.width * z)), y: r4(b.y + dy / (rect.height * z)) } }; });
     }, commit(els.length > 1 ? '移动 ' + els.length + ' 个元素' : '移动元素'), () => { clearGuides(); onClick?.(); }, preview);
   }
 
   // ---------- 缩放（在元素自身坐标系里算，支持旋转后的元素） ----------
   function resize(e: React.PointerEvent, o: Overlay, handle: Handle) {
     ed.clock.pause();
-    const g = measure(o, timeline, rect, stageEl);
+    const g = geoOf(o);
+    const z = g.view.zoom;
     const th = rad(g.rot), cos = Math.cos(th), sin = Math.sin(th);
     const sx = handle.includes('e') ? 1 : handle.includes('w') ? -1 : 0;
     const sy = handle.includes('s') ? 1 : handle.includes('n') ? -1 : 0;
     const corner = sx !== 0 && sy !== 0;
-    const textAuto = g.autoH && !isBoxElement(o);
+    const math = o.kind === 'math';
+    const textAuto = (g.autoH && !isBoxElement(o)) || math;
     drag(e, (ev, dx, dy) => {
       const ldx = dx * cos + dy * sin, ldy = -dx * sin + dy * cos;
       let nw = sx ? Math.max(8, g.w + sx * ldx) : g.w;
       let nh = sy ? Math.max(4, g.h + sy * ldy) : g.h;
-      // 角点：图片/图标/自动高度文字默认等比，Shift 反转
-      if (corner && ((o.kind === 'image' || o.kind === 'icon' || textAuto) !== ev.shiftKey)) {
+      // 角点：图片/图标/自动高度文字默认等比，Shift 反转；公式始终等比（只改字号）
+      if (corner && (math || (o.kind === 'image' || o.kind === 'icon' || textAuto) !== ev.shiftKey)) {
         const fx = nw / g.w, fy = nh / g.h;
         const f = Math.abs(fx - 1) > Math.abs(fy - 1) ? fx : fy;
         nw = g.w * f; nh = g.h * f;
       }
       const lx = ev.altKey ? 0 : (sx * (nw - g.w)) / 2, ly = ev.altKey ? 0 : (sy * (nh - g.h)) / 2;
       const cx = g.cx + lx * cos - ly * sin, cy = g.cy + lx * sin + ly * cos;
-      const patch: Record<string, unknown> = { x: r4((cx - rect.left) / rect.width), y: r4((cy - rect.top) / rect.height), w: r4(nw / rect.width) };
+      const [fx, fy] = toFrac(timeline, rect, g.view, cx, cy);
+      if (math) return [{ op: 'updateOverlay', id: o.id, patch: { x: r4(fx), y: r4(fy), fontSize: Math.max(8, Math.round((o.fontSize * nw) / g.w)) } }];
+      const patch: Record<string, unknown> = { x: r4(fx), y: r4(fy), w: r4(nw / (rect.width * z)) };
       if (textAuto && corner) patch.fontSize = Math.max(4, Math.round((o.fontSize * nw) / g.w));
-      else if (!g.autoH || sy) patch.h = r4(nh / rect.height);
+      else if (!g.autoH || sy) patch.h = r4(nh / (rect.height * z));
       if (!g.box) patch.align = o.align ?? 'center'; // 旧版字幕第一次拖宽：转成文本框，保持原对齐
       return [{ op: 'updateOverlay', id: o.id, patch }];
-    }, commit(textAuto && corner ? '缩放文字' : '调整大小'), undefined, preview);
+    }, commit(textAuto && corner ? (math ? '缩放公式' : '缩放文字') : '调整大小'), undefined, preview);
   }
 
   // ---------- 旋转 ----------
   function rotate(e: React.PointerEvent, o: Overlay) {
     ed.clock.pause();
-    const g = measure(o, timeline, rect, stageEl);
+    const g = geoOf(o);
     const s = stageEl?.getBoundingClientRect();
     if (!s) return;
     drag(e, (ev) => {
@@ -203,6 +233,30 @@ export function StageCanvas({ rect, timeline, stage, actions }: { rect: Rect; ti
       if (a === -180) a = 180;
       return [{ op: 'updateOverlay', id: o.id, patch: { rotate: Math.round(a * 10) / 10 } }];
     }, commit('旋转'), undefined, preview);
+  }
+
+  // ---------- 镜头框（选中镜头时预览关掉镜头，框出此刻的取景；拖动平移、拖角缩放，保持画面比例） ----------
+  const camFrame = (cam: Overlay) => {
+    const W = timeline.meta.width;
+    const rel = Math.max(0, Math.min(cam.endSeconds - cam.startSeconds, now - cam.startSeconds));
+    const st = cameraState(cam, rel, W, timeline.meta.height);
+    return { st, cx: rect.left + st.cx * sc, cy: rect.top + st.cy * sc, w: rect.width / st.zoom, h: rect.height / st.zoom, scaleNow: 1 / (st.zoom * (cam.w ?? 1)) };
+  };
+  function cameraDrag(e: React.PointerEvent, cam: Overlay, handle: Handle | null) {
+    ed.clock.pause();
+    const f = camFrame(cam);
+    // 没拖动：当作点选镜头框下面的元素（镜头框常常盖满整个画面）
+    const { clientX, clientY } = e;
+    const pick = () => { const hit = hitsAt(stageEl, clientX, clientY)[0]; if (hit) ed.sel.select(hit); };
+    const x0 = cam.x ?? 0.5, y0 = cam.y ?? 0.5;
+    drag(e, (ev, dx, dy) => {
+      if (!handle) return [{ op: 'updateOverlay', id: cam.id, patch: { x: r4(x0 + dx / rect.width), y: r4(y0 + dy / rect.height) } }];
+      // 角点：以中心为基准等比缩放取景框
+      const sxn = handle.includes('e') ? 1 : -1, syn = handle.includes('s') ? 1 : -1;
+      const grow = Math.max((sxn * dx * 2) / f.w, (syn * dy * 2) / f.h);
+      const fw = Math.max(0.05, (f.w * (1 + grow)) / rect.width);
+      return [{ op: 'updateOverlay', id: cam.id, patch: { w: r4(Math.min(4, fw / f.scaleNow)) } }];
+    }, commit(handle ? '调整镜头取景' : '移动镜头'), handle ? undefined : pick, preview);
   }
 
   // ---------- 画中画（拖动/角点缩放） ----------
@@ -272,7 +326,7 @@ export function StageCanvas({ rect, timeline, stage, actions }: { rect: Rect; ti
     const cur = items.length === 1 && items[0].kind === 'overlay' && hits.some((h) => h.id === items[0].id) ? overlayOf(items[0].id) : hits[0] ? overlayOf(hits[0].id) : undefined;
     const list: MenuItem[] = hits.slice(0, 8).map((h) => {
       const o = overlayOf(h.id)!;
-      return { label: '选择' + (KIND_NAME[o.kind ?? 'subtitle'] ?? '元素') + '「' + elementLabel(o).slice(0, 14) + '」', icon: o.kind === 'image' ? 'image' : o.kind === 'chart' ? 'chart' : o.kind === 'icon' ? 'star' : o.kind === 'shape' ? 'shapes' : 'text', run: () => ed.sel.select(h) };
+      return { label: '选择' + (KIND_NAME[o.kind ?? 'subtitle'] ?? '元素') + '「' + elementLabel(o).slice(0, 14) + '」', icon: o.kind === 'image' ? 'image' : o.kind === 'chart' ? 'chart' : o.kind === 'icon' ? 'star' : o.kind === 'shape' ? 'shapes' : o.kind === 'math' ? 'sigma' : o.kind === 'plot' ? 'plot' : 'text', run: () => ed.sel.select(h) };
     });
     if (cur) {
       list.push({ separator: true, label: '' },
@@ -281,7 +335,12 @@ export function StageCanvas({ rect, timeline, stage, actions }: { rect: Rect; ti
         { label: '下移一层', run: () => actions.arrange(cur.id, 'backward') },
         { label: '置于底层', icon: 'back', run: () => actions.arrange(cur.id, 'back') });
       if (cur.group) list.push({ separator: true, label: '' }, { label: '选中整页幻灯片', icon: 'slides', run: () => actions.selectGroup(cur.group!) });
-      if (editable(cur)) list.push({ label: '编辑文字', icon: 'text', run: () => setEditing(cur.id) });
+      if (editable(cur)) list.push({ label: cur.kind === 'math' ? '编辑公式' : '编辑文字', icon: cur.kind === 'math' ? 'sigma' : 'text', run: () => setEditing(cur.id) });
+      const cam = cameras.length ? activeCamera(cameras, cur, now) : undefined;
+      list.push(
+        { label: '在播放头处变形…', icon: 'wand', disabled: !(now > cur.startSeconds && now < cur.endSeconds), run: () => actions.transformAtPlayhead(cur.id) },
+        cam ? { label: '编辑镜头', icon: 'camera', run: () => ed.sel.select({ kind: 'overlay', id: cam.id }) } : { label: cur.group ? '给这一页加镜头' : '添加镜头', icon: 'camera', run: () => actions.addCamera() },
+      );
       list.push({ separator: true, label: '' },
         { label: '创建副本', icon: 'duplicate', kbd: 'Ctrl+D', run: actions.duplicateSelection },
         { label: '交给 AI', icon: 'sparkle', disabled: !ed.host.insertIntoChat, run: () => { actions.askAi(); } },
@@ -299,10 +358,23 @@ export function StageCanvas({ rect, timeline, stage, actions }: { rect: Rect; ti
   const editO = editing ? overlayOf(editing) : undefined;
 
   const gizmoFor = (o: Overlay, handles: boolean) => {
-    const g = measure(o, timeline, rect, stageEl);
+    if (o.kind === 'camera') {
+      if (!handles) return null;
+      const f = camFrame(o);
+      const active = now >= o.startSeconds && now < o.endSeconds;
+      return (
+        <div key={o.id} className="dj-gizmo dj-camframe" title="拖动移动镜头，拖角调整取景"
+          style={{ left: f.cx - f.w / 2, top: f.cy - f.h / 2, width: f.w, height: f.h, opacity: active ? 1 : 0.45 }}
+          onPointerDown={(e) => cameraDrag(e, o, null)}>
+          <span className="dj-camlabel">镜头 {f.st.zoom.toFixed(2)}×</span>
+          {(['nw', 'ne', 'se', 'sw'] as const).map((h) => <b key={h} data-h={h} onPointerDown={(e) => cameraDrag(e, o, h)} />)}
+        </div>
+      );
+    }
+    const g = geoOf(o);
     const active = now >= o.startSeconds && now < o.endSeconds;
     const line = isLine(o);
-    const hs: readonly Handle[] = !handles ? [] : line ? ['e', 'w'] : g.autoH ? ['nw', 'ne', 'e', 'se', 'sw', 'w'] : HANDLES;
+    const hs: readonly Handle[] = !handles ? [] : line ? ['e', 'w'] : o.kind === 'math' ? ['nw', 'ne', 'se', 'sw'] : g.autoH ? ['nw', 'ne', 'e', 'se', 'sw', 'w'] : HANDLES;
     return (
       <div key={o.id} className={'dj-gizmo dj-el-gizmo' + (g.box ? '' : ' dj-text-gizmo') + (handles ? '' : ' dj-multi')}
         style={{ left: g.cx - g.w / 2, top: g.cy - g.h / 2, width: g.w, height: g.h, transform: g.rot ? 'rotate(' + g.rot + 'deg)' : undefined, opacity: active ? 1 : 0.45, pointerEvents: handles && !g.live ? 'auto' : 'none' }}
@@ -319,21 +391,25 @@ export function StageCanvas({ rect, timeline, stage, actions }: { rect: Rect; ti
 
   let editor: React.ReactNode = null;
   if (editO) {
-    const g = measure(editO, timeline, rect, stageEl);
+    const g = geoOf(editO);
     const box = isBoxElement(editO) || editO.w !== undefined;
+    const math = editO.kind === 'math';
     const multiline = editO.kind === 'text' || editO.kind === 'shape';
     let cancelled = false;
+    // 公式：在原位置下方给一个等宽字体的 LaTeX 输入框（公式本身仍可见）
+    const ew = math ? Math.max(280, g.w) : Math.max(80, g.w), eh = math ? 64 : Math.max(32, g.h + 8);
     editor = (
-      <textarea className="dj-textedit" autoFocus defaultValue={editO.text}
-        style={{ left: g.cx - Math.max(80, g.w) / 2, top: g.cy - Math.max(32, g.h + 8) / 2, width: Math.max(80, g.w), height: Math.max(32, g.h + 8), transform: g.rot ? 'rotate(' + g.rot + 'deg)' : undefined,
-          fontSize: Math.max(11, editO.fontSize * sc), lineHeight: editO.lineHeight ?? 1.3, textAlign: editO.align ?? (box && editO.kind !== 'shape' ? 'left' : 'center') }}
+      <textarea className="dj-textedit" autoFocus defaultValue={editO.text} spellCheck={!math}
+        style={{ left: g.cx - ew / 2, top: math ? g.cy + g.h / 2 + 8 : g.cy - eh / 2, width: ew, height: eh, transform: g.rot && !math ? 'rotate(' + g.rot + 'deg)' : undefined,
+          ...(math ? { fontSize: 14, lineHeight: 1.4, fontFamily: 'ui-monospace, Consolas, monospace', textAlign: 'left' as const }
+            : { fontSize: Math.max(11, editO.fontSize * sc * g.view.zoom), lineHeight: editO.lineHeight ?? 1.3, textAlign: editO.align ?? (box && editO.kind !== 'shape' ? 'left' : 'center') }) }}
         onFocus={(e) => e.currentTarget.select()}
         onKeyDown={(e) => {
           e.stopPropagation();
           if (e.key === 'Escape') { cancelled = true; e.currentTarget.blur(); }
           if (e.key === 'Enter' && !e.nativeEvent.isComposing && (e.ctrlKey || e.metaKey || (!multiline && !e.shiftKey))) { e.preventDefault(); e.currentTarget.blur(); }
         }}
-        onBlur={(e) => { const v = e.currentTarget.value; const root = e.currentTarget.closest<HTMLElement>('.dj-root'); setEditing(null); requestAnimationFrame(() => { if (!document.activeElement || document.activeElement === document.body) root?.focus({ preventScroll: true }); }); if (!cancelled && v !== editO.text) ed.store.dispatch([{ op: 'updateOverlay', id: editO.id, patch: { text: v } }], { label: '修改文字' }); }} />
+        onBlur={(e) => { const v = e.currentTarget.value; const root = e.currentTarget.closest<HTMLElement>('.dj-root'); setEditing(null); requestAnimationFrame(() => { if (!document.activeElement || document.activeElement === document.body) root?.focus({ preventScroll: true }); }); if (!cancelled && v !== editO.text && (!math || v.trim())) ed.store.dispatch([{ op: 'updateOverlay', id: editO.id, patch: { text: v } }], { label: math ? '修改公式' : '修改文字' }); }} />
     );
   }
 
