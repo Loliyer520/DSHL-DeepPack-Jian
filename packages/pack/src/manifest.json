@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "type": "profile",
   "name": "djian",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "displayName": {
     "zh-CN": "D剪 · AI 视频剪辑工作台",
     "en-US": "Djian · AI Video Editing Workbench"
@@ -14,13 +14,31 @@
   "author": "Loliy",
   "profileName": "djian",
   "dshVersion": "0.2.0-rc.2",
-  "dshVersions": ["0.2.0-rc.2"],
+  "dshVersions": [
+    "0.2.0-rc.2"
+  ],
   "launchers": {
-    "dshl": { "supported": true, "minVersion": "0.5.0.0", "reason": "使用 DSHL 的 vendor 直挂安装与 services 本地服务托管" },
-    "hdsl": { "supported": false, "reason": "依赖 DSHL 扩展（vendor 直挂、services）" },
-    "dsh-packforge-app": { "supported": false, "reason": "依赖 DSHL 扩展（vendor 直挂、services）" },
-    "official-desktop": { "supported": false, "reason": "依赖 DSHL 扩展（vendor 直挂、services）" },
-    "dsh-cli": { "supported": false, "reason": "依赖 DSHL 扩展（vendor 直挂、services）" }
+    "dshl": {
+      "supported": true,
+      "minVersion": "0.5.0.0",
+      "reason": "使用 DSHL 的 vendor 直挂安装与 services 本地服务托管"
+    },
+    "hdsl": {
+      "supported": false,
+      "reason": "依赖 DSHL 扩展（vendor 直挂、services）"
+    },
+    "dsh-packforge-app": {
+      "supported": false,
+      "reason": "依赖 DSHL 扩展（vendor 直挂、services）"
+    },
+    "official-desktop": {
+      "supported": false,
+      "reason": "依赖 DSHL 扩展（vendor 直挂、services）"
+    },
+    "dsh-cli": {
+      "supported": false,
+      "reason": "依赖 DSHL 扩展（vendor 直挂、services）"
+    }
   },
   "bundles": [
     "@deepseek-ai/dsh-base",
@@ -42,8 +60,12 @@
     {
       "name": "djian-engine",
       "command": "node",
-      "args": ["./node_modules/@djian/webui/server/index.mjs"],
-      "env": { "NODE_USE_ENV_PROXY": "1" },
+      "args": [
+        "./node_modules/@djian/webui/server/index.mjs"
+      ],
+      "env": {
+        "NODE_USE_ENV_PROXY": "1"
+      },
       "port": 5180,
       "portAutoBump": true,
       "healthPath": "/api/health",

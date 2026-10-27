@@ -95,3 +95,7 @@ npm run test:seek                                   # 媒体跳转只读必要�
 | `DJIAN_FFMPEG` / `DJIAN_FFPROBE` | 指定素材探测与缩略图用的 FFmpeg（默认 PATH，其次 Remotion 自带） |
 | `DJIAN_RENDER_BINARIES_DIR` | 指定完整的渲染二进制目录（合成器、FFmpeg、FFprobe 与动态库） |
 | `DJIAN_NO_WARMUP` | 启动时不预热渲染器 |
+
+### 模型配置
+
+整合包使用 DSH 官方 DeepSeek 默认路由与模型，不内置 GLM 或自定义上游地址。请在宿主「设置 → 模型」中配置 DeepSeek 凭据。

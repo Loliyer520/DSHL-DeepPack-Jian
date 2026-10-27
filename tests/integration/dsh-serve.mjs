@@ -1,3 +1,4 @@
+import { localModelPatch } from '../helpers/model-patch.mjs';
 // 本地联调：用真实 dsh web 宿主 + 整合包补丁 + 假模型跑起 D剪，供浏览器手动/自动化检查面板。
 // 用法：node tests/integration/dsh-serve.mjs <@deepseek-ai/dsh 安装目录> [web 端口，默认 7788]
 // 假模型：用户消息含「演示」时调用 djian_apply_ops 加一条字幕（演示 AI 与人同时编辑），含「演示幻灯片」时用 addSlide 做两页，
@@ -27,7 +28,7 @@ const fakeLlm = http.createServer((req, res) => {
     const lastAssistant = msgs.map((m) => m.role).lastIndexOf('assistant');
     const userText = msgs.slice(lastAssistant + 1).filter((m) => m.role === 'user').map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? ''))).join(' ');
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-    const chunk = (delta, finish) => 'data: ' + JSON.stringify({ id: 'x' + seq, object: 'chat.completion.chunk', created: 1, model: 'glm-5.3-flash', choices: [{ index: 0, delta, finish_reason: finish }], ...(finish ? { usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } } : {}) }) + '\n\n';
+    const chunk = (delta, finish) => 'data: ' + JSON.stringify({ id: 'x' + seq, object: 'chat.completion.chunk', created: 1, model: 'local-test-model', choices: [{ index: 0, delta, finish_reason: finish }], ...(finish ? { usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } } : {}) }) + '\n\n';
     const wantsTool = Array.isArray(json.tools) && json.tools.length && userText.includes('演示') && last?.role !== 'tool';
     // 「演示幻灯片」：用原生元素做两页（数据页 + 卡片页），演示 AI 不再导入渲染好的图片
     const turnStart = msgs.map((m) => m.role === 'assistant' && !m.tool_calls?.length).lastIndexOf(true);
@@ -82,7 +83,7 @@ fs.mkdirSync(profile, { recursive: true });
 fs.writeFileSync(path.join(profile, 'package.json'), JSON.stringify({ name: 'dsh-profile-djian', private: true, dependencies: {}, dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'] } } }, null, 2));
 fs.copyFileSync(path.join(ROOT, 'packages/pack/src/overrides/cordis.patch.yml'), path.join(profile, 'cordis.patch.yml'));
 const testPatch = path.join(home, 'test.patch.yml');
-fs.writeFileSync(testPatch, fs.readFileSync(path.join(ROOT, 'packages/pack/src/overrides/cordis.patch.yml'), 'utf8').split('\n- id: agent-default-model')[0].replace('https://open.bigmodel.cn/api/coding/paas/v4', 'http://127.0.0.1:' + llmPort + '/v1').split('# ---- 模型路由')[1].replace(/^[^\n]*\n/, ''));
+fs.writeFileSync(testPatch, localModelPatch(llmPort));
 for (const [dir, name] of [['host-bridge', '@djian/host-bridge'], ['client-timeline', '@djian/client-ui-timeline'], ['client-library', '@djian/client-ui-library']]) {
   const src = path.join(ROOT, 'packages', dir);
   const dest = path.join(profile, 'node_modules', ...name.split('/'));
@@ -98,7 +99,7 @@ fs.cpSync(path.join(ROOT, 'packages/pack/src/home/skills'), path.join(profile, '
 // 预置一个示例素材，方便直接拖上时间线
 process.chdir(profile);
 process.env.DSH_HOME = home;
-process.env.DJIAN_LLM_KEY = 'local-test-key';
+process.env.DJIAN_TEST_LLM_KEY = 'local-test-key';
 const { runProfile } = await import(pathToFileURL(path.join(cliDir, 'lib/profile-boot.js')).href);
 const environment = { get: (n) => (process.env[n] === undefined ? undefined : { value: process.env[n] }), getFrom: (n) => (process.env[n] === undefined ? undefined : { value: process.env[n] }) };
 const app = await runProfile({ profile: 'djian', patchFiles: [testPatch], args: ['--no-open', '--port', String(webPort)], environment });

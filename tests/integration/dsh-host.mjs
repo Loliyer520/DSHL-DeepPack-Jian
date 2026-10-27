@@ -1,3 +1,4 @@
+import { localModelPatch } from '../helpers/model-patch.mjs';
 // 真实宿主集成测试：独立 DSH_HOME + djian profile + 整合包补丁，启动真实 dsh（不调用收费模型）。
 // 用法：node tests/integration/dsh-host.mjs <@deepseek-ai/dsh 安装目录（需同目录装好 dsh-base/dsh-web-app）>
 import fs from 'node:fs';
@@ -17,7 +18,7 @@ const fakeLlm = http.createServer((req, res) => {
   req.on('end', () => {
     try { requests.push(JSON.parse(body)); } catch { requests.push({ raw: body }); }
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-    const chunk = (delta, finish) => 'data: ' + JSON.stringify({ id: 'x', object: 'chat.completion.chunk', created: 1, model: 'glm-5.3-flash', choices: [{ index: 0, delta, finish_reason: finish }], ...(finish ? { usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } } : {}) }) + '\n\n';
+    const chunk = (delta, finish) => 'data: ' + JSON.stringify({ id: 'x', object: 'chat.completion.chunk', created: 1, model: 'local-test-model', choices: [{ index: 0, delta, finish_reason: finish }], ...(finish ? { usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } } : {}) }) + '\n\n';
     res.write(chunk({ role: 'assistant', content: '好的' }, null));
     res.write(chunk({}, 'stop'));
     res.end('data: [DONE]\n\n');
@@ -39,7 +40,7 @@ fs.writeFileSync(path.join(profile, 'package.json'), JSON.stringify({ name: 'dsh
 fs.copyFileSync(path.join(ROOT, 'packages/pack/src/overrides/cordis.patch.yml'), path.join(profile, 'cordis.patch.yml'));
 // 测试叠加补丁：把模型地址指向本地假模型（整行重述 config）
 const testPatch = path.join(home, 'test.patch.yml');
-fs.writeFileSync(testPatch, fs.readFileSync(path.join(ROOT, 'packages/pack/src/overrides/cordis.patch.yml'), 'utf8').split('\n- id: agent-default-model')[0].replace('https://open.bigmodel.cn/api/coding/paas/v4', 'http://127.0.0.1:' + llmPort + '/v1').split('# ---- 模型路由')[1].replace(/^[^\n]*\n/, ''));
+fs.writeFileSync(testPatch, localModelPatch(llmPort));
 // 模拟 DSHL 的 vendor 直挂：把本地包按 files 字段铺进 profile node_modules
 for (const [dir, name] of [['host-bridge', '@djian/host-bridge'], ['client-timeline', '@djian/client-ui-timeline'], ['client-library', '@djian/client-ui-library']]) {
   const src = path.join(ROOT, 'packages', dir);
@@ -58,7 +59,7 @@ fs.cpSync(path.join(ROOT, 'packages/pack/src/home/skills'), path.join(profile, '
 const previous = process.cwd();
 process.chdir(profile);
 process.env.DSH_HOME = home;
-process.env.DJIAN_LLM_KEY = 'local-test-key';
+process.env.DJIAN_TEST_LLM_KEY = 'local-test-key';
 const { runProfile } = await import(pathToFileURL(path.join(cliDir, 'lib/profile-boot.js')).href);
 const environment = { get: (n) => (process.env[n] === undefined ? undefined : { value: process.env[n] }), getFrom: (n) => (process.env[n] === undefined ? undefined : { value: process.env[n] }) };
 const saved = console.log;
