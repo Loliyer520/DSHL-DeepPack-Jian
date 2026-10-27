@@ -24,6 +24,10 @@
     "src/nativeRuntime.ts",
     "src/srt.ts",
     "src/icons.ts",
-    "src/templates.ts"
+    "src/templates.ts",
+    "src/expr.ts",
+    "src/paths.ts",
+    "src/mathData.ts",
+    "src/mathServer.ts"
   ]
 }

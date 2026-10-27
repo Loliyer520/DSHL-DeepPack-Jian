@@ -16,8 +16,10 @@ import type { Animations, AudioClip, AudioTrack, Clip, Filter, Overlay, Timeline
 import { clipBox, elementOrder, evalKeyframes, secToFrames } from "./timeline";
 import { resolveAnimations } from "./presets";
 import { fontById, injectFontFaceStyle } from "./fonts";
-import { AssetResolver, MediaErrorHandler, type Resolver } from "./renderContext";
+import { AssetResolver, MathBase, MediaErrorHandler, type Resolver } from "./renderContext";
 import { ElementView } from "./elements";
+import { MorphView } from "./morph";
+import { activeCamera, cameraState, cameraTransform } from "./camera";
 
 // 预览与导出共用的合成组件。素材地址由 assetBase（引擎 HTTP 地址）解析；旧调用可传 directSources。
 
@@ -317,9 +319,19 @@ const FontGate: React.FC<{ timeline: Timeline; fontsBase?: string }> = ({ timeli
   return null;
 };
 
-// ---------- 元素层（文字/形状/图片/图标/图表）见 elements.tsx ----------
+// ---------- 元素层（文字/形状/图片/图标/图表/公式/坐标系）见 elements.tsx ----------
 /** @deprecated 旧名，等同 ElementView */
 export const OverlayView = ElementView;
+
+/** 镜头：把元素放进镜头画面（from 为元素起点帧，用来换算绝对时刻） */
+const CameraLayer: React.FC<{ ov: Overlay; cameras: Overlay[]; from: number; children: React.ReactNode }> = ({ ov, cameras, from, children }) => {
+  const { fps, width: W, height: H } = useVideoConfig();
+  const t = (from + useCurrentFrame()) / fps;
+  const cam = cameras.length ? activeCamera(cameras, ov, t) : undefined;
+  if (!cam) return <AbsoluteFill>{children}</AbsoluteFill>;
+  const state = cameraState(cam, t - cam.startSeconds, W, H);
+  return <AbsoluteFill style={{ transformOrigin: "0 0", transform: cameraTransform(state, W, H) }}>{children}</AbsoluteFill>;
+};
 
 // ---------- 主合成 ----------
 export interface TimelineVideoProps {
@@ -329,12 +341,16 @@ export interface TimelineVideoProps {
   /** @deprecated src 已是绝对地址时使用；新代码请传 assetBase */
   directSources?: boolean;
   fontsBase?: string;
+  /** 公式排版接口（引擎 /api/math） */
+  mathBase?: string;
+  /** 编辑镜头时关掉镜头效果，看到整个画布 */
+  cameraOff?: boolean;
   onMediaError?: (src: string) => void;
 }
 
 const ABSOLUTE_URL = /^(?:[a-z]+:)?\/\//i;
 
-export const TimelineVideo: React.FC<TimelineVideoProps> = ({ timeline, assetBase, directSources = false, fontsBase, onMediaError }) => {
+export const TimelineVideo: React.FC<TimelineVideoProps> = ({ timeline, assetBase, directSources = false, fontsBase, mathBase, cameraOff = false, onMediaError }) => {
   const { fps } = useVideoConfig();
   const resolver = React.useMemo<Resolver>(() => {
     if (assetBase !== undefined) return (src) => (ABSOLUTE_URL.test(src) || src.startsWith("data:") ? src : assetBase + encodeURIComponent(src));
@@ -342,25 +358,35 @@ export const TimelineVideo: React.FC<TimelineVideoProps> = ({ timeline, assetBas
   }, [assetBase, directSources]);
   const voice = React.useMemo(() => voiceIntervals(timeline), [timeline]);
   const [mainTrack, ...overlayTracks] = timeline.videoTracks;
-  const overlays = React.useMemo(() => elementOrder(timeline.overlays), [timeline.overlays]);
+  const overlays = React.useMemo(() => elementOrder(timeline.overlays.filter((o) => o.kind !== "camera")), [timeline.overlays]);
+  const cameras = React.useMemo(() => (cameraOff ? [] : timeline.overlays.filter((o) => o.kind === "camera")), [timeline.overlays, cameraOff]);
+  const byId = React.useMemo(() => new Map(timeline.overlays.map((o) => [o.id, o])), [timeline.overlays]);
   return (
     <MediaErrorHandler.Provider value={onMediaError}>
       <AssetResolver.Provider value={resolver}>
-        <AbsoluteFill style={{ backgroundColor: timeline.meta.background ?? "#000" }}>
-          <FontGate timeline={timeline} fontsBase={fontsBase} />
-          {mainTrack && !mainTrack.hidden && <MainTrack clips={mainTrack.clips} trackMuted={Boolean(mainTrack.muted)} />}
-          {overlayTracks.filter((tr) => !tr.hidden).map((tr) => (
-            <React.Fragment key={tr.id}>
-              {tr.clips.map((clip) => <PipSegment key={clip.id} clip={clip} trackMuted={Boolean(tr.muted)} />)}
-            </React.Fragment>
-          ))}
-          {timeline.audioTracks.map((tr) => tr.clips.map((clip) => <AudioSegment key={clip.id} clip={clip} track={tr} voice={voice} />))}
-          {overlays.map((ov) => (
-            <Sequence key={ov.id} from={secToFrames(fps, ov.startSeconds)} durationInFrames={Math.max(1, secToFrames(fps, ov.endSeconds) - secToFrames(fps, ov.startSeconds))}>
-              <AbsoluteFill><ElementView ov={ov} /></AbsoluteFill>
-            </Sequence>
-          ))}
-        </AbsoluteFill>
+        <MathBase.Provider value={mathBase}>
+          <AbsoluteFill style={{ backgroundColor: timeline.meta.background ?? "#000" }}>
+            <FontGate timeline={timeline} fontsBase={fontsBase} />
+            {mainTrack && !mainTrack.hidden && <MainTrack clips={mainTrack.clips} trackMuted={Boolean(mainTrack.muted)} />}
+            {overlayTracks.filter((tr) => !tr.hidden).map((tr) => (
+              <React.Fragment key={tr.id}>
+                {tr.clips.map((clip) => <PipSegment key={clip.id} clip={clip} trackMuted={Boolean(tr.muted)} />)}
+              </React.Fragment>
+            ))}
+            {timeline.audioTracks.map((tr) => tr.clips.map((clip) => <AudioSegment key={clip.id} clip={clip} track={tr} voice={voice} />))}
+            {overlays.map((ov) => {
+              const from = secToFrames(fps, ov.startSeconds);
+              const source = ov.morph ? byId.get(ov.morph.from) : undefined;
+              return (
+                <Sequence key={ov.id} from={from} durationInFrames={Math.max(1, secToFrames(fps, ov.endSeconds) - from)}>
+                  <CameraLayer ov={ov} cameras={cameras} from={from}>
+                    {source && source.id !== ov.id && source.kind !== "camera" ? <MorphView A={source} B={ov} /> : <ElementView ov={ov} />}
+                  </CameraLayer>
+                </Sequence>
+              );
+            })}
+          </AbsoluteFill>
+        </MathBase.Provider>
       </AssetResolver.Provider>
     </MediaErrorHandler.Provider>
   );

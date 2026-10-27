@@ -2,15 +2,20 @@
 // 只用 `import type` 引用 schema，保证打进浏览器包时不会带上 zod 运行时。
 import type { Animations, AudioClip, Clip, Keyframe, Overlay, Timeline } from "./schema.js";
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 // 共享常量（schema 与 ops 共用；放在这里避免浏览器端引入 zod）
 export const ANIM_CHANNELS = ["x", "y", "scale", "scaleX", "scaleY", "opacity", "rotation", "volume", "brightness", "contrast", "saturate", "blur", "clipL", "clipR", "clipT", "clipB", "progress"] as const;
 // v6 元素（幻灯片式图层）：overlays 里每一项都是一个元素，kind 决定画什么
-export const ELEMENT_KINDS = ["subtitle", "title", "text", "shape", "image", "icon", "chart"] as const;
-export const BOX_KINDS = ["shape", "image", "icon", "chart"] as const;
-export const SHAPE_TYPES = ["rect", "ellipse", "triangle", "rightTriangle", "diamond", "pentagon", "hexagon", "octagon", "star", "parallelogram", "trapezoid", "chevron", "blockArrow", "plus", "heart", "callout", "ring", "line", "arrow", "doubleArrow"] as const;
+// v7 数学动画：math 公式（text 为 LaTeX）/ plot 坐标系与函数图像 / camera 镜头（不可见，推拉平移同组元素）
+export const ELEMENT_KINDS = ["subtitle", "title", "text", "shape", "image", "icon", "chart", "math", "plot", "camera"] as const;
+export const BOX_KINDS = ["shape", "image", "icon", "chart", "plot"] as const;
+export const SHAPE_TYPES = ["rect", "ellipse", "triangle", "rightTriangle", "diamond", "pentagon", "hexagon", "octagon", "star", "parallelogram", "trapezoid", "chevron", "blockArrow", "plus", "heart", "callout", "ring", "line", "arrow", "doubleArrow", "path"] as const;
 export const LINE_SHAPES = ["line", "arrow", "doubleArrow"] as const;
+// 坐标系里的对象：函数 y=f(x) / 参数曲线 / 极坐标曲线 / 点 / 切线 / 曲线下面积 / 黎曼和 / 向量 / 线段 / 文字标注
+export const PLOT_ITEM_TYPES = ["fn", "param", "polar", "point", "tangent", "area", "riemann", "vector", "segment", "label"] as const;
+// 数学动画常用配色（深色底上清晰；坐标系里的对象未指定颜色时依次取用）
+export const MATH_COLORS = ["#58C4DD", "#F7D96F", "#83C167", "#FC6255", "#9A72AC", "#5CD0B3", "#F0AC5F"] as const;
 export const CHART_TYPES = ["column", "bar", "line", "area", "pie", "donut", "progress", "ring"] as const;
 export const TEXT_EFFECTS = ["fadeIn", "fadeUp", "pop", "blur", "drop", "typewriter"] as const;
 export const LIST_STYLES = ["bullet", "number", "check"] as const;
@@ -64,7 +69,7 @@ export const cubicBezier = (x1: number, y1: number, x2: number, y2: number) => (
   return sampleY(t);
 };
 
-const easingFn = (e: Keyframe["e"]): ((f: number) => number) => {
+export const easingFn = (e: Keyframe["e"]): ((f: number) => number) => {
   if (Array.isArray(e) && e.length === 4) return cubicBezier(e[0], e[1], e[2], e[3]);
   if (e === "hold") return () => 0;
   return EASING[(e as string | undefined) ?? "linear"] ?? EASING.linear;
@@ -181,27 +186,39 @@ export function elementOrder(overlays: readonly Overlay[]): Overlay[] {
 }
 
 /** 元素显示名：name > 文字 > 类型名 */
-const KIND_LABEL: Record<string, string> = { shape: "形状", image: "图片", icon: "图标", chart: "图表", text: "文本", title: "标题", subtitle: "字幕" };
+export const KIND_LABEL: Record<string, string> = { shape: "形状", image: "图片", icon: "图标", chart: "图表", text: "文本", title: "标题", subtitle: "字幕", math: "公式", plot: "坐标系", camera: "镜头" };
 export const SHAPE_LABEL: Record<string, string> = {
   rect: "矩形", ellipse: "椭圆", triangle: "三角形", rightTriangle: "直角三角形", diamond: "菱形", pentagon: "五边形", hexagon: "六边形",
   octagon: "八边形", star: "星形", parallelogram: "平行四边形", trapezoid: "梯形", chevron: "箭头标签", blockArrow: "块箭头", plus: "十字",
-  heart: "心形", callout: "对话框", ring: "圆环", line: "直线", arrow: "箭头", doubleArrow: "双向箭头",
+  heart: "心形", callout: "对话框", ring: "圆环", line: "直线", arrow: "箭头", doubleArrow: "双向箭头", path: "自由路径",
 };
 export const CHART_LABEL: Record<string, string> = { column: "柱状图", bar: "条形图", line: "折线图", area: "面积图", pie: "饼图", donut: "环形图", progress: "进度条", ring: "进度环" };
+/** 公式的显示名：去掉上色等样式命令和多余的花括号（{\color{#58C4DD}a}^2 → a^2） */
+export const texLabel = (tex: string) =>
+  tex.replace(/\\(?:color|textcolor)\{[^}]*\}/g, "")
+    // 只拆“分组用”的花括号；命令参数（\frac{a}{b}）、上下标（x^{2}）保留
+    .replace(/(\\[A-Za-z]+(?:\{[^{}]*\})+)|([\^_]\{[^{}]*\})|\{([^{}]*)\}/g, (m, cmd: string | undefined, sup: string | undefined, inner: string | undefined) => cmd ?? sup ?? inner ?? m)
+    .replace(/\s+/g, " ").trim();
+export const PLOT_ITEM_LABEL: Record<string, string> = { fn: "函数", param: "参数曲线", polar: "极坐标曲线", point: "点", tangent: "切线", area: "面积", riemann: "黎曼和", vector: "向量", segment: "线段", label: "标注" };
 export function elementLabel(o: Overlay): string {
   if (o.name) return o.name;
+  if (o.kind === "camera") return "镜头";
   const text = o.text?.trim();
-  if (text) return text.replace(/\*\*|==|\[#[0-9a-fA-F]{3,8}\]|\[\/\]/g, "").split("\n")[0];
+  if (text) return o.kind === "math" ? texLabel(text) : text.replace(/\*\*|==|\[#[0-9a-fA-F]{3,8}\]|\[\/\]/g, "").split("\n")[0];
   if (o.kind === "shape") return SHAPE_LABEL[o.shape?.type ?? "rect"] ?? "形状";
   if (o.kind === "image") return o.image?.src ? srcLabel(o.image.src) : "图片";
   if (o.kind === "icon") return "图标 " + (o.icon?.name ?? "");
   if (o.kind === "chart") return CHART_LABEL[o.chart?.type ?? "column"] ?? "图表";
+  if (o.kind === "plot") {
+    const first = o.plot?.items.find((it) => it.fn || it.fx);
+    return first ? "坐标系 " + (first.fn ? "y=" + first.fn : "(" + first.fx + ", " + first.fy + ")") : "坐标系";
+  }
   return KIND_LABEL[o.kind ?? "subtitle"] ?? "元素";
 }
 
-/** 一组元素（一页幻灯片）的标题：名为「标题」或 kind=title 的文字，否则字号最大的文字（数字滚动不算） */
+/** 一组元素（一页幻灯片）的标题：名为「标题」或 kind=title 的文字，否则字号最大的文字（数字滚动、公式不算） */
 export function groupTitle(members: readonly Overlay[]): string {
-  const texts = members.filter((o) => o.kind !== "subtitle" && !o.counter && o.text?.trim());
+  const texts = members.filter((o) => o.kind !== "subtitle" && o.kind !== "math" && o.kind !== "camera" && !o.counter && o.text?.trim());
   const head = texts.find((o) => o.name === "标题" || o.kind === "title") ?? [...texts].sort((a, b) => b.fontSize - a.fontSize)[0];
   return head ? head.text.trim().replace(/\*\*|==|\[#[0-9a-fA-F]{3,8}\]|\[\/\]/g, "").split("\n")[0] : "幻灯片";
 }

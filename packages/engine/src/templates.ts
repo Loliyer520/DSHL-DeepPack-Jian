@@ -1,6 +1,48 @@
-// 幻灯片模板：一页 = 一组普通元素（形状/文字/图标/图表），生成后每个元素都能单独编辑。
+// 幻灯片模板：一页 = 一组普通元素（形状/文字/图标/图表/公式/坐标系），生成后每个元素都能单独编辑。
 // 纯函数：输入内容 + 画布尺寸 → 元素列表（addOverlay 参数 + delay 秒）。横屏/竖屏自动换排布。
 import type { Fill } from "./schema.js";
+import { compileExpr } from "./expr.js";
+
+/** 按函数取样定纵轴范围（去掉 2% 极端值，避免 tan 这类渐近线把范围撑爆） */
+export function autoRange(fns: string[], xr: [number, number]): [number, number] {
+  const ys: number[] = [];
+  for (const src of fns) {
+    let f: ((x: number) => number) | undefined;
+    try { const c = compileExpr(src.replace(/^\s*(?:y|f\s*\(\s*x\s*\))\s*=\s*/, "")); f = (x) => c({ vars: { x } }); } catch { continue; }
+    for (let k = 0; k <= 200; k++) { const y = f(xr[0] + ((xr[1] - xr[0]) * k) / 200); if (Number.isFinite(y)) ys.push(y); }
+  }
+  if (!ys.length) return [-3, 3];
+  ys.sort((a, b) => a - b);
+  let lo = Math.min(0, ys[Math.floor(ys.length * 0.02)]), hi = Math.max(0, ys[Math.ceil(ys.length * 0.98) - 1]);
+  if (hi - lo < 2) { lo -= 1; hi += 1; }
+  const pad = (hi - lo) * 0.15;
+  return [Math.floor((lo - pad) * 2) / 2, Math.ceil((hi + pad) * 2) / 2];
+}
+
+/** 函数表达式 → 标注用的 LaTeX（sin(x) → y=\sin(x)，sqrt(…) → \sqrt{…}，^(…) → ^{…}） */
+export function fnTex(src: string): string {
+  let s = src.trim().replace(/^\s*(?:y|f\s*\(\s*x\s*\))\s*=\s*/, "");
+  const group = (open: number) => {
+    let depth = 0;
+    for (let i = open; i < s.length; i++) {
+      if (s[i] === "(") depth++;
+      else if (s[i] === ")" && --depth === 0) return i;
+    }
+    return -1;
+  };
+  for (let i = s.indexOf("sqrt("); i !== -1; i = s.indexOf("sqrt(")) {
+    const close = group(i + 4);
+    if (close === -1) break;
+    s = s.slice(0, i) + "\\sqrt{" + s.slice(i + 5, close) + "}" + s.slice(close + 1);
+  }
+  for (let i = s.indexOf("^("); i !== -1; i = s.indexOf("^(")) {
+    const close = group(i + 1);
+    if (close === -1) break;
+    s = s.slice(0, i) + "^{" + s.slice(i + 2, close) + "}" + s.slice(close + 1);
+  }
+  s = s.replace(/\b(sin|cos|tan|ln|log|exp|sinh|cosh|tanh|arcsin|arccos|arctan)\b/g, "\\$1").replace(/\bpi\b/g, "\\pi ").replace(/\*/g, " ");
+  return "y=" + s;
+}
 
 export interface SlideItem { title?: string; text?: string; value?: number; prefix?: string; suffix?: string; icon?: string; image?: string; label?: string }
 export interface SlideInput {
@@ -15,6 +57,8 @@ export interface SlideInput {
   chart?: string; // chart 模板：column/bar/line/area/pie/donut
   image?: string; // imageText 模板的图片素材
   icon?: string; // bullets/quote 等模板的配图图标
+  formula?: string; // formula 模板的 LaTeX
+  fn?: string; // graph 模板的函数（多条用 ; 分隔）
 }
 export type SlideElement = Record<string, unknown> & { delay: number };
 
@@ -26,6 +70,7 @@ export const SLIDE_THEMES: Record<string, SlideTheme> = {
   warm: { label: "暖橙", bg: "#fffaf3", surface: "#ffffff", border: "#fed7aa", text: "#3b1d0a", muted: "#9a6b4b", accent: "#ea580c", accent2: "#f59e0b", onAccent: "#ffffff", dark: false },
   fresh: { label: "清新绿", bg: "#f6fdf9", surface: "#ffffff", border: "#bbf7d0", text: "#052e1b", muted: "#4b7a62", accent: "#16a34a", accent2: "#0d9488", onAccent: "#ffffff", dark: false },
   bold: { label: "黑红", bg: "#0a0a0a", surface: "#171717", border: "#2a2a2a", text: "#fafafa", muted: "#a3a3a3", accent: "#ef4444", accent2: "#f59e0b", onAccent: "#ffffff", dark: true },
+  math: { label: "数学黑板", bg: "#0e0f12", surface: "#1a1c22", border: "#2c2f38", text: "#f5f5f5", muted: "#a3a8b4", accent: "#58C4DD", accent2: "#F7D96F", onAccent: "#0e0f12", dark: true },
 };
 
 export const SLIDE_TEMPLATES: Record<string, { label: string; hint: string }> = {
@@ -40,6 +85,8 @@ export const SLIDE_TEMPLATES: Record<string, { label: string; hint: string }> = 
   steps: { label: "流程", hint: "kicker、title、items 2–5 项 {title, text?}" },
   chart: { label: "图表", hint: "kicker、title、chart 图表类型、items {title 标签, value}、subtitle 数据来源" },
   imageText: { label: "图文", hint: "image 素材名、kicker、title、subtitle、items 要点" },
+  formula: { label: "公式", hint: "kicker、title、formula（LaTeX，逐笔书写）、subtitle 说明" },
+  graph: { label: "函数图像", hint: "kicker、title、fn（如 \"sin(x)\"，多条用 ; 分隔）、subtitle 说明；之后可改元素的 plot 加点、切线、面积" },
   ending: { label: "结尾", hint: "title（如 谢谢观看）、subtitle" },
 };
 
@@ -56,6 +103,8 @@ export const SLIDE_SAMPLES: Record<string, Omit<SlideInput, "template" | "theme"
   steps: { kicker: "HOW IT WORKS", title: "三步完成", items: [{ title: "第一步", text: "说明" }, { title: "第二步", text: "说明" }, { title: "第三步", text: "说明" }] },
   chart: { kicker: "GROWTH", title: "增长趋势", chart: "column", items: [{ title: "1月", value: 120 }, { title: "2月", value: 260 }, { title: "3月", value: 410 }, { title: "4月", value: 680 }], subtitle: "数据来源：示例" },
   imageText: { kicker: "SHOWCASE", title: "图文页标题", subtitle: "一段说明文字", items: [{ title: "要点一" }, { title: "要点二" }] },
+  formula: { kicker: "THEOREM", title: "勾股定理", formula: "a^2 + b^2 = c^2", subtitle: "直角三角形两条直角边的平方和，等于斜边的平方" },
+  graph: { kicker: "FUNCTION", title: "正弦与余弦", fn: "sin(x); cos(x)", subtitle: "两条曲线相差四分之一个周期" },
   ending: { title: "谢谢观看", subtitle: "联系方式" },
 };
 
@@ -124,6 +173,28 @@ export function buildSlide(input: SlideInput, meta: { width: number; height: num
 
   header();
   const top = portrait ? 0.26 : 0.32, bottom = portrait ? 0.94 : 0.88;
+
+  if (t === "formula") {
+    add(0.5, { kind: "math", name: "公式", text: input.formula || "e^{i\\pi} + 1 = 0", x: 0.5, y: portrait ? 0.48 : 0.55, fontSize: px(portrait ? 84 : 110), color: th.text, effects: [{ preset: "write" }] });
+    add(1.6, { kind: "shape", name: "强调线", ...box(0.42, portrait ? 0.6 : 0.7, 0.16, 0.004), shape: { type: "line", stroke: { color: th.accent, width: px(5) } }, effects: [{ preset: "drawIn" }] });
+    text(1.9, input.subtitle ?? "", box(L, portrait ? 0.64 : 0.74, CW, 0.12), { name: "说明", align: "center", fontSize: px(34), color: th.muted, effects: [{ preset: "riseUp" }] });
+    return out;
+  }
+
+  if (t === "graph") {
+    const fns = (input.fn ?? "").split(/[;；\n]/).map((s) => s.trim()).filter(Boolean).slice(0, 6);
+    const list = fns.length ? fns : ["sin(x)"];
+    const xr: [number, number] = [-6.5, 6.5];
+    const yr = autoRange(list, xr);
+    const plotTop = top - 0.02, plotBottom = input.subtitle ? bottom - 0.08 : bottom;
+    add(0.4, {
+      kind: "plot", name: "坐标系", ...box(L, plotTop, CW, plotBottom - plotTop), fontSize: px(24), color: th.text,
+      plot: { x: xr, y: yr, grid: true, gridColor: th.accent, items: list.map((fn, i) => ({ type: "fn", fn, id: "f" + (i + 1), color: [th.accent, th.accent2, "#83C167", "#FC6255", "#9A72AC", "#5CD0B3"][i], label: "$" + fnTex(fn) + "$" })) },
+      effects: [{ preset: "create" }],
+    });
+    text(1.4, input.subtitle ?? "", box(L, bottom - 0.05, CW, 0.05), { name: "说明", align: "center", fontSize: px(30), color: th.muted, effects: [{ preset: "fadeIn" }] });
+    return out;
+  }
 
   if (t === "cards") {
     const list = items.slice(0, 4);

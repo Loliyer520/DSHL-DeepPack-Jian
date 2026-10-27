@@ -11,6 +11,10 @@ import { overlayFontFamily } from "./fonts";
 import { iconByName } from "./icons";
 import { AssetResolver, MediaErrorHandler } from "./renderContext";
 import { ChartSvg } from "./charts";
+import { PlotSvg } from "./plot";
+import { MathGlyphs, mathSize, useMath } from "./math";
+import { isMathError } from "./mathData";
+import { mapPath, parsePath, reversePath, toPathD, trimEnd, verticesPath, type Pt, type SubPath } from "./paths";
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 const outCubic = (f: number) => 1 - Math.pow(1 - f, 3);
@@ -273,6 +277,58 @@ export function shapePath(spec: ShapeSpec, w: number, h: number, sw: number): { 
 
 const isLine = (t: string) => t === "line" || t === "arrow" || t === "doubleArrow";
 
+/** 自由路径（盒子 0–100 坐标）→ 画布像素路径 */
+export function freePath(spec: ShapeSpec, w: number, h: number): SubPath[] {
+  const sx = w / 100, sy = h / 100;
+  const subs = spec.vertices?.length
+    ? verticesPath(spec.vertices as Pt[], Boolean(spec.closed), Boolean(spec.smooth))
+    : parsePath(spec.path ?? "");
+  return mapPath(subs, (p) => [p[0] * sx, p[1] * sy]);
+}
+/** 形状轮廓（画布像素，变形取样用） */
+export function shapeOutline(spec: ShapeSpec, w: number, h: number): SubPath[] {
+  if (spec.type === "path") return freePath(spec, w, h);
+  if (isLine(spec.type)) return [{ start: [0, h / 2], segs: [{ c1: [w / 3, h / 2], c2: [(w * 2) / 3, h / 2], p: [w, h / 2] }], closed: false }];
+  return parsePath(shapePath(spec, w, h, spec.stroke?.width ?? 0).d);
+}
+
+const PathShape: React.FC<{ spec: ShapeSpec; w: number; h: number; progress: number; gid: string }> = ({ spec, w, h, progress, gid }) => {
+  const subs = freePath(spec, w, h);
+  if (!subs.length) return null;
+  const drawing = progress < 1;
+  const sw = spec.stroke?.width ?? 0;
+  const color = spec.stroke?.color ?? solidOf(spec.fill) ?? "#ffffff";
+  const fillRef = spec.fill === undefined ? "none" : typeof spec.fill === "string" ? spec.fill : "url(#" + gid + ")";
+  // 箭头：只给单条开放路径加，路径末端让出箭头长度
+  const lw = Math.max(1, sw || 6);
+  const hl = Math.max(lw * 3, 12), hw = Math.max(lw * 2.2, 9);
+  const heads: string[] = [];
+  let body = subs;
+  if (spec.arrow && subs.length === 1 && !subs[0].closed) {
+    let s = subs[0];
+    if (spec.arrow === "end" || spec.arrow === "both") { const t = trimEnd(s, hl * 0.8); s = t.path; heads.push(headAt(t.tip, t.angle, hl, hw)); }
+    if (spec.arrow === "start" || spec.arrow === "both") { const t = trimEnd(reversePath(s), hl * 0.8); s = reversePath(t.path); heads.push(headAt(t.tip, t.angle, hl, hw)); }
+    body = [s];
+  }
+  const d = toPathD(body);
+  const headOpacity = drawing ? clamp01((progress - 0.85) / 0.15) : 1;
+  return (
+    <svg width={w} height={h} viewBox={"0 0 " + w + " " + h} style={{ position: "absolute", inset: 0, overflow: "visible" }}>
+      {spec.fill !== undefined && typeof spec.fill !== "string" && <defs><Paint fill={spec.fill} id={gid} /></defs>}
+      {spec.fill !== undefined && <path d={d} fill={fillRef} stroke="none" fillOpacity={drawing ? clamp01((progress - 0.55) / 0.45) : undefined} />}
+      {(sw > 0 || drawing) && (
+        <path d={d} fill="none" stroke={color} strokeWidth={sw > 0 ? sw : 2} strokeLinecap="round" strokeLinejoin="round"
+          {...(drawing ? { pathLength: 1, strokeDasharray: 1, strokeDashoffset: 1 - progress } : { strokeDasharray: dashArray(spec.stroke?.dash, sw) })} />
+      )}
+      {heads.length > 0 && <path d={heads.join("")} fill={color} opacity={headOpacity} />}
+    </svg>
+  );
+};
+const headAt = (tip: Pt, ang: number, len: number, wid: number) => {
+  const c = Math.cos(ang), s = Math.sin(ang), bx = tip[0] - c * len, by = tip[1] - s * len;
+  return poly([[tip[0], tip[1]], [bx - s * wid, by + c * wid], [bx + s * wid, by - c * wid]]);
+};
+
 function Paint({ fill, id }: { fill: Fill; id: string }) {
   if (typeof fill === "string") return null;
   const stops = fill.stops.map((s, i) => <stop key={i} offset={s.offset} stopColor={s.color} />);
@@ -281,7 +337,7 @@ function Paint({ fill, id }: { fill: Fill; id: string }) {
   const c = Math.cos(a) / 2, s = Math.sin(a) / 2;
   return <linearGradient id={id} x1={0.5 - c} y1={0.5 - s} x2={0.5 + c} y2={0.5 + s}>{stops}</linearGradient>;
 }
-const solidOf = (fill: Fill | undefined): string | undefined => (typeof fill === "string" ? fill : fill?.stops[fill.stops.length - 1]?.color);
+export const solidOf = (fill: Fill | undefined): string | undefined => (typeof fill === "string" ? fill : fill?.stops[fill.stops.length - 1]?.color);
 const dashArray = (dash: string | undefined, sw: number) => (dash === "dashed" ? sw * 3 + " " + sw * 2 : dash === "dotted" ? "0 " + sw * 2 : undefined);
 
 export const ShapeSvg: React.FC<{ spec: ShapeSpec; w: number; h: number; progress: number; uid: string }> = ({ spec, w, h, progress, uid }) => {
@@ -289,6 +345,7 @@ export const ShapeSvg: React.FC<{ spec: ShapeSpec; w: number; h: number; progres
   const gid = "dj-fill-" + uid;
   const fillRef = spec.fill === undefined ? "none" : typeof spec.fill === "string" ? spec.fill : "url(#" + gid + ")";
   const drawing = progress < 1;
+  if (spec.type === "path") return <PathShape spec={spec} w={w} h={h} progress={progress} gid={gid} />;
   if (isLine(spec.type)) {
     const lw = Math.max(1, sw || 6);
     const color = spec.stroke?.color ?? solidOf(spec.fill) ?? "#ffffff";
@@ -386,7 +443,34 @@ const BoxElement: React.FC<{ ov: Overlay; m: Motion; sec: number; W: number; H: 
       {ov.kind === "image" && ov.image && <ImageBox ov={ov} />}
       {ov.kind === "icon" && <IconSvg name={ov.icon?.name} color={ov.color} strokeWidth={ov.icon?.strokeWidth} fill={ov.icon?.fill} progress={m.progress} />}
       {ov.kind === "chart" && ov.chart && <ChartSvg ov={ov} spec={ov.chart} w={w} h={h ?? w} progress={m.progress} />}
+      {ov.kind === "plot" && ov.plot && <PlotSvg ov={ov} spec={ov.plot} w={w} h={h ?? w} progress={m.progress} sec={sec} unit={Math.min(W, H) / 1080} />}
       {textBlock}
+    </div>
+  );
+};
+
+// ---------- 公式：text 为 LaTeX，按字号自然大小排版，x/y 为中心 ----------
+const MathElement: React.FC<{ ov: Overlay; m: Motion; W: number; H: number }> = ({ ov, m, W, H }) => {
+  const res = useMath(ov.text);
+  const frame: React.CSSProperties = {
+    position: "absolute", left: (ov.x ?? 0.5) * W, top: (ov.y ?? 0.5) * H,
+    transformOrigin: "0 0", transform: (motionTransform(m) + " translate(-50%, -50%)").trim(),
+    opacity: m.opacity, filter: [m.filter, dropShadow(ov)].filter(Boolean).join(" ") || undefined, clipPath: m.clipPath,
+  };
+  if (!res) return <div data-el={ov.id} style={{ ...frame, width: ov.fontSize * 2, height: ov.fontSize }} />;
+  if (isMathError(res)) {
+    return (
+      <div data-el={ov.id} style={{ ...frame, color: "#f87171", font: Math.max(14, ov.fontSize * 0.4) + "px monospace", border: "2px dashed #f87171", padding: "0.3em 0.6em", borderRadius: 8, background: "rgba(0,0,0,0.6)", whiteSpace: "pre" }}>
+        {ov.text + "\n" + res.error}
+      </div>
+    );
+  }
+  const { w, h } = mathSize(res, ov.fontSize);
+  return (
+    <div data-el={ov.id} style={{ ...frame, width: w, height: h }}>
+      <svg width={w} height={h} viewBox={res.vb.join(" ")} style={{ position: "absolute", inset: 0, overflow: "visible" }}>
+        <MathGlyphs data={res} color={ov.color} progress={m.progress} unitPx={ov.fontSize / 1000} fontFamily={overlayFontFamily(ov.fontFamily)} />
+      </svg>
     </div>
   );
 };
@@ -427,8 +511,10 @@ const LegacyText: React.FC<{ ov: Overlay; m: Motion; sec: number; W: number; H: 
 export const ElementView: React.FC<{ ov: Overlay }> = ({ ov }) => {
   const { fps, width: W, height: H } = useVideoConfig();
   const sec = useCurrentFrame() / fps;
+  if (ov.kind === "camera") return null;
   const anims = resolveAnimations(ov, ov.endSeconds - ov.startSeconds);
   const m = elementMotion(ov, anims, sec, W, H);
+  if (ov.kind === "math") return <MathElement ov={ov} m={m} W={W} H={H} />;
   if (isBoxElement(ov) || ov.w !== undefined) return <BoxElement ov={ov} m={m} sec={sec} W={W} H={H} />;
   return <LegacyText ov={ov} m={m} sec={sec} W={W} H={H} />;
 };

@@ -8,7 +8,8 @@ import { listAnimationPresets } from '../../engine/dist/presets.js';
 import { OP_NAMES } from '../../engine/dist/ops.js';
 import { ICONS } from '../../engine/dist/icons.js';
 import { SLIDE_TEMPLATES, SLIDE_THEMES } from '../../engine/dist/templates.js';
-import { CHART_LABEL, CHART_TYPES, SHAPE_LABEL, SHAPE_TYPES, TEXT_EFFECTS } from '../../engine/dist/timeline.js';
+import { CHART_LABEL, CHART_TYPES, MATH_COLORS, PLOT_ITEM_LABEL, PLOT_ITEM_TYPES, SHAPE_LABEL, SHAPE_TYPES, TEXT_EFFECTS } from '../../engine/dist/timeline.js';
+import { layoutTex } from '../../engine/dist/mathServer.js';
 import { cuesToOps, parseSubtitles, toSrt, toVtt } from '../../engine/dist/srt.js';
 import { Router, HttpError, readJson, sendJson } from './http.mjs';
 import { serveMedia } from './media.mjs';
@@ -37,12 +38,21 @@ export function buildRouter({ store, render }) {
     icons: ICONS.map(({ name, label, group }) => ({ name, label, group })),
     shapes: SHAPE_TYPES.map((type) => ({ type, label: SHAPE_LABEL[type] })),
     charts: CHART_TYPES.map((type) => ({ type, label: CHART_LABEL[type] })),
+    plotItems: PLOT_ITEM_TYPES.map((type) => ({ type, label: PLOT_ITEM_LABEL[type] })),
+    mathColors: MATH_COLORS,
     templates: Object.entries(SLIDE_TEMPLATES).map(([key, t]) => ({ key, ...t })),
     themes: Object.entries(SLIDE_THEMES).map(([key, t]) => ({ key, label: t.label, dark: t.dark, accent: t.accent, text: t.text, bg: t.bg })),
     presets: listAnimationPresets(),
     textEffects: TEXT_EFFECTS,
     fonts: FONTS.map(({ id, label }) => ({ id, label })),
   }));
+  // 公式排版：LaTeX → 字形片（面板预览与导出渲染共用，结果只取决于公式与引擎版本，可长期缓存）
+  r.add('GET', '/api/math', (req, res, { url }) => {
+    const tex = url.searchParams.get('tex') ?? '';
+    if (tex.length > 4000) throw new HttpError(413, '公式过长');
+    const result = layoutTex(tex);
+    sendJson(res, 200, result, 'error' in result ? {} : { 'Cache-Control': 'public, max-age=86400' });
+  });
   r.add('GET', '/fonts/:file', async (req, res, { params }) => {
     const font = FONTS.find((f) => f.file === params.file);
     const file = font && path.join(FONTS_DIR, font.file);

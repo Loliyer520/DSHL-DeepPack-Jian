@@ -5,7 +5,7 @@ import type { Animations, Keyframe } from "./schema.js";
 
 export interface AnimationPreset {
   label: string;
-  // 进度：驱动 progress 通道（打字机/描边/数字滚动/图表生长），可与入场动画叠加
+  // 进度：驱动 progress 通道（打字机/描边/数字滚动/图表生长/公式书写/坐标系依次画出），可与入场动画叠加
   group: "入场" | "出场" | "组合" | "循环" | "进度";
   // (dur = clip 成片时长秒) → 关键帧组
   expand: (dur: number) => Animations;
@@ -51,6 +51,9 @@ export const ANIMATION_PRESETS: Record<string, AnimationPreset> = {
   drawIn: { label: "描边绘制", group: "进度", expand: (d) => ({ progress: [kf(0, 0, "inOut"), kf(Math.min(1.5, d * 0.5), 1)] }) },
   countUp: { label: "数字滚动", group: "进度", expand: (d) => ({ progress: [kf(0, 0, "out"), kf(Math.min(2, d * 0.6), 1)] }) },
   growIn: { label: "生长", group: "进度", expand: (d) => ({ progress: [kf(0, 0, "out"), kf(Math.min(1.4, d * 0.45), 1)] }) },
+  // 公式逐笔书写（先描边后填色）；坐标系里依次画出坐标轴与各对象
+  write: { label: "书写", group: "进度", expand: (d) => ({ progress: [kf(0, 0, "linear"), kf(Math.min(2, d * 0.5), 1)] }) },
+  create: { label: "依次画出", group: "进度", expand: (d) => ({ progress: [kf(0, 0, "inOut"), kf(Math.min(3, d * 0.6), 1)] }) },
   // ---- 循环（重复波形，按 1s 周期铺到时长） ----
   pulse: {
     label: "脉冲", group: "循环",
