@@ -45,6 +45,7 @@ tests/               单元与集成测试
 | `djian_changes` | 某个版本之后谁改了什么（含用户在面板的修改） |
 | `djian_frame` | 抽一帧或多帧画面（模型支持图像时直接给图） |
 | `djian_assets` / `djian_import_asset` | 素材清单 / 导入本地文件 |
+| `djian_image` | OpenAI 兼容中转站文生图、参考图/蒙版改造，结果自动入库 |
 | `djian_search_media` / `djian_download_media` | 在线 CC 素材搜索与下载 |
 | `djian_subtitles` | SRT/VTT 导入与导出 |
 | `djian_export` | 导出视频并查询进度 |
@@ -95,7 +96,20 @@ npm run test:seek                                   # 媒体跳转只读必要�
 | `DJIAN_FFMPEG` / `DJIAN_FFPROBE` | 指定素材探测与缩略图用的 FFmpeg（默认 PATH，其次 Remotion 自带） |
 | `DJIAN_RENDER_BINARIES_DIR` | 指定完整的渲染二进制目录（合成器、FFmpeg、FFprobe 与动态库） |
 | `DJIAN_NO_WARMUP` | 启动时不预热渲染器 |
+| `DJIAN_IMAGE_API_KEY` | AI 生图/改图的中转站密钥（只读环境变量，不作为工具参数传递） |
+| `DJIAN_IMAGE_BASE_URL` | OpenAI 兼容接口根地址，默认 `https://api.openai.com/v1`；中转站通常填 `https://你的域名/v1` |
+| `DJIAN_IMAGE_MODEL` | 默认图像模型，默认 `gpt-image-1`；单次调用也可用 `djian_image.model` 覆盖 |
+| `DJIAN_IMAGE_TIMEOUT_MS` | 图像请求与结果下载超时，默认 300000ms，最大 600000ms |
 
 ### 模型配置
 
 整合包使用 DSH 官方 DeepSeek 默认路由与模型，不内置 GLM 或自定义上游地址。请在宿主「设置 → 模型」中配置 DeepSeek 凭据。
+
+### AI 生成 / 改造图片素材
+
+配置上面的 `DJIAN_IMAGE_*` 环境变量并重启宿主后，AI 可调用 `djian_image`：
+
+- `action:"generate"`：请求 `POST <baseURL>/images/generations` 文生图。
+- `action:"edit"`：请求 `POST <baseURL>/images/edits`，以当前项目的一张或多张图片作为参考，可选蒙版。
+- 支持 OpenAI 格式的 `b64_json` 或图片 URL 返回；结果自动作为**新素材**导入，不覆盖原图，并给支持图像输入的 AI 返回预览。
+- 常用参数：`prompt`、`size`、`quality`、`n`（1–4）、`outputFormat`（png/jpeg/webp）、`name`。生成后 AI 会返回实际素材文件名，再用 `addClip` 或 `addOverlay` 放入时间线。

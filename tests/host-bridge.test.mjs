@@ -23,7 +23,7 @@ const preStep = (id, step) => listeners.get('agent/pre-step')({ agent: agent(id)
 
 test('declares only the tools service and registers every djian tool', () => {
   assert.deepEqual(inject, ['tools']);
-  for (const name of ['djian_timeline', 'djian_apply_ops', 'djian_changes', 'djian_frame', 'djian_assets', 'djian_import_asset', 'djian_search_media', 'djian_download_media', 'djian_export']) {
+  for (const name of ['djian_timeline', 'djian_apply_ops', 'djian_changes', 'djian_frame', 'djian_assets', 'djian_import_asset', 'djian_image', 'djian_search_media', 'djian_download_media', 'djian_export']) {
     assert.ok(tools.has(name), name);
     assert.equal(tools.get(name).parameters.type, 'object');
   }

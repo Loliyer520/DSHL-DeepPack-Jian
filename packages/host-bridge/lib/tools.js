@@ -3,6 +3,7 @@
 import { readFile } from 'node:fs/promises';
 import { outline } from './outline.js';
 import { OPS_DOC, OPS_PARAMETERS } from './ops-doc.js';
+import { IMAGE_TOOL } from './image.js';
 
 const str = (v) => (typeof v === 'string' ? v : undefined);
 const p = (pid) => '/api/p/' + encodeURIComponent(pid);
@@ -99,6 +100,7 @@ export const TOOLS = [
       return { value: r, text: '已导入「' + r.name + '」（' + r.type + (r.duration ? '，' + r.duration + 's' : '') + (r.width ? '，' + r.width + '×' + r.height : '') + '）' };
     },
   },
+  IMAGE_TOOL,
   {
     name: 'djian_search_media',
     description: '在 Openverse（CC 授权的图片/音频聚合库，可商用需看具体许可）搜索素材。英文关键词效果更好。结果用 djian_download_media 下载进素材库。',

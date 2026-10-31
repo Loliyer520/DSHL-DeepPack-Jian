@@ -88,7 +88,7 @@ function registerTools(ctx, { client, resolve, presence, images, log }) {
       name: tool.name,
       description: tool.description,
       parameters: tool.parameters,
-      timeoutMs: tool.name === 'djian_frame' ? 200_000 : 130_000,
+      timeoutMs: tool.name === 'djian_frame' ? 200_000 : tool.name === 'djian_image' ? 600_000 : 130_000,
       output: {
         schema: { description: 'D剪工具结果；message 为给模型的摘要' },
         render: (_args, value) => [{ type: 'text', text: String(value?.message ?? JSON.stringify(value)) }],
