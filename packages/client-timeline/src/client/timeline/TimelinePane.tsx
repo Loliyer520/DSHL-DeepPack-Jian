@@ -1,5 +1,6 @@
 // 时间线：所有轨道同屏（可切专注模式），拖动移动/换轨/重排、裁剪、淡入淡出、音量包络、框选、
-// 吸附、Ctrl+滚轮缩放、右键菜单、从素材库拖入。拖动过程走 store.preview，松手一次提交。
+// 吸附、右键菜单、从素材库拖入。播放头固定居中：内容左侧留半个视口，scrollLeft=时间×pps 即居中；
+// 空白处/标尺拖动或滚轮直接扒拉时间线；Ctrl+滚轮缩放。拖动过程走 store.preview，松手一次提交。
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Timeline } from '../../../../engine/src/schema';
 import { evalKeyframes, isBoxElement, shiftAnimations, timelineHasContent } from '../../../../engine/src/timeline';
@@ -20,7 +21,7 @@ const LANE_COLORS: Record<string, string> = { main: 'var(--dj-main)', pip: 'var(
 const TRANSITION_LABEL: Record<string, string> = { dissolve: '叠化', fadeBlack: '闪黑', fadeWhite: '闪白', slide: '滑动', wipe: '擦除', push: '推入', zoom: '缩放', blur: '模糊' };
 
 type Drag =
-  | { type: 'scrub' }
+  | { type: 'scrub'; t0: number; cx0: number }
   | { type: 'marquee'; x0: number; y0: number; x1: number; y1: number; base: Selected[] }
   | { type: 'move'; block: Block; ids: Block[]; x0: number; y0: number; moved: boolean }
   | { type: 'trimL' | 'trimR' | 'fadeIn' | 'fadeOut'; block: Block; x0: number }
@@ -73,17 +74,16 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
     return () => { el.removeEventListener('scroll', onScroll); ro.disconnect(); cancelAnimationFrame(raf); };
   }, []);
 
-  // 播放头：直接改 DOM；播放时翻页跟随，外部定位时滚到可见
+  // 播放头：直接改 DOM；居中锁定——内容左端有半个视口的留白，scrollLeft=时间×pps 时播放头恰在视口中央
   useEffect(() => ed.clock.subscribe((sec, playing) => {
-    const px = sec * ctx.current.pps;
-    if (playhead.current) playhead.current.style.transform = 'translateX(' + px + 'px)';
+    if (playhead.current) playhead.current.style.transform = 'translateX(' + sec * ctx.current.pps + 'px)';
     const el = scroll.current;
-    if (!el || drag.current) return;
-    const right = el.scrollLeft + el.clientWidth;
-    if (playing && px > right - el.clientWidth * 0.12) el.scrollLeft = px - el.clientWidth * 0.15;
-    else if (!playing && (px < el.scrollLeft || px > right)) el.scrollLeft = Math.max(0, px - el.clientWidth * 0.3);
+    if (el && !(drag.current && drag.current.type !== 'scrub')) el.scrollLeft = Math.round(sec * ctx.current.pps);
   }), [ed.clock]);
-  useEffect(() => { if (playhead.current) playhead.current.style.transform = 'translateX(' + ed.clock.time() * pps + 'px)'; }, [pps, ed.clock]);
+  useEffect(() => {
+    if (playhead.current) playhead.current.style.transform = 'translateX(' + ed.clock.time() * pps + 'px)';
+    if (scroll.current && !(drag.current && drag.current.type !== 'scrub')) scroll.current.scrollLeft = Math.round(ed.clock.time() * pps);
+  }, [pps, ed.clock]);
 
   // Ctrl/⌘ + 滚轮：以指针处时间为锚点缩放
   useEffect(() => {
@@ -93,13 +93,17 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
         e.preventDefault();
         const rect = el.getBoundingClientRect();
         const xIn = e.clientX - rect.left;
-        const sec = (el.scrollLeft + xIn) / ctx.current.pps;
+        const sec = (el.scrollLeft + xIn - el.clientWidth / 2) / ctx.current.pps;
         const next = clampZoom(ctx.current.pps * (e.deltaY < 0 ? 1.18 : 1 / 1.18));
         setPps(next);
-        requestAnimationFrame(() => { el.scrollLeft = sec * next - xIn; });
-      } else if (e.shiftKey && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        requestAnimationFrame(() => { el.scrollLeft = sec * next - xIn + el.clientWidth / 2; });
+      } else {
+        // 滚轮直接扒拉时间线（播放头保持居中）
         e.preventDefault();
-        el.scrollLeft += e.deltaY;
+        const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+        el.scrollLeft += d;
+        const total = ctx.current.layout?.total ?? 0;
+        ed.clock.seek(Math.max(0, Math.min(total, el.scrollLeft / ctx.current.pps)));
       }
     };
     el.addEventListener('wheel', onWheel, { passive: false });
@@ -109,7 +113,6 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
   const fit = useCallback(() => {
     const el = scroll.current; if (!el || !layout) return;
     setPps(fitPxPerSec(el.clientWidth, layout.total));
-    requestAnimationFrame(() => { el.scrollLeft = 0; });
   }, [layout]);
   const zoom = (factor: number) => setPps((p) => clampZoom(p * factor));
   useEffect(() => {
@@ -242,7 +245,12 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
 
   const update = (d: Drag, e: { clientX: number; clientY: number }) => {
     const { x, y } = toLocal(e);
-    if (d.type === 'scrub') { seekAt(x); return; }
+    if (d.type === 'scrub') {
+      // 扒拉：指针向左拖 = 时间前进（时间线跟着手走），播放头保持居中
+      const total = ctx.current.layout?.total ?? 0;
+      ed.clock.seek(Math.max(0, Math.min(total, d.t0 - (e.clientX - d.cx0) / ctx.current.pps)));
+      return;
+    }
     if (d.type === 'marquee') {
       d.x1 = x; d.y1 = y;
       const L = ctx.current.layout!, p = ctx.current.pps;
@@ -294,7 +302,7 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
     pendingOps.current = null;
     if (pend && commit) ed.store.dispatch(pend.ops, { label: pend.label });
     else ed.store.preview(null);
-    // 空白处单击（没拉出选框）= 定位播放头，与剪映一致
+    // Ctrl/Shift 框选：没拉出选框的单击 = 定位播放头
     if (d?.type === 'marquee' && commit && Math.abs(d.x1 - d.x0) < 4 && Math.abs(d.y1 - d.y0) < 4) seekAt(d.x0);
     resetOverlay();
   };
@@ -324,7 +332,7 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
     } else if (target.closest('.dj-ruler')) {
       ed.clock.pause();
       seekAt(x);
-      d = { type: 'scrub' };
+      d = { type: 'scrub', t0: ed.clock.time(), cx0: e.clientX };
     } else if (transEl) {
       ed.sel.select({ kind: 'clip', id: transEl.dataset.trans! });
       onInspect('transition');
@@ -355,9 +363,17 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
         d = { type: 'move', block: b, ids: group.length ? group : [b], x0: x, y0: y, moved: false };
       }
     } else {
+      // 空白处：普通按下 = 扒拉时间线（点击定位，拖动平移）；Ctrl/Shift 拖动 = 框选
+      if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        ed.sel.clear();
+        ed.clock.pause();
+        seekAt(x);
+        d = { type: 'scrub', t0: ed.clock.time(), cx0: e.clientX };
+      } else {
       const base = e.shiftKey ? ed.sel.getSnapshot().items : [];
       if (!e.shiftKey) ed.sel.clear();
       d = { type: 'marquee', x0: x, y0: y, x1: x, y1: y, base };
+      }
     }
     if (!d) return;
     e.preventDefault();
@@ -496,9 +512,10 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
   // ---------- 渲染 ----------
   if (!timeline || !layout || !project) return <div className="dj-timeline"><div className="dj-empty-state">正在加载时间线…</div></div>;
   const fps = timeline.meta.fps;
+  const pad = view.width / 2; // 内容左端留半个视口：scrollLeft = 时间×pps 时播放头恰在视口中央
   const width = Math.max(view.width, (layout.total + Math.max(10, view.width / pps * 0.5)) * pps);
   const height = RULER + layout.height + 40;
-  const from = view.left / pps, to = (view.left + view.width) / pps;
+  const from = (view.left - pad) / pps, to = (view.left + view.width - pad) / pps;
   const step = tickStep(pps, fps);
   const ticks: number[] = [];
   for (let s = Math.max(0, Math.floor(from / step) * step); s <= to + step; s += step) ticks.push(s);
@@ -554,8 +571,9 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
           onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}
           onDoubleClick={onDoubleClick} onContextMenu={onContextMenu} onDragOver={onDragOver} onDrop={(e) => void onDrop(e)}
           onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) resetOverlay(); }}>
-          <div className="dj-canvas-tl" ref={content} style={{ width, height }}>
-            <div className="dj-ruler" style={{ width }}>
+          <div style={{ position: 'relative', width: pad + width, height }}>
+          <div className="dj-canvas-tl" ref={content} style={{ position: 'absolute', top: 0, left: pad, width, height }}>
+            <div className="dj-ruler" style={{ width }} title="点击定位播放头；按住左右拖动 / 滚动滚轮可扒拉时间线；Ctrl+滚轮缩放；Ctrl 或 Shift+拖动框选">
               {minorTicks.map((s) => <span key={'m' + s} className="dj-tick dj-minor" style={{ left: s * pps }} />)}
               {ticks.map((s) => <span key={s} className="dj-tick" style={{ left: s * pps }}>{step < 1 ? timecode(s, fps) : timecode(s, fps, false)}</span>)}
               {(timeline.markers ?? []).map((m) => (
@@ -598,12 +616,13 @@ export function TimelinePane({ actions, compact, onInspect, apiRef, onFocusChang
               </div>
             )}
             {layout.lanes.some((l) => l.kind === 'audio' && l.trackId) && (
-              <div className="dj-newtrack" style={{ top: RULER + layout.height + 6, left: view.left + 8, right: 'auto', width: Math.max(160, view.width - 16), opacity: overlay.dropLane === null && overlay.insert ? 1 : 0.5 }}>拖到这里新建音频轨</div>
+              <div className="dj-newtrack" style={{ top: RULER + layout.height + 6, left: Math.max(12, view.left - pad + 8), right: 'auto', width: Math.max(160, view.width - 16), opacity: overlay.dropLane === null && overlay.insert ? 1 : 0.5 }}>拖到这里新建音频轨</div>
             )}
             <div className="dj-playhead" ref={playhead} style={{ height }} />
             {overlay.snap !== null && <div className="dj-snapline" style={{ left: overlay.snap * pps, height }} />}
             {overlay.insert && <div className="dj-insert" style={{ left: overlay.insert.x - 1, top: RULER + overlay.insert.top, height: overlay.insert.height }} />}
             {overlay.marquee && (overlay.marquee.w > 3 || overlay.marquee.h > 3) && <div className="dj-marquee" style={{ left: overlay.marquee.x, top: RULER + overlay.marquee.y, width: overlay.marquee.w, height: overlay.marquee.h }} />}
+          </div>
           </div>
         </div>
       </div>
