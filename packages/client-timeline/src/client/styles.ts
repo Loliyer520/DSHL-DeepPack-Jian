@@ -200,6 +200,7 @@ export const CSS_PANELS = String.raw`
 .dj-dialog h3{margin:0 0 12px;font-size:15px;display:flex;align-items:center}
 .dj-dialog h3 .dj-spacer{flex:1}
 .dj-dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.dj-dialog footer .dj-spacer{flex:1}
 .dj-list{display:flex;flex-direction:column;gap:4px}
 .dj-list>div{display:flex;align-items:center;gap:8px;padding:8px;border-radius:var(--dj-r2);background:var(--dj-s2)}
 .dj-list small{color:var(--dj-t3)}
