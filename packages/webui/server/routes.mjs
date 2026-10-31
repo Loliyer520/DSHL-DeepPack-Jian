@@ -16,11 +16,12 @@ import { serveMedia } from './media.mjs';
 import { probe, thumbnail, sprite, peaks } from './media-tools.mjs';
 import { searchOpenverse, safeDownload } from './library.mjs';
 import { safeAssetName, sanitizeId } from './store.mjs';
-import { FONTS_DIR, LIMITS, MIME, PORT, VERSION, assetKind } from './config.mjs';
+import { DJIAN_HOME, FONTS_DIR, LIMITS, MIME, PORT, VERSION, assetKind } from './config.mjs';
+import { Settings } from './settings.mjs';
 
 const ACTORS = new Set(['user', 'ai']);
 
-export function buildRouter({ store, render }) {
+export function buildRouter({ store, render, settings = new Settings() }) {
   const r = new Router();
   const project = (params) => {
     const pid = sanitizeId(params.pid);
@@ -29,7 +30,7 @@ export function buildRouter({ store, render }) {
   };
 
   // ---------- 元信息 ----------
-  r.add('GET', '/api/health', (req, res) => sendJson(res, 200, { ok: true, service: 'djian-engine', version: VERSION, protocol: 2, port: PORT, pid: process.pid }));
+  r.add('GET', '/api/health', (req, res) => sendJson(res, 200, { ok: true, service: 'djian-engine', version: VERSION, protocol: 2, port: PORT, pid: process.pid, dataDir: DJIAN_HOME }));
   r.add('GET', '/api/fonts', (req, res) => sendJson(res, 200, { fonts: FONTS.map(({ id, label, weights }) => ({ id, label, variable: weights.includes(' ') })) }));
   r.add('GET', '/api/animation-presets', (req, res) => sendJson(res, 200, { presets: listAnimationPresets() }));
   r.add('GET', '/api/ops', (req, res) => sendJson(res, 200, { ops: OP_NAMES }));
@@ -86,6 +87,13 @@ export function buildRouter({ store, render }) {
   r.add('GET', '/api/session-project', (req, res, { url }) => {
     const pid = store.projectForSession(url.searchParams.get('sessionId'));
     sendJson(res, 200, { project: pid ? store.list().find((p) => p.id === pid) ?? { id: pid } : null });
+  });
+
+  // ---------- 全局设置（图像模型）。密钥只落盘，响应永远脱敏 ----------
+  r.add('GET', '/api/settings/image', (req, res) => sendJson(res, 200, settings.imageView()));
+  r.add('PUT', '/api/settings/image', async (req, res) => {
+    const body = await readJson(req);
+    sendJson(res, 200, settings.updateImage(body));
   });
 
   registerTimelineRoutes(r, { store, project });

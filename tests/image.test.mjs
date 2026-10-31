@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
 import { startEngine } from './helpers/engine.mjs';
 import { EngineClient } from '../packages/host-bridge/lib/engine-client.js';
 import { IMAGE_TOOL, sniffImage } from '../packages/host-bridge/lib/image.js';
@@ -111,4 +113,20 @@ test('upstream errors are useful without leaking the key', async () => {
       return true;
     },
   );
+});
+
+test('panel-saved settings win over an empty environment', async () => {
+  const file = path.join(engine.dataDir, 'settings.json');
+  try {
+    fs.writeFileSync(file, JSON.stringify({
+      image: { apiKey: 'panel-image-secret', baseUrl: 'http://127.0.0.1:' + upstream.address().port + '/v1', model: 'panel-model' },
+    }));
+    const result = await IMAGE_TOOL.execute(client, ctx, { action: 'generate', prompt: '面板配置优先' }, {});
+    assert.equal(result.value.model, 'panel-model');
+    const call = requests.findLast((r) => r.url === '/v1/images/generations');
+    assert.equal(call.headers.authorization, 'Bearer panel-image-secret');
+    assert.equal(JSON.parse(call.body.toString('utf8')).model, 'panel-model');
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
 });

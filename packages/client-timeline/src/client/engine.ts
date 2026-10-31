@@ -95,6 +95,7 @@ export interface AssetInfo { name: string; type: 'video' | 'image' | 'audio'; si
 export interface Presence { clientId: string; actor: 'user' | 'ai'; status?: string | null; label?: string | null; at: number }
 export interface Snapshot { id: string; at: string; label: string; rev: number | null; actor: string }
 export interface ExportStatus { jobId: string; status: 'rendering' | 'done' | 'error' | 'cancelled'; progress: { percent: number; stage: string }; result?: { fileName: string; sizeBytes: number }; error?: string }
+export interface ImageSettingsView { configured: boolean; apiKeyHint: string | null; baseUrl: string; model: string; timeoutMs: number }
 
 const P = (pid: string) => '/api/p/' + encodeURIComponent(pid);
 export const api = {
@@ -112,6 +113,9 @@ export const api = {
   saveVersion: (pid: string, label: string) => request('POST', P(pid) + '/history', { body: { label } }),
   restore: (pid: string, id: string, clientId: string) => request<OpsResult>('POST', P(pid) + '/history/' + encodeURIComponent(id) + '/restore', { body: { clientId }, timeoutMs: 30_000 }),
   fonts: () => request<{ fonts: { id: string; label: string; variable: boolean }[] }>('GET', '/api/fonts').then((r) => r.fonts),
+  imageSettings: () => request<ImageSettingsView>('GET', '/api/settings/image'),
+  saveImageSettings: (body: { apiKey?: string; baseUrl?: string | null; model?: string | null; timeoutMs?: number | null }) =>
+    request<ImageSettingsView>('PUT', '/api/settings/image', { body }),
   startExport: (pid: string, body: { scale: number; quality: string }) => request<{ jobId: string }>('POST', P(pid) + '/export', { body }),
   exportStatus: (jobId: string) => request<ExportStatus>('GET', '/api/export/' + encodeURIComponent(jobId)),
   cancelExport: (jobId: string) => request('POST', '/api/export/' + encodeURIComponent(jobId) + '/cancel', { body: {} }),

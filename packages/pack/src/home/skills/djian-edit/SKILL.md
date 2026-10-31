@@ -75,7 +75,7 @@ description: 视频剪辑操作速查——剪段、拼接、画中画、字幕�
 
 ## 素材
 
-- AI 文生图 / 改造图片：`djian_image{action:"generate",prompt,size,quality,name}`；改造用 `djian_image{action:"edit",prompt,image:"原图.png",name}`，多图参考用 `images:[…]`，可选 `mask`。结果自动入库且不覆盖原图，之后用返回的素材名 `addClip`/`addOverlay`。工具需要宿主配置 `DJIAN_IMAGE_API_KEY`，中转地址和默认模型分别是 `DJIAN_IMAGE_BASE_URL`、`DJIAN_IMAGE_MODEL`；未配置时按报错提示用户配置，不要索要密钥或尝试其他密钥参数。
+- AI 文生图 / 改造图片：`djian_image{action:"generate",prompt,size,quality,name}`；改造用 `djian_image{action:"edit",prompt,image:"原图.png",name}`，多图参考用 `images:[…]`，可选 `mask`。结果自动入库且不覆盖原图，之后用返回的素材名 `addClip`/`addOverlay`。用户在面板「素材 → AI 生图设置」里配置中转站地址、密钥与默认模型（也可用 DJIAN_IMAGE_* 环境变量）；未配置时按报错引导用户打开该设置，不要索要密钥或尝试其他密钥参数。
 - 本地生成的文件：`djian_import_asset{path:"绝对路径"}`；重名会改名，之后用返回的名字。
 - 在线素材：`djian_search_media{query:"英文关键词", type:"image"|"audio"}` → `djian_download_media{url, title, license, creator}`。
 

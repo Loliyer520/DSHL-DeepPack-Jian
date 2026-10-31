@@ -1,5 +1,6 @@
 // OpenAI 兼容图像工具：generations 文生图、edits 参考图/蒙版改造，结果直接导入当前项目素材库。
-// 密钥只从 DJIAN_IMAGE_API_KEY 读取；不要把它放进工具参数、返回值或日志。
+// 配置优先读 D剪 面板保存的 settings.json（经引擎 health.dataDir 定位，密钥不出本机文件）；
+// 环境变量 DJIAN_IMAGE_* 作为无人值守部署的备用。密钥绝不放进工具参数、返回值或日志。
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -9,22 +10,40 @@ const DEFAULT_MODEL = 'gpt-image-1';
 const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
 const p = (pid) => '/api/p/' + encodeURIComponent(pid);
 
-function settings(args, env) {
-  const apiKey = str(env.DJIAN_IMAGE_API_KEY);
-  if (!apiKey) throw new Error('尚未配置图像模型：请设置 DJIAN_IMAGE_API_KEY；中转站地址用 DJIAN_IMAGE_BASE_URL（例如 https://example.com/v1），模型用 DJIAN_IMAGE_MODEL');
-  const baseUrl = str(env.DJIAN_IMAGE_BASE_URL) ?? DEFAULT_BASE_URL;
+/** 引擎数据目录里面板保存的图像设置；读不到（未配置/引擎未就绪）就回退环境变量 */
+async function engineImageSettings(client) {
+  try {
+    const health = await client.get('/api/health', { timeoutMs: 3000 });
+    const dir = str(health?.dataDir);
+    if (!dir || path.isAbsolute(dir) === false) return {};
+    const raw = JSON.parse(await readFile(path.join(dir, 'settings.json'), 'utf8'));
+    const image = raw?.image;
+    return image && typeof image === 'object' ? {
+      apiKey: str(image.apiKey),
+      baseUrl: str(image.baseUrl),
+      model: str(image.model),
+      timeoutMs: Number.isFinite(Number(image.timeoutMs)) && Number(image.timeoutMs) > 0 ? Math.round(Number(image.timeoutMs)) : undefined,
+    } : {};
+  } catch { return {}; }
+}
+
+async function resolveSettings(client, args, env) {
+  const panel = await engineImageSettings(client);
+  const apiKey = panel.apiKey ?? str(env.DJIAN_IMAGE_API_KEY);
+  if (!apiKey) throw new Error('尚未配置图像模型：请打开 D剪 面板「素材 → AI 生图设置」填写中转站地址与密钥；也可用环境变量 DJIAN_IMAGE_API_KEY / DJIAN_IMAGE_BASE_URL / DJIAN_IMAGE_MODEL 配置。配置后无需重启。');
+  const baseUrl = panel.baseUrl ?? str(env.DJIAN_IMAGE_BASE_URL) ?? DEFAULT_BASE_URL;
   let url;
-  try { url = new URL(baseUrl); } catch { throw new Error('DJIAN_IMAGE_BASE_URL 不是有效 URL'); }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('DJIAN_IMAGE_BASE_URL 只支持不带内嵌凭据的 http/https 地址');
-  const timeoutMs = Math.max(1000, Math.min(600_000, Number(env.DJIAN_IMAGE_TIMEOUT_MS) || 300_000));
-  return { apiKey, baseUrl: baseUrl.replace(/\/+$/, ''), model: str(args.model) ?? str(env.DJIAN_IMAGE_MODEL) ?? DEFAULT_MODEL, timeoutMs };
+  try { url = new URL(baseUrl); } catch { throw new Error('图像接口地址不是有效 URL：请检查面板「AI 生图设置」或 DJIAN_IMAGE_BASE_URL'); }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('图像接口地址只支持不带内嵌凭据的 http/https URL');
+  const timeoutMs = panel.timeoutMs ?? Math.max(1000, Math.min(600_000, Number(env.DJIAN_IMAGE_TIMEOUT_MS) || 300_000));
+  return { apiKey, baseUrl: baseUrl.replace(/\/+$/, ''), model: str(args.model) ?? panel.model ?? str(env.DJIAN_IMAGE_MODEL) ?? DEFAULT_MODEL, timeoutMs };
 }
 
 async function request(url, init, timeoutMs) {
   let response;
   try { response = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) }); }
   catch (e) {
-    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') throw new Error('图像模型请求超时，请稍后重试或调大 DJIAN_IMAGE_TIMEOUT_MS');
+    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') throw new Error('图像模型请求超时，请稍后重试，或在面板「AI 生图设置」里调大超时');
     throw new Error('无法连接图像中转站：' + (e?.message ?? e));
   }
   return response;
@@ -129,7 +148,7 @@ async function editBody(client, projectId, args, fields, model) {
 async function execute(client, ctx, args, env = process.env) {
   const action = args.action === 'edit' ? 'edit' : args.action === 'generate' || args.action === undefined ? 'generate' : null;
   if (!action) throw new Error('action 必须是 generate 或 edit');
-  const config = settings(args, env);
+  const config = await resolveSettings(client, args, env);
   const fields = commonFields(args);
   const headers = { Authorization: 'Bearer ' + config.apiKey };
   let sourceNames = [];
@@ -173,7 +192,7 @@ async function execute(client, ctx, args, env = process.env) {
 
 export const IMAGE_TOOL = {
   name: 'djian_image',
-  description: '调用 OpenAI 兼容中转站的图像模型生成或改造图片，并自动导入当前项目素材库。action:"generate" 文生图；action:"edit" 用 image/images 指定的项目图片做参考改造，可另传 mask。支持 size、quality、n(1–4)、outputFormat；model 可覆盖 DJIAN_IMAGE_MODEL。返回实际素材文件名与预览，再用 addClip/addOverlay 放入时间线。密钥通过 DJIAN_IMAGE_API_KEY 配置，不要向用户索要或传入密钥。',
+  description: '调用 OpenAI 兼容中转站的图像模型生成或改造图片，并自动导入当前项目素材库。action:"generate" 文生图；action:"edit" 用 image/images 指定的项目图片做参考改造，可另传 mask。支持 size、quality、n(1–4)、outputFormat；model 可覆盖默认模型。返回实际素材文件名与预览，再用 addClip/addOverlay 放入时间线。密钥由用户在 D剪 面板「素材 → AI 生图设置」或 DJIAN_IMAGE_* 环境变量配置；未配置时引导用户打开面板设置，不要索要或传入密钥。',
   parameters: {
     type: 'object',
     properties: {
@@ -182,7 +201,7 @@ export const IMAGE_TOOL = {
       image: { type: 'string', description: 'edit：一张参考图的项目素材文件名' },
       images: { type: 'array', items: { type: 'string' }, maxItems: 4, description: 'edit：最多 4 张参考图的项目素材文件名' },
       mask: { type: 'string', description: 'edit：可选蒙版图片的项目素材文件名' },
-      model: { type: 'string', description: '可选，覆盖环境变量里的图像模型名' },
+      model: { type: 'string', description: '可选，覆盖默认图像模型名' },
       size: { type: 'string', description: 'auto 或 宽x高，如 1024x1024、1536x1024、1024x1536' },
       quality: { type: 'string', enum: ['auto', 'low', 'medium', 'high', 'standard', 'hd'] },
       outputFormat: { type: 'string', enum: ['png', 'jpeg', 'webp'] },

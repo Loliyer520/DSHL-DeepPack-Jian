@@ -5,6 +5,7 @@ import { absolute, api, type AssetInfo } from '../engine';
 import { forgetAsset } from '../media';
 import { Icon } from '../Icon';
 import { ContextMenu, type MenuItem } from './common';
+import { ImageSettingsDialog } from './ImageSettingsDialog';
 import type { Actions } from '../actions';
 
 const TYPE_LABEL = { video: '视频', image: '图片', audio: '音频' } as const;
@@ -23,6 +24,7 @@ export function AssetsPane({ actions }: { actions: Actions }) {
   const [over, setOver] = useState(false);
   const [uploading, setUploading] = useState<{ done: number; total: number; name: string } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const [imageSettings, setImageSettings] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const pid = project?.id;
 
@@ -102,6 +104,7 @@ export function AssetsPane({ actions }: { actions: Actions }) {
       <input ref={fileInput} type="file" multiple hidden accept="video/*,image/*,audio/*" onChange={(e) => { void upload([...(e.target.files ?? [])]); e.target.value = ''; }} />
       <div style={{ display: 'flex', gap: 6, margin: '10px 0' }}>
         <input className="dj-input" type="search" placeholder="搜索素材" aria-label="搜索素材" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+        <button className="dj-icon-btn" title="AI 生图设置（中转站地址、密钥与模型）" aria-label="AI 生图设置" onClick={() => setImageSettings(true)}><Icon name="settings" /></button>
       </div>
       <div className="dj-chips" style={{ marginBottom: 10 }}>
         {(['all', 'video', 'image', 'audio'] as const).map((k) => (
@@ -128,6 +131,7 @@ export function AssetsPane({ actions }: { actions: Actions }) {
         ))}
       </div>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+      {imageSettings && <ImageSettingsDialog onClose={() => setImageSettings(false)} />}
     </div>
   );
 }

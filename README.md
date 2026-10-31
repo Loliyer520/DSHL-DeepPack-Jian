@@ -96,10 +96,10 @@ npm run test:seek                                   # 媒体跳转只读必要�
 | `DJIAN_FFMPEG` / `DJIAN_FFPROBE` | 指定素材探测与缩略图用的 FFmpeg（默认 PATH，其次 Remotion 自带） |
 | `DJIAN_RENDER_BINARIES_DIR` | 指定完整的渲染二进制目录（合成器、FFmpeg、FFprobe 与动态库） |
 | `DJIAN_NO_WARMUP` | 启动时不预热渲染器 |
-| `DJIAN_IMAGE_API_KEY` | AI 生图/改图的中转站密钥（只读环境变量，不作为工具参数传递） |
-| `DJIAN_IMAGE_BASE_URL` | OpenAI 兼容接口根地址，默认 `https://api.openai.com/v1`；中转站通常填 `https://你的域名/v1` |
-| `DJIAN_IMAGE_MODEL` | 默认图像模型，默认 `gpt-image-1`；单次调用也可用 `djian_image.model` 覆盖 |
-| `DJIAN_IMAGE_TIMEOUT_MS` | 图像请求与结果下载超时，默认 300000ms，最大 600000ms |
+| `DJIAN_IMAGE_API_KEY` | （备用）AI 生图/改图的中转站密钥；推荐在面板「素材 → AI 生图设置」里配置，面板配置优先 |
+| `DJIAN_IMAGE_BASE_URL` | （备用）OpenAI 兼容接口根地址，默认 `https://api.openai.com/v1`；面板配置优先 |
+| `DJIAN_IMAGE_MODEL` | （备用）默认图像模型，默认 `gpt-image-1`；单次调用也可用 `djian_image.model` 覆盖 |
+| `DJIAN_IMAGE_TIMEOUT_MS` | （备用）图像请求与结果下载超时，默认 300000ms，最大 600000ms |
 
 ### 模型配置
 
@@ -107,7 +107,7 @@ npm run test:seek                                   # 媒体跳转只读必要�
 
 ### AI 生成 / 改造图片素材
 
-配置上面的 `DJIAN_IMAGE_*` 环境变量并重启宿主后，AI 可调用 `djian_image`：
+打开 D剪 面板「素材 → AI 生图设置」（齿轮按钮），填写 OpenAI 兼容中转站的地址、密钥与默认模型即可，保存后立即生效、无需重启。密钥只保存在本机引擎数据目录（`settings.json`），不会出现在对话或工具返回里。无人值守部署也可改用上面的 `DJIAN_IMAGE_*` 环境变量（面板配置优先）。之后 AI 可调用 `djian_image`：
 
 - `action:"generate"`：请求 `POST <baseURL>/images/generations` 文生图。
 - `action:"edit"`：请求 `POST <baseURL>/images/edits`，以当前项目的一张或多张图片作为参考，可选蒙版。
