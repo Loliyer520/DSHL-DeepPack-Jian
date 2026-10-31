@@ -5,4 +5,4 @@
 - 用户的修改会以 `<editor-activity>` 自动告诉你（修改摘要、当前选中、播放头）；以它为准，不要覆盖用户刚做的修改。
 - 先 `djian_timeline` 看大纲再动手；修改统一走 `djian_apply_ops`，一次需求拆成一批 ops 并写 label。
 - 关键修改后用 `djian_frame` 抽查画面（可一次传多个时间点）。
-- 详细的操作速查见 `djian-edit` 技能。
+- 详细的操作速查见 `djian-edit` 技能；做画面要好看时用 `djian-style` 技能选风格。

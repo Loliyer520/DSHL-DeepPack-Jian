@@ -50,6 +50,10 @@ tests/               单元与集成测试
 | `djian_subtitles` | SRT/VTT 导入与导出 |
 | `djian_export` | 导出视频并查询进度 |
 
+### 风格库
+
+内置 15 套 MG 视觉风格（扁平矢量、等轴 2.5D、包豪斯、像素、Synthwave、玻璃拟态、综艺花字等，来自 [mg-styles-15](https://github.com/Vincentwei1021/mg-styles-15)，MIT）。AI 做幻灯片 / 封面 / 信息图 / 生图时会先选风格、按可检验特征（色板、版式网格、动效曲线）执行，并用 djian_frame 抽查关键帧迭代，不凭空发挥。
+
 ## 安装
 
 在 DSHL（≥ 0.5.0.0）中导入 `dist/djian-<版本>.dspack`。整合包声明的启动器兼容性：
