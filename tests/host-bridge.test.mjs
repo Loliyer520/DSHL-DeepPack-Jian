@@ -23,7 +23,7 @@ const preStep = (id, step) => listeners.get('agent/pre-step')({ agent: agent(id)
 
 test('declares only the tools service and registers every djian tool', () => {
   assert.deepEqual(inject, ['tools']);
-  for (const name of ['djian_timeline', 'djian_apply_ops', 'djian_changes', 'djian_frame', 'djian_assets', 'djian_import_asset', 'djian_image', 'djian_search_media', 'djian_download_media', 'djian_export']) {
+  for (const name of ['djian_timeline', 'djian_style', 'djian_handoff', 'djian_checkpoint', 'djian_apply_ops', 'djian_changes', 'djian_frame', 'djian_assets', 'djian_import_asset', 'djian_image', 'djian_search_media', 'djian_download_media', 'djian_export']) {
     assert.ok(tools.has(name), name);
     assert.equal(tools.get(name).parameters.type, 'object');
   }
@@ -70,4 +70,20 @@ test('selection and playhead ride along at the start of a turn', async () => {
   const d = await preStep(sid, 1);
   assert.match(d.messages[0].content[0].text, /播放头 0:05\.40；选中 c3「a\.mp4」（主轨 0:03\.00–0:05\.40）/);
   assert.equal((await preStep(sid, 1)).messages.length, 0, 'unchanged presence is not repeated');
+});
+
+test('project style is injected at each new turn, not repeated on later tool steps', async () => {
+  const sid = 'hb-style';
+  await tools.get('djian_style').execute({ action: 'set', brief: '深色科技风', background: '#0B0D12', accent: '#58C4DD', titleSize: 72, margin: 0.08, maxAnimations: 2 }, exec(sid));
+  const first = await preStep(sid, 1);
+  const card = first.messages.find((m) => m.source.kind === 'djian-style');
+  assert.ok(card);
+  assert.match(card.content[0].text, /深色科技风/);
+  assert.match(card.content[0].text, /标题 72px/);
+  assert.match(card.content[0].text, /已确认的部分不擅自重做/);
+  assert.ok(Object.isFrozen(card));
+  const toolStep = await preStep(sid, 2);
+  assert.equal(toolStep.messages.filter((m) => m.source.kind === 'djian-style').length, 0);
+  const nextTurn = await preStep(sid, 1);
+  assert.equal(nextTurn.messages.filter((m) => m.source.kind === 'djian-style').length, 1);
 });

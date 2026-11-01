@@ -40,6 +40,8 @@ tests/               单元与集成测试
 | 工具 | 作用 |
 | --- | --- |
 | `djian_timeline` | 时间线大纲（每个对象带 id），可附素材清单 |
+| `djian_style` / `djian_handoff` | 项目级风格卡 / 轻量新会话接力摘要 |
+| `djian_checkpoint` | 保存、列出和按用户要求恢复确认版本 |
 | `djian_apply_ops` | 一批编辑操作（加/删/改/移动/分割片段、文字与画面元素、公式/坐标系/镜头、变形、整页幻灯片、叠放顺序、轨道、关键帧、标记、画布），返回回执与新 id；公式有 LaTeX 错误、坐标系表达式写错时回执给出提示 |
 | `djian_catalog` | 查可用的图标、形状、图表、幻灯片模板与主题、动画预设、字体 |
 | `djian_changes` | 某个版本之后谁改了什么（含用户在面板的修改） |
@@ -100,6 +102,7 @@ npm run test:seek                                   # 媒体跳转只读必要�
 | `DJIAN_FFMPEG` / `DJIAN_FFPROBE` | 指定素材探测与缩略图用的 FFmpeg（默认 PATH，其次 Remotion 自带） |
 | `DJIAN_RENDER_BINARIES_DIR` | 指定完整的渲染二进制目录（合成器、FFmpeg、FFprobe 与动态库） |
 | `DJIAN_NO_WARMUP` | 启动时不预热渲染器 |
+| `DJIAN_GPU_ENCODER` | H.264 导出编码：`auto`（默认，实际试编码后选择 NVENC/QSV/AMF/VideoToolbox，失败回退 CPU）、`off`、`nvenc`、`qsv`、`amf`、`videotoolbox` |
 | `DJIAN_IMAGE_API_KEY` | （备用）AI 生图/改图的中转站密钥；推荐在面板「素材 → AI 生图设置」里配置，面板配置优先 |
 | `DJIAN_IMAGE_BASE_URL` | （备用）OpenAI 兼容接口根地址，默认 `https://api.openai.com/v1`；面板配置优先 |
 | `DJIAN_IMAGE_MODEL` | （备用）默认图像模型，默认 `gpt-image-1`；单次调用也可用 `djian_image.model` 覆盖 |
@@ -117,3 +120,13 @@ npm run test:seek                                   # 媒体跳转只读必要�
 - `action:"edit"`：请求 `POST <baseURL>/images/edits`，以当前项目的一张或多张图片作为参考，可选蒙版。
 - 支持 OpenAI 格式的 `b64_json` 或图片 URL 返回；结果自动作为**新素材**导入，不覆盖原图，并给支持图像输入的 AI 返回预览。
 - 常用参数：`prompt`、`size`、`quality`、`n`（1–4）、`outputFormat`（png/jpeg/webp）、`name`。生成后 AI 会返回实际素材文件名，再用 `addClip` 或 `addOverlay` 放入时间线。
+
+### 长任务审美稳定
+
+- `djian_style` 把从 15 套 MG 风格中选定的名称、核心配色、字号、边距和动效上限保存到项目 `project.json`，每个新对话轮次自动注入，不依赖越来越长的聊天记录。
+- `djian_handoff` 生成包含当前任务、修改范围、风格卡、时间线大纲和最近检查点的轻量摘要；换镜头或上下文变长时粘贴到新会话。
+- `djian_checkpoint` 在确认版或大改前留档。恢复只应由用户明确要求触发，避免 AI 因自己的反复判断覆盖用户成果。
+
+### GPU 导出
+
+默认 `DJIAN_GPU_ENCODER=auto`：先用 256×256 测试帧实际试编码，Windows/Linux 按 NVENC → QSV → AMF 选择，macOS 使用 VideoToolbox；正式导出异常时自动用 libx264 重试。锁定某个硬件编码器后若试编码失败会明确报错，不会静默降级。导出结果与任务状态会记录实际使用的 `encoder`。

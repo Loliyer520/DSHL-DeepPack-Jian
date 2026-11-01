@@ -13,6 +13,7 @@ import { timelineDurationInFrames } from "./timeline.js";
 import { resolveRenderBrowser } from "./browser.js";
 import { muxNativeAudio, resolveRenderBinaries, useNativeAudio } from "./nativeRuntime.js";
 import { layoutTex } from "./mathServer.js";
+import { applyHardwareEncoder, ffmpegExecutable, markEncoderFailed, parseEncoderPreference, resolveEncoder, SOFTWARE_ENCODER, type EncoderName, type EncoderPreference } from "./hardwareEncoder.js";
 
 const ENGINE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SRC_DIR = path.join(ENGINE_ROOT, "src");
@@ -228,19 +229,27 @@ export interface RenderOptions extends Partial<AssetContext> {
   scale?: number;
   concurrency?: number;
   crf?: number;
+  /** 默认读 DJIAN_GPU_ENCODER：auto 实际探测并回退；off 强制 libx264；也可锁定 nvenc/qsv/amf/videotoolbox */
+  gpuEncoder?: EncoderPreference;
   signal?: AbortSignal;
+  onEncoder?: (encoder: EncoderName) => void;
   onProgress?: (p: { rendered: number; total: number; stage: string }) => void;
 }
 
 /** 导出 mp4：JSON 时间线进 → mp4 出 */
-export async function renderVideo(opts: RenderOptions): Promise<{ outFile: string; durationInFrames: number; fps: number }> {
+export async function renderVideo(opts: RenderOptions): Promise<{ outFile: string; durationInFrames: number; fps: number; encoder: EncoderName }> {
   if (!opts.assetBase) {
     if (!opts.assetsDir) throw new Error("缺少素材来源（assetBase 或 assetsDir）");
     return withStaticAssets(opts.assetsDir, (assetBase, fontsBase, mathBase) => renderVideo({ ...opts, assetsDir: undefined, assetBase, fontsBase: opts.fontsBase ?? fontsBase, mathBase: opts.mathBase ?? mathBase }));
   }
   const timeline: Timeline = parseTimeline(opts.timeline);
   const durationInFrames = Math.max(1, timelineDurationInFrames(timeline));
-  const binariesDirectory = await resolveRenderBinaries();
+  const preference = opts.gpuEncoder ?? parseEncoderPreference(process.env.DJIAN_GPU_ENCODER);
+  const binariesDirectory = await resolveRenderBinaries(preference !== "off");
+  const executable = preference === "off" ? null : ffmpegExecutable(binariesDirectory);
+  let encoder: EncoderName = executable ? await resolveEncoder(executable, preference) : SOFTWARE_ENCODER;
+  opts.onEncoder?.(encoder);
+  if (encoder !== SOFTWARE_ENCODER) console.log("[djian] 使用 GPU 编码：" + encoder);
   const separateAudio = binariesDirectory ? await useNativeAudio(binariesDirectory) : false;
   const serveUrl = await getServeUrl();
   const inputProps = { timeline, assetBase: opts.assetBase, fontsBase: opts.fontsBase, mathBase: opts.mathBase };
@@ -248,21 +257,33 @@ export async function renderVideo(opts: RenderOptions): Promise<{ outFile: strin
   fs.mkdirSync(path.dirname(outFile), { recursive: true });
   const scratch = separateAudio ? fs.mkdtempSync(path.join(path.dirname(outFile), ".djian-render-")) : null;
   try {
-    await withBrowser(async (puppeteerInstance) => {
-      const composition = await selectComposition({ serveUrl, id: "TimelineVideo", inputProps, puppeteerInstance, chromiumOptions, binariesDirectory, timeoutInMilliseconds: 120_000 });
-      await renderMedia({
-        binariesDirectory, composition, serveUrl, inputProps, puppeteerInstance, chromiumOptions,
-        codec: "h264",
-        outputLocation: scratch ? path.join(scratch, "video.mp4") : outFile,
-        ...(scratch ? { audioCodec: "pcm-16" as const, separateAudioTo: path.join(scratch, "audio.wav") } : {}),
-        scale: opts.scale ?? 1,
-        concurrency: opts.concurrency ?? Math.max(1, Math.floor(os.cpus().length / 2)),
-        ...(opts.crf != null ? { crf: opts.crf } : {}),
-        timeoutInMilliseconds: 120_000,
-        cancelSignal: linkSignal(opts.signal),
-        onProgress: (p) => opts.onProgress?.({ rendered: p.renderedFrames, total: durationInFrames, stage: p.stitchStage }),
+    const encode = async (selected: EncoderName) => {
+      await withBrowser(async (puppeteerInstance) => {
+        const composition = await selectComposition({ serveUrl, id: "TimelineVideo", inputProps, puppeteerInstance, chromiumOptions, binariesDirectory, timeoutInMilliseconds: 120_000 });
+        await renderMedia({
+          binariesDirectory, composition, serveUrl, inputProps, puppeteerInstance, chromiumOptions,
+          codec: "h264",
+          outputLocation: scratch ? path.join(scratch, "video.mp4") : outFile,
+          ...(scratch ? { audioCodec: "pcm-16" as const, separateAudioTo: path.join(scratch, "audio.wav") } : {}),
+          scale: opts.scale ?? 1,
+          concurrency: opts.concurrency ?? Math.max(1, Math.floor(os.cpus().length / 2)),
+          ...(opts.crf != null ? { crf: opts.crf } : {}),
+          ...(selected !== SOFTWARE_ENCODER ? { ffmpegOverride: ({ args }: { args: string[] }) => applyHardwareEncoder(args, selected, opts.crf ?? 18) } : {}),
+          timeoutInMilliseconds: 120_000,
+          cancelSignal: linkSignal(opts.signal),
+          onProgress: (p) => opts.onProgress?.({ rendered: p.renderedFrames, total: durationInFrames, stage: p.stitchStage }),
+        });
       });
-    });
+    };
+    try { await encode(encoder); }
+    catch (error) {
+      if (encoder === SOFTWARE_ENCODER || preference !== "auto" || opts.signal?.aborted || !executable) throw error;
+      console.warn("[djian] GPU 正式导出失败，已自动改用 libx264 重试：" + (error instanceof Error ? error.message.slice(-800) : String(error)));
+      markEncoderFailed(executable, encoder);
+      encoder = SOFTWARE_ENCODER;
+      opts.onEncoder?.(encoder);
+      await encode(encoder);
+    }
     if (scratch && binariesDirectory) {
       opts.onProgress?.({ rendered: durationInFrames, total: durationInFrames, stage: "muxing" });
       const completed = path.join(scratch, "completed.mp4");
@@ -272,7 +293,7 @@ export async function renderVideo(opts: RenderOptions): Promise<{ outFile: strin
   } finally {
     if (scratch) fs.rmSync(scratch, { recursive: true, force: true });
   }
-  return { outFile, durationInFrames, fps: timeline.meta.fps };
+  return { outFile, durationInFrames, fps: timeline.meta.fps, encoder };
 }
 
 /** 单帧 PNG 落盘（旧 API，CLI/调试用） */

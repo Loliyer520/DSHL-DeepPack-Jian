@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { outline } from './outline.js';
 import { OPS_DOC, OPS_PARAMETERS } from './ops-doc.js';
 import { IMAGE_TOOL } from './image.js';
+import { WORKFLOW_TOOLS } from './workflow.js';
 
 const str = (v) => (typeof v === 'string' ? v : undefined);
 const p = (pid) => '/api/p/' + encodeURIComponent(pid);
@@ -39,6 +40,7 @@ export const TOOLS = [
       return { value: { rev, canvas: timeline.meta, ...(args.detail === 'full' ? { timeline } : {}), ...(assets ? { assets: assets.assets.map(({ name, type, duration, width, height }) => ({ name, type, duration, width, height })) } : {}) }, text };
     },
   },
+  ...WORKFLOW_TOOLS,
   {
     name: 'djian_apply_ops',
     description: OPS_DOC,

@@ -54,7 +54,7 @@ try {
     },
   });
   const secs = ((Date.now() - started) / 1000).toFixed(1);
-  console.log(`完成：${result.outFile}（${result.durationInFrames} 帧 @ ${result.fps}fps，耗时 ${secs}s）`);
+  console.log(`完成：${result.outFile}（${result.durationInFrames} 帧 @ ${result.fps}fps，${result.encoder}，耗时 ${secs}s）`);
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);

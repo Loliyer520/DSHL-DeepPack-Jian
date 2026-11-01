@@ -100,7 +100,7 @@ v7 仍只加可选字段，但旧版引擎读到会丢掉这些字段，所以�
 
 ## 渲染
 
-`TimelineVideo.tsx` 同时用于面板预览（`@remotion/player`）与导出/取帧（`@remotion/renderer`），保证所见即所得。公式排版接口通过 `mathBase` 传入（引擎服务 `/api/math`；命令行导出的临时静态服务也提供同一接口）。引擎服务常驻一个 Chrome 实例并预热（本机 Chrome/Edge 用新版无头模式——Chromium 132 起移除了旧版；本机浏览器起不来时改用 Remotion 自带的无头浏览器）；整合包随附预构建（压缩、无 source map）的 Remotion bundle，按源码哈希校验，不一致时才在临时目录现打包。取帧单帧按比例缩放输出，多帧逐张渲染后拼成联系表；导出走 `renderMedia`，系统编码器只有原生 AAC 时先无损混音再编码。
+`TimelineVideo.tsx` 同时用于面板预览（`@remotion/player`）与导出/取帧（`@remotion/renderer`），保证所见即所得。公式排版接口通过 `mathBase` 传入（引擎服务 `/api/math`；命令行导出的临时静态服务也提供同一接口）。引擎服务常驻一个 Chrome 实例并预热（本机 Chrome/Edge 用新版无头模式——Chromium 132 起移除了旧版；本机浏览器起不来时改用 Remotion 自带的无头浏览器）；整合包随附预构建（压缩、无 source map）的 Remotion bundle，按源码哈希校验，不一致时才在临时目录现打包。取帧单帧按比例缩放输出，多帧逐张渲染后拼成联系表；导出走 `renderMedia`，系统编码器只有原生 AAC 时先无损混音再编码。H.264 默认实际试编码选择 NVENC/QSV/AMF/VideoToolbox，GPU 模式优先使用通过自检的系统 FFmpeg；正式导出失败自动回退 libx264，`DJIAN_GPU_ENCODER=off` 可强制 CPU。
 
 Remotion 自带的 FFmpeg 是精简版（没有 `fps`/`tile` 滤镜、没有 `lavfi` 解码与裸 PCM 封装）：胶片缩略图用输出端 `-r` 抽样成一组小图，波形用 WAV 输出并跳过 RIFF 头，编码器自检用 `image2pipe` 喂一张内嵌 PNG。
 

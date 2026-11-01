@@ -83,12 +83,13 @@ export class RenderService {
     renderVideo({
       timeline: p.timeline, outFile: job.outFile, assetBase: this.assetBase(pid), fontsBase: this.fontsBase, mathBase: this.mathBase,
       scale: s, crf: CRF[quality], signal: controller.signal,
+      onEncoder: (encoder) => { if (job.status === 'rendering') job.encoder = encoder; },
       onProgress: (pr) => {
         if (job.status !== 'rendering') return;
         job.progress = { rendered: pr.rendered, total: pr.total, percent: pr.total ? Math.round((pr.rendered / pr.total) * 100) : 0, stage: pr.stage };
       },
     }).then((r) => {
-      job.result = { fileName: name, sizeBytes: fs.statSync(job.outFile).size, durationInFrames: r.durationInFrames, fps: r.fps };
+      job.result = { fileName: name, sizeBytes: fs.statSync(job.outFile).size, durationInFrames: r.durationInFrames, fps: r.fps, encoder: r.encoder };
       job.status = 'done';
       this.pruneExports();
     }).catch((e) => {

@@ -10,6 +10,7 @@ import { diffTimelines } from '../../engine/dist/diff.js';
 import { describeBatch } from '../../engine/dist/describe.js';
 import { atomicWriteJson, readJsonFile } from './storage.mjs';
 import { DJIAN_HOME, LEGACY_CURRENT_FILE, LEGACY_TIMELINE, LIMITS, PROJECTS_DIR, SESSIONS_FILE, TRASH_DIR, assetKind } from './config.mjs';
+import { mergeStyle, styleText } from './style.mjs';
 
 export class StoreError extends Error {
   constructor(status, message, code, extra) {
@@ -135,6 +136,32 @@ export class Store {
     if (!meta) throw new StoreError(404, '项目不存在');
     meta.name = String(name).trim().slice(0, 60) || meta.name;
     this.writeProjectMeta(id, meta);
+  }
+
+  getStyle(id) {
+    this.load(id);
+    const style = this.readProjectMeta(id)?.style ?? null;
+    return { style, text: styleText(style) };
+  }
+
+  updateStyle(id, patch) {
+    this.load(id);
+    const meta = this.readProjectMeta(id) ?? {};
+    const style = mergeStyle(meta.style, patch);
+    if (Object.keys(style).length) meta.style = style;
+    else delete meta.style;
+    meta.updatedAt = new Date().toISOString();
+    this.writeProjectMeta(id, meta);
+    return { style: Object.keys(style).length ? style : null, text: styleText(style) };
+  }
+
+  clearStyle(id) {
+    this.load(id);
+    const meta = this.readProjectMeta(id) ?? {};
+    delete meta.style;
+    meta.updatedAt = new Date().toISOString();
+    this.writeProjectMeta(id, meta);
+    return { style: null, text: null };
   }
 
   /** 删除 = 移入回收站（可手动找回），不做不可逆删除 */

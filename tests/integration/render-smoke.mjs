@@ -21,7 +21,9 @@ try {
     audioTracks: [{ id: 'audio', clips: [{ id: 'sound', src: 'source.wav', inPoint: 1, atSeconds: 0, duration: 2, speed: 1.5, volume: .5 }] }],
     overlays: [{ text: 'D剪 · Rendering', startSeconds: 0, endSeconds: 2, position: 'center', fontSize: 18 }],
   };
-  await renderVideo({ timeline, outFile: output, assetsDir: scratch, concurrency: 2 });
+  const result = await renderVideo({ timeline, outFile: output, assetsDir: scratch, concurrency: 2 });
+  assert.ok(['libx264', 'h264_nvenc', 'h264_qsv', 'h264_amf', 'h264_videotoolbox'].includes(result.encoder));
+  console.log('实际编码器：' + result.encoder);
   const probe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', output], { windowsHide: true }));
   const video = probe.streams.find((s) => s.codec_type === 'video');
   const audio = probe.streams.find((s) => s.codec_type === 'audio');

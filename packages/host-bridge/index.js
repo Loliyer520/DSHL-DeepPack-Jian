@@ -16,12 +16,14 @@ const deepFreeze = (o) => {
   if (o && typeof o === 'object' && !Object.isFrozen(o)) { Object.freeze(o); for (const v of Object.values(o)) deepFreeze(v); }
   return o;
 };
-export const activityMessage = (text) => deepFreeze({
+const contextMessage = (text, kind) => deepFreeze({
   id: randomUUID(),
   role: 'user',
   content: [{ type: 'text', text }],
-  source: { kind: 'djian-activity', form: 'snapshot', sections: [{ name: 'djian-activity', text }] },
+  source: { kind, form: 'snapshot', sections: [{ name: kind, text }] },
 });
+export const activityMessage = (text) => contextMessage(text, 'djian-activity');
+export const styleMessage = (text) => contextMessage(text, 'djian-style');
 const jsonSafe = (v) => JSON.parse(JSON.stringify(v ?? null));
 
 export function apply(ctx, config = {}) {
@@ -133,9 +135,16 @@ function registerActivity(ctx, { client, resolve, sessions, presence, config, lo
     try {
       const state = await Promise.race([resolve(sid), new Promise((_, rej) => setTimeout(() => rej(new Error('项目解析超时')), 1500))]);
       if (state.lastInjectedRev === undefined) state.lastInjectedRev = recoverInjectedRev(payload.agent);
-      const text = await buildActivity(client, state, { step: payload.step, signal: payload.signal });
-      if (!text) return decision;
-      return { ...decision, messages: [...decision.messages, activityMessage(text)] };
+      const [text, style] = await Promise.all([
+        buildActivity(client, state, { step: payload.step, signal: payload.signal }),
+        payload.step === 1
+          ? client.get('/api/p/' + encodeURIComponent(state.projectId) + '/style', { timeoutMs: 800, signal: payload.signal }).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+      const messages = [...decision.messages];
+      if (style?.text) messages.push(styleMessage(style.text));
+      if (text) messages.push(activityMessage(text));
+      return messages.length === decision.messages.length ? decision : { ...decision, messages };
     } catch (e) {
       log('编辑事件注入跳过：' + e.message);
       return decision;

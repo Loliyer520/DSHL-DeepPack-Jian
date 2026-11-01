@@ -155,17 +155,23 @@ function registerTimelineRoutes(r, { store, project }) {
     sendJson(res, 200, { ok: true, presence: entry });
   });
   r.add('GET', '/api/p/:pid/presence', (req, res, { params }) => sendJson(res, 200, store.getPresence(project(params))));
+  r.add('GET', '/api/p/:pid/style', (req, res, { params }) => sendJson(res, 200, store.getStyle(project(params))));
+  r.add('PUT', '/api/p/:pid/style', async (req, res, { params }) => {
+    const body = await readJson(req, 32 * 1024);
+    sendJson(res, 200, store.updateStyle(project(params), body?.patch ?? {}));
+  });
+  r.add('DELETE', '/api/p/:pid/style', (req, res, { params }) => sendJson(res, 200, store.clearStyle(project(params))));
   r.add('GET', '/api/p/:pid/history', (req, res, { params }) => sendJson(res, 200, { snapshots: store.listSnapshots(project(params)) }));
   r.add('POST', '/api/p/:pid/history', async (req, res, { params }) => {
     const pid = project(params);
     const body = await readJson(req);
     const label = typeof body?.label === 'string' && body.label.trim() ? body.label.trim().slice(0, 80) : '手动保存的版本';
-    sendJson(res, 200, { ok: true, id: store.snapshot(pid, label, { actor: 'user' }) });
+    sendJson(res, 200, { ok: true, id: store.snapshot(pid, label, { actor: ACTORS.has(body?.actor) ? body.actor : 'user' }) });
   });
   r.add('POST', '/api/p/:pid/history/:snap/restore', async (req, res, { params }) => {
     const pid = project(params);
     const body = await readJson(req).catch(() => ({}));
-    sendJson(res, 200, store.restoreSnapshot(pid, params.snap, { actor: 'user', clientId: body?.clientId ?? null }));
+    sendJson(res, 200, store.restoreSnapshot(pid, params.snap, { actor: ACTORS.has(body?.actor) ? body.actor : 'user', clientId: body?.clientId ?? null }));
   });
 }
 

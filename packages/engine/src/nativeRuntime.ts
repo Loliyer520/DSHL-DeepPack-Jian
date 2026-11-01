@@ -10,6 +10,7 @@ const run = promisify(execFile);
 const require = createRequire(import.meta.url);
 const extension = process.platform === 'win32' ? '.exe' : '';
 let pending: Promise<string | undefined> | undefined;
+let pendingFull: Promise<string | undefined> | undefined;
 const audioModes = new Map<string, Promise<boolean>>();
 
 export function needsNativeAac(encoders: string): boolean {
@@ -100,7 +101,7 @@ export async function prepareNativeRuntime(bundledDir: string, encoder: string, 
   } finally { await removeScratch(staging, cacheDir); }
 }
 
-async function resolveRuntime(): Promise<string | undefined> {
+async function resolveRuntime(preferFull: boolean): Promise<string | undefined> {
   if (process.env.DJIAN_RENDER_BINARIES_DIR) {
     const directory = path.resolve(process.env.DJIAN_RENDER_BINARIES_DIR);
     for (const name of ['ffmpeg', 'ffprobe', 'remotion']) {
@@ -113,8 +114,13 @@ async function resolveRuntime(): Promise<string | undefined> {
   const rendererRequire = createRequire(require.resolve('@remotion/renderer'));
   const bundled = path.dirname(rendererRequire.resolve('@remotion/compositor-win32-x64-msvc/package.json'));
   let failure: unknown;
-  try { await verifyEncoder(path.join(bundled, 'ffmpeg.exe')); return undefined; }
-  catch (error) { failure = error; }
+  let bundledUsable = false;
+  try {
+    await verifyEncoder(path.join(bundled, 'ffmpeg.exe'));
+    bundledUsable = true;
+    // 随包精简 FFmpeg 通常没有硬件编码器；GPU 模式优先寻找功能完整的系统 FFmpeg。
+    if (!preferFull) return undefined;
+  } catch (error) { failure = error; }
   const candidates = new Set((process.env.PATH ?? '').split(path.delimiter).filter(Boolean).map((entry) => path.resolve(entry.replace(/^"|"$/g, ''), 'ffmpeg.exe')));
   for (const encoder of candidates) {
     if (path.dirname(encoder).toLowerCase() === bundled.toLowerCase()) continue;
@@ -124,11 +130,16 @@ async function resolveRuntime(): Promise<string | undefined> {
       return await prepareNativeRuntime(bundled, encoder, path.join(os.tmpdir(), 'djian-native-runtime'));
     } catch (error) { failure = error; }
   }
+  if (bundledUsable) return undefined;
   const detail = failure instanceof Error ? failure.message.slice(-1500) : String(failure);
   throw new Error(`编码器自检失败，尚未开始渲染。请安装可用的 FFmpeg 并加入 PATH，或设置 DJIAN_RENDER_BINARIES_DIR。\n${detail}`);
 }
 
-export function resolveRenderBinaries(): Promise<string | undefined> {
-  pending ??= resolveRuntime().catch((error) => { pending = undefined; throw error; });
+export function resolveRenderBinaries(preferFull = false): Promise<string | undefined> {
+  if (preferFull) {
+    pendingFull ??= resolveRuntime(true).catch((error) => { pendingFull = undefined; throw error; });
+    return pendingFull;
+  }
+  pending ??= resolveRuntime(false).catch((error) => { pending = undefined; throw error; });
   return pending;
 }
