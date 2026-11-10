@@ -1,3 +1,7 @@
+import {AI_TOOLS,COMPACT_OPS_PARAMETERS} from './ai-tools.js';
+import {DELIVERY_TOOLS} from './delivery-tools.js';
+import {DESIGN_TOOLS} from './design-tools.js';
+import {PROJECT_TOOLS,ensureRevision,postEdit} from './project-tools.js';
 // D剪 剪辑工具：名称、说明、参数 schema 与执行逻辑（不依赖宿主，宿主插件与 MCP 适配器共用）。
 // execute(client, ctx, args) → { value: JSON, text: 给模型的文字, image?: { data: Buffer, mediaType } }
 import { readFile } from 'node:fs/promises';
@@ -22,6 +26,10 @@ function receiptLines(result) {
 }
 
 export const TOOLS = [
+  ...AI_TOOLS,
+  ...DESIGN_TOOLS,
+  ...DELIVERY_TOOLS,
+  ...PROJECT_TOOLS,
   {
     name: 'djian_timeline',
     description: '读取当前会话剪辑项目的时间线。默认返回精简大纲（含每个片段/字幕/轨道的 id、时间区间与效果），detail:"full" 返回完整 JSON。修改前、或事件提示用户改过之后调用；id 一律以这里为准。',
@@ -41,13 +49,15 @@ export const TOOLS = [
     },
   },
   ...WORKFLOW_TOOLS,
+  {name:'djian_check',description:'检查当前项目：缺失素材、源范围、文字越界、阅读速度、对比度、重叠与动画编排。返回可定位的问题；静态估算不代表最终像素或响度测量。',parameters:{type:'object',properties:{}},async execute(client,ctx){const result=await client.get(p(ctx.projectId)+'/check');ctx.observe(result.rev);return {value:result,text:result.issues.length?result.issues.map(i=>`${i.severity} @${i.time}s ${i.id??''}: ${i.message}`).join('\n'):'未发现静态规则问题'};}},
   {
     name: 'djian_apply_ops',
-    description: OPS_DOC,
-    parameters: OPS_PARAMETERS,
+    description: '按顺序应用一批操作，每条独立回执。先用 djian_context 获取相关 id 和约束；参数不明时查 djian_operation；较大修改先用 djian_rehearse 预演。不确定整体效果时先预演再采用。时间为秒，x/y 为中心点，w/h 为画布比例。已有设计锁不可绕过。失败只补失败项。requestId 在同一请求重试时复用。',
+    parameters: COMPACT_OPS_PARAMETERS,
     async execute(client, ctx, args) {
       if (!Array.isArray(args.ops) || !args.ops.length) throw new Error('ops 必须是非空数组');
-      const result = await client.post(p(ctx.projectId) + '/ops', { ops: args.ops, actor: 'ai', clientId: ctx.clientId, baseRev: ctx.lastSeenRev, label: str(args.label) ?? null });
+      const baseRev=await ensureRevision(client,ctx);
+      const result = await postEdit(client,p(ctx.projectId) + '/ops', { ops: args.ops, actor: 'ai', clientId: ctx.clientId, baseRev, batchId: args.requestId, conflictPolicy: args.conflictPolicy ?? 'reject', label: str(args.label) ?? null });
       ctx.observe(result.rev, result.changed);
       const lines = [
         (result.summary?.length ? '已完成（rev ' + result.rev + '）：\n- ' + result.summary.join('\n- ') : '没有产生任何变化（rev ' + result.rev + '）'),
@@ -56,7 +66,7 @@ export const TOOLS = [
       ];
       const created = (result.receipts ?? []).filter((r) => r.id && /^add|^split|^duplicate/.test(r.op)).map((r) => r.op + '→' + (r.ids ?? [r.id]).join(','));
       if (created.length) lines.push('新 id：' + created.join('；'));
-      return { value: { rev: result.rev, receipts: result.receipts, conflicts: result.conflicts }, text: lines.join('\n') };
+      return { value: { rev: result.rev, requestId:result.requestId, receipts: result.receipts, conflicts: result.conflicts }, text: lines.join('\n') };
     },
   },
   {
@@ -124,8 +134,8 @@ export const TOOLS = [
   },
   {
     name: 'djian_catalog',
-    description: '查询可用的幻灯片资源：icons 内置图标（可按 keyword 过滤，中文名或英文名）、shapes 形状、charts 图表、templates 幻灯片模板、themes 配色主题、presets 动画预设、fonts 字体。做 PPT 式画面前先查这里，用原生元素而不是生成图片。',
-    parameters: { type: 'object', properties: { what: { type: 'string', enum: ['icons', 'shapes', 'charts', 'templates', 'themes', 'presets', 'fonts', 'all'] }, keyword: { type: 'string', description: '过滤图标：如 “数据”“rocket”“箭头”' } }, required: ['what'] },
+    description: '查询可用的幻灯片资源：icons 内置图标（可按 keyword 过滤，中文名或英文名）、shapes 形状、charts 图表、templates 幻灯片模板、themes 配色主题、presets 动画预设（含 3D、物理弹簧）、transitions 转场、fonts 字体。做 PPT 式画面前先查这里，用原生元素而不是生成图片。',
+    parameters: { type: 'object', properties: { what: { type: 'string', enum: ['icons', 'shapes', 'charts', 'templates', 'themes', 'presets', 'transitions', 'fonts', 'all'] }, keyword: { type: 'string', description: '过滤图标：如 “数据”“rocket”“箭头”' } }, required: ['what'] },
     async execute(client, ctx, args) {
       const c = await client.get('/api/catalog', { timeoutMs: 10_000 });
       const kw = str(args.keyword)?.trim().toLowerCase();
@@ -142,6 +152,7 @@ export const TOOLS = [
       if (want('templates')) parts.push('幻灯片模板 addSlide.template：\n' + c.templates.map((x) => x.key + ' ' + x.label + '：' + x.hint).join('\n'));
       if (want('themes')) parts.push('配色主题 addSlide.theme：' + c.themes.map((x) => x.key + ' ' + x.label + (x.dark ? '（深色）' : '（浅色）') + ' 强调色 ' + x.accent).join('、'));
       if (want('presets')) parts.push('动画预设：\n' + Object.entries(c.presets.reduce((m, p) => ({ ...m, [p.group]: [...(m[p.group] ?? []), p.key + ' ' + p.label] }), {})).map(([g, l]) => g + '：' + l.join('、')).join('\n') + '\n逐字/逐词/逐行 textEffect.type：' + c.textEffects.join('、'));
+      if (want('transitions')) parts.push('转场 transition:{type,duration,direction?,ease?,intensity?}：' + c.transitions.map((t) => t.type + ' ' + t.label + (t.directional ? '（可选方向）' : '')).join('、'));
       if (want('fonts')) parts.push('字体 fontFamily：' + c.fonts.map((f) => f.id + ' ' + f.label).join('、'));
       return { value: args.what === 'all' ? c : { [args.what]: c[args.what] }, text: parts.join('\n\n') };
     },
@@ -168,14 +179,15 @@ export const TOOLS = [
   },
   {
     name: 'djian_export',
-    description: '导出成片 mp4。action:"start" 开始导出（scale 0.5/1/2，quality draft/standard/high），返回 jobId；action:"status" 查询进度。导出完成后提醒用户在剪辑面板下载。',
+    description: '导出成片 mp4。action:"start" 开始导出（scale 0.5/1/2，quality draft/standard/high），返回 jobId；action:"status" 查询进度。自动预检，缺失素材/字体等错误会阻断导出；先用 scale:0.5,quality:draft 出低清样片。导出完成后提醒用户在剪辑面板下载。',
     parameters: { type: 'object', properties: { action: { type: 'string', enum: ['start', 'status'] }, jobId: { type: 'string' }, scale: { type: 'number', enum: [0.5, 1, 2] }, quality: { type: 'string', enum: ['draft', 'standard', 'high'] } }, required: ['action'] },
     async execute(client, ctx, args) {
       if (args.action === 'status') {
         const r = await client.get('/api/export/' + encodeURIComponent(args.jobId ?? ''));
         return { value: r, text: r.status === 'done' ? '导出完成：' + r.result.fileName + '（' + Math.round(r.result.sizeBytes / 1024 / 1024 * 10) / 10 + 'MB），可在剪辑面板下载' : r.status === 'rendering' ? '导出中 ' + r.progress.percent + '%（' + r.progress.stage + '）' : '导出' + (r.status === 'cancelled' ? '已取消' : '失败：' + r.error) };
       }
-      const r = await client.post(p(ctx.projectId) + '/export', { scale: args.scale ?? 1, quality: args.quality ?? 'standard' });
+      const checked=await client.get(p(ctx.projectId)+'/delivery/preflight');ctx.observe(checked.rev);
+      const r = await client.post(p(ctx.projectId) + '/export', { scale: args.scale ?? 1, quality: args.quality ?? 'standard',baseRev:checked.rev });
       return { value: r, text: '已开始导出，jobId=' + r.jobId + '；可用 action:"status" 查询进度' };
     },
   },

@@ -89,7 +89,7 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
     </div>, document.body);
 }
 
-export function Dialog({ title, onClose, children, footer }: { title: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode }) {
+export function Dialog({ title, onClose, children, footer, className }: { className?:string; title: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
@@ -98,7 +98,7 @@ export function Dialog({ title, onClose, children, footer }: { title: string; on
   }, []);
   return (
     <div className="dj-mask" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Escape') onClose(); }}>
-      <div className="dj-dialog" ref={ref} role="dialog" aria-modal="true" aria-label={title}>
+      <div className={"dj-dialog"+(className?" "+className:"")} ref={ref} role="dialog" aria-modal="true" aria-label={title}>
         <h3>{title}<span className="dj-spacer" /><button className="dj-icon-btn" aria-label="关闭" onClick={onClose}><Icon name="close" /></button></h3>
         {children}
         {footer && <footer>{footer}</footer>}

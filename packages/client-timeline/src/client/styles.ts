@@ -197,6 +197,9 @@ export const CSS_PANELS = String.raw`
 .dj-menu hr{border:0;height:.5px;margin:4px 0;background:var(--dj-line)}
 .dj-mask{position:absolute;inset:0;z-index:100;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px}
 .dj-dialog{width:min(440px,100%);max-height:100%;overflow:auto;padding:16px;border-radius:12px;background:var(--dj-s1);box-shadow:var(--dsw-elevation-prominent,0 24px 60px rgba(0,0,0,.5))}
+.dj-studio-dialog{width:min(720px,100%)}
+.dj-studio-dialog>.dj-tabs{position:sticky;top:-16px;background:var(--dj-s1);z-index:2}
+.dj-studio-dialog>.dj-tabs>button{white-space:nowrap}
 .dj-dialog h3{margin:0 0 12px;font-size:15px;display:flex;align-items:center}
 .dj-dialog h3 .dj-spacer{flex:1}
 .dj-dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}

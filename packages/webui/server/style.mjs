@@ -7,6 +7,8 @@ const integer = (v, lo, hi) => (Number.isInteger(v) ? Math.max(lo, Math.min(hi, 
 export function sanitizeStylePatch(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
   const out = {};
+  for(const key of ['audience','platform','mood','focalPoint','typeHierarchy','motionRules']){const value=text(raw[key],240);if(value!==undefined||raw[key]===null)out[key]=value??null;}
+  if(['sparse','balanced','dense'].includes(raw.density)||raw.density===null)out.density=raw.density;
   const brief = text(raw.brief, 240);
   const designStyle = text(raw.designStyle, 60);
   const fontFamily = text(raw.fontFamily, 40);
@@ -45,6 +47,7 @@ export function styleText(style) {
   if (!style || typeof style !== 'object' || !Object.keys(style).length) return null;
   const lines = ['<djian-style>', '项目风格卡：这是长期约束，优先于历史聊天里相互冲突的临时风格尝试。'];
   if (style.designStyle || style.brief) lines.push('- 风格：' + [style.designStyle ? esc(style.designStyle) : '', style.brief ? esc(style.brief) : ''].filter(Boolean).join(' — '));
+  for(const [key,label] of [['audience','受众'],['platform','发布平台'],['mood','情绪'],['focalPoint','视觉重点'],['typeHierarchy','字体层级'],['motionRules','动效规则'],['density','信息密度']])if(style[key])lines.push('- '+label+'：'+esc(style[key]));
   const palette = [['背景', style.background], ['文字', style.text], ['强调', style.accent], ['辅助', style.secondary]].filter((x) => x[1]).map((x) => x[0] + ' ' + x[1]);
   if (palette.length) lines.push('- 色彩：' + palette.join('；') + (style.maxColors ? '；全页不超过 ' + style.maxColors + ' 种颜色' : ''));
   const type = [style.fontFamily ? '字体 ' + esc(style.fontFamily) : '', style.titleSize ? '标题 ' + style.titleSize + 'px' : '', style.bodySize ? '正文 ' + style.bodySize + 'px' : ''].filter(Boolean);

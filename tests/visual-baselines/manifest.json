@@ -1,0 +1,55 @@
+{
+  "threshold": {
+    "channelDelta": 16,
+    "maxChangedRatio": 0.003,
+    "maxMeanDelta": 0.3
+  },
+  "platform": "linux",
+  "arch": "x64",
+  "renderer": "4.0.526",
+  "fonts": {
+    "mashanzheng.woff2": "ec7385e5d281b9f8cda3d9be405b5ec2342c4b7564d6ae68ac93916ce9cf73db",
+    "notosanssc.woff2": "85d202ed2fb4978f0524cb394c3977d086bdbc5b5ae4db4f66a2d25c76213594",
+    "notoserifsc.woff2": "851ecace2c06810d4456beb5709fa89eb61b8cbb644231857457abf833a133a7",
+    "zcoolkuaile.woff2": "f479cf24edb8b9d103463703f5db952ce3d552f43e965b796399fcfbfd2f698c",
+    "zcoolqingke.woff2": "63cab154e6476548f4542a2ccfbca7d1b7a1800839fafeb34a732e358e245d3a"
+  },
+  "frames": {
+    "adaptive-landscape": {
+      "width": 960,
+      "height": 540,
+      "time": 1,
+      "sha256": "13023a66570a0fe7aee090a8960274dc6ce9e582a925c993e35d3dfb5fe72102"
+    },
+    "adaptive-portrait": {
+      "width": 540,
+      "height": 960,
+      "time": 1,
+      "sha256": "c18f33a26666c6e6cefaaa1a76b716952b1465296d7783a2cee74efe7c1d29a0"
+    },
+    "scene-warm": {
+      "width": 960,
+      "height": 540,
+      "time": 2,
+      "sha256": "1f0098ff17a647cb2a8fbe2ea12ea55b372f62cd459b1b4631fc2c3387bfce7f"
+    },
+    "scene-brand": {
+      "width": 960,
+      "height": 540,
+      "time": 6,
+      "sha256": "0b0f45218d4bb26c07f1566eb0ac682b28ae788572237e949de8467de500216e"
+    },
+    "typography-fit": {
+      "width": 960,
+      "height": 540,
+      "time": 1,
+      "sha256": "ec441a4a82ab5f7d7cd9191bf8f8326099b3cd4d0179055690715804c7b4bdc6"
+    },
+    "native-shadows": {
+      "width": 960,
+      "height": 640,
+      "time": 2,
+      "sha256": "d2c280ea93af67f297db7425776580165cf0ed2f73664338b480ad2688372b5b"
+    }
+  }
+}

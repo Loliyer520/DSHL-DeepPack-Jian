@@ -47,6 +47,22 @@ v7 仍只加可选字段，但旧版引擎读到会丢掉这些字段，所以�
 - **镜头** `kind:"camera"`：不渲染，描述镜头框——`x/y` 中心、`w` 宽度（1 = 全画面），`x/y/scale` 关键帧移动/缩放镜头框。合成时每个元素外包一层 `CameraLayer`，按绝对时刻找到作用于它的镜头（同组优先，其次不分组的全局镜头，字幕不受影响）并施加变换。面板选中镜头时关掉镜头效果、显示镜头框；画布编辑把舞台坐标经镜头逆变换换算回画布比例。
 - **自由路径** `shape.type:"path"`：`path`（SVG 路径）或 `vertices`（可 `smooth` Catmull-Rom、`closed`），坐标为盒子 0–100；开放路径可加 `arrow`，末端按切线方向让出箭头长度。
 
+## 时间线 schema v8（元素外观）
+
+`shadow` 保留旧版单层对象 / `false` 写法，另可写最多 8 层的数组；每层 `{color, blur, x?, y?, opacity?, spread?}`。阴影按真实 alpha 轮廓生成：扩展/收缩 → 高斯模糊 → 偏移 → 着色，每层都读取原始 SourceAlpha，最后与 SourceGraphic 合成，避免连续 drop-shadow 造成阴影再次投影。第一层在最上方，透明度与颜色 alpha 相乘。文字阴影只作用一次；未显式设置的字幕/标题仍沿用原来的默认文字阴影。
+
+所有可见元素新增 `filter`（与片段共用校验与净化）和 `blendMode`；同名关键帧优先于静态滤镜，其余静态滤镜仍生效。预览、导出和几何变形复用外观渲染逻辑。属性面板提供多层阴影/发光预设、逐层参数、滤镜和混合模式；渐变支持 2–8 个色标的增删与位置编辑。AI 工具参数、说明与时间线大纲同步展示这些能力。
+
+数组阴影不能被旧版引擎完整读取，因此格式提升至 v8；v1–v7 自动迁移，旧引擎读取 v8 时只读，防止丢失外观数据。
+
+## 时间线 schema v9（2.5D 与高级转场）
+
+片段与元素共享 `transform3d:{rotateX?,rotateY?,z?,perspective?,backface?}`，通过 CSS 透视平面实现 2.5D；`rotationX/rotationY/z/perspective` 动画通道覆盖对应静态值。旋转单位度，纵深与透视单位画布像素，默认透视 1200。正纵深会在渲染时限于透视距离的 90%，避免穿过相机平面。对已有二维变换零影响；背面默认可见，可显式关闭。3D 元素的 `transform` 几何变形采用已有的通用位置/尺寸与交叉淡化路径，避免二维仿射算法丢失透视。
+
+`transition` 新增 flip/cube/iris/diagonal/zoomBlur/whip，以及 `ease`（预设或贝塞尔）和 `intensity`（0.1–2）。转场函数按确定帧号求值，无随机与 CSS 墙钟动画。旧转场默认线性不变，新转场默认 inOut；媒体预滚、声音与总时长逻辑沿用原有实现。`/api/catalog` 与 `djian_catalog{what:"transitions"}` 提供共享转场目录，面板和 AI 使用相同选项。
+
+v1–v8 自动迁移至 v9。格式版本提升防止旧引擎清除新动画通道或不认识的转场。此实现不包含网格模型、物理光照、全局 Z 排序或模型文件导入。
+
 ### 幻灯片模板
 
 `addSlide` 把模板（14 种，含 formula、graph）× 主题（7 套，含 math）展开成一组普通元素，共享一个 `group`，元素 id 由分组 id 推出（`<group>e<i>`），面板乐观插入与服务端结果一致。版式按画布横竖自动切换，字号按短边缩放。整页缺省插在最下层（不遮挡已有元素），元素之间按出场先后错开。`updateGroup`（整体移动/改时长/解组/批量改）与 `removeGroup` 操作整页；面板时间线把同组元素合并成一块显示。
@@ -119,3 +135,21 @@ Remotion 自带的 FFmpeg 是精简版（没有 `fps`/`tile` 滤镜、没有 `la
 ## 非 DSH 环境
 
 `packages/agent/mcp-server.mjs` 是同一套工具的 MCP stdio 适配器（需要显式传 `projectId`），供其他支持 MCP 的客户端使用；`host-bridge` 在没有 DSHL 托管服务时也能自行拉起引擎。
+
+### 2.3.0：组合 / 遮罩 / 路径
+
+Schema v10 增加可选 `groups: Record<string, GroupState>`，通过 `updateGroup.state` 完整替换；系统 `putGroupState` 支持实体级差异、撤销与协作。渲染器只对有状态的分组建立共同变换容器，并放在其最高成员层位。内部 Sequence 保留成员时间，外层按最早可见成员的起点计算整体时间。
+
+`masks.ts` 生成 SVG alpha matte：先模糊蒙版形状，再将亮度转成 alpha，避免模糊内容。`motionPath.ts` 将 SVG 路径映射到画布像素后按弧长取样；缓存有上限；独立 `pathProgress` 通道控制进度。分割时显式保存缺省进度曲线。形变涉及遮罩/路径时走已有交叉淡化，保留新属性。
+
+### 2.4.0：动画编排
+
+Schema v14 新增弹簧 easing 对象、五个遮罩通道、follow/connector 引用、组 stagger。`spring.ts` 解析求解欠阻尼/临界阻尼/过阻尼，`evalKeyframes` 传入区间秒数；分割仅平移原关键帧。`relationships.ts` 用确定性二维仿射变换解析多级跟随和连接锚点，不依赖上一帧或 DOM。解析/操作层拒绝循环与悬空引用，删除目标时清理引用，客户端复制后延迟建立重映射绑定。
+
+`stagger.ts` 提供独立入场包裹层的参数，渲染时叠加在原成员动画之外，关系计算使用相同包裹层变换。`maskState` 用当前通道覆盖静态遮罩，仅生成 alpha matte，不改变内容清晰度。
+
+视觉增强：`appearance.tsx` 合成外/内阴影；`glass.ts` 使用浏览器背景滤镜；`sharedElements.ts` 匹配相邻场景并冻结画布坐标快照，由 TimelineVideo 调用 MorphView。曲线编辑器通过原有关键帧 ops 完成预览、提交与撤销。
+
+2.6.0：`trackMatte.tsx` 将二维遮罩源按绝对时间采样为 SVG Alpha/亮度蒙版，视频与元素共用；`gradient.ts` 对色标/颜色/角度插值。扫光在外观 SVG 滤镜中与原始 Alpha 合成。项目 `animationLibrary` 通过 save/apply/removeAnimation 操作维护，系统 putAnimation 用于逐项撤销。
+
+2.7.0：`layout.ts` 以共享纯函数将 autoSize / 组 layout 解析为元素几何，服务端、面板和加载时一致；`pathEdit.ts` 提供贝塞尔节点操作；`TemporalBlur.tsx` 通过 Freeze 子帧和隔离加法合成实现原生元素/组合运动模糊。组模糊关闭成员重复采样，SampleAnchor 仅为当前帧保留画布命中元素。

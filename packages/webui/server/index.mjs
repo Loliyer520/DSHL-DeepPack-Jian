@@ -79,6 +79,7 @@ async function shutdown(signal) {
   closing = true;
   console.log('[djian] 收到 ' + signal + '，正在退出…');
   server.close();
+  await store.close();
   await render.close().catch(() => {});
   try { if (readJsonFile(LOCK_FILE)?.pid === process.pid) fs.rmSync(LOCK_FILE, { force: true }); } catch {}
   process.exit(0);

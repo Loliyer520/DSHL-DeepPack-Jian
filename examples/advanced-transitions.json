@@ -1,0 +1,207 @@
+{
+  "meta": {
+    "width": 640,
+    "height": 360,
+    "fps": 30,
+    "background": "#0f172a"
+  },
+  "videoTracks": [
+    {
+      "id": "main",
+      "clips": [
+        {
+          "id": "clip0",
+          "type": "image",
+          "src": "transition-a.png",
+          "inPoint": 0,
+          "clipDuration": 1.4,
+          "volume": 0
+        },
+        {
+          "id": "clip1",
+          "type": "image",
+          "src": "transition-b.png",
+          "inPoint": 0,
+          "clipDuration": 1.4,
+          "volume": 0,
+          "transition": {
+            "type": "flip",
+            "duration": 0.8,
+            "ease": "inOut",
+            "intensity": 1
+          }
+        },
+        {
+          "id": "clip2",
+          "type": "image",
+          "src": "transition-a.png",
+          "inPoint": 0,
+          "clipDuration": 1.4,
+          "volume": 0,
+          "transition": {
+            "type": "cube",
+            "duration": 0.8,
+            "ease": "inOut",
+            "intensity": 1
+          }
+        },
+        {
+          "id": "clip3",
+          "type": "image",
+          "src": "transition-b.png",
+          "inPoint": 0,
+          "clipDuration": 1.4,
+          "volume": 0,
+          "transition": {
+            "type": "iris",
+            "duration": 0.8,
+            "ease": "inOut",
+            "intensity": 1
+          }
+        },
+        {
+          "id": "clip4",
+          "type": "image",
+          "src": "transition-a.png",
+          "inPoint": 0,
+          "clipDuration": 1.4,
+          "volume": 0,
+          "transition": {
+            "type": "diagonal",
+            "duration": 0.8,
+            "ease": "inOut",
+            "intensity": 1
+          }
+        },
+        {
+          "id": "clip5",
+          "type": "image",
+          "src": "transition-b.png",
+          "inPoint": 0,
+          "clipDuration": 1.4,
+          "volume": 0,
+          "transition": {
+            "type": "zoomBlur",
+            "duration": 0.8,
+            "ease": "inOut",
+            "intensity": 1
+          }
+        },
+        {
+          "id": "clip6",
+          "type": "image",
+          "src": "transition-a.png",
+          "inPoint": 0,
+          "clipDuration": 1.4,
+          "volume": 0,
+          "transition": {
+            "type": "whip",
+            "duration": 0.8,
+            "ease": "inOut",
+            "intensity": 1
+          }
+        }
+      ]
+    }
+  ],
+  "overlays": [
+    {
+      "id": "label0",
+      "kind": "text",
+      "text": "6 NATIVE TRANSITIONS",
+      "startSeconds": 0,
+      "endSeconds": 0.9999999999999999,
+      "x": 0.5,
+      "y": 0.92,
+      "w": 0.9,
+      "fontSize": 14,
+      "color": "#ffffff",
+      "align": "center",
+      "shadow": false
+    },
+    {
+      "id": "label1",
+      "kind": "text",
+      "text": "01 / CARD FLIP",
+      "startSeconds": 0.9999999999999999,
+      "endSeconds": 2.4,
+      "x": 0.5,
+      "y": 0.92,
+      "w": 0.9,
+      "fontSize": 14,
+      "color": "#ffffff",
+      "align": "center",
+      "shadow": false
+    },
+    {
+      "id": "label2",
+      "kind": "text",
+      "text": "02 / CUBE TURN",
+      "startSeconds": 2.4,
+      "endSeconds": 3.7999999999999994,
+      "x": 0.5,
+      "y": 0.92,
+      "w": 0.9,
+      "fontSize": 14,
+      "color": "#ffffff",
+      "align": "center",
+      "shadow": false
+    },
+    {
+      "id": "label3",
+      "kind": "text",
+      "text": "03 / CIRCLE REVEAL",
+      "startSeconds": 3.7999999999999994,
+      "endSeconds": 5.199999999999999,
+      "x": 0.5,
+      "y": 0.92,
+      "w": 0.9,
+      "fontSize": 14,
+      "color": "#ffffff",
+      "align": "center",
+      "shadow": false
+    },
+    {
+      "id": "label4",
+      "kind": "text",
+      "text": "04 / DIAGONAL WIPE",
+      "startSeconds": 5.199999999999999,
+      "endSeconds": 6.6,
+      "x": 0.5,
+      "y": 0.92,
+      "w": 0.9,
+      "fontSize": 14,
+      "color": "#ffffff",
+      "align": "center",
+      "shadow": false
+    },
+    {
+      "id": "label5",
+      "kind": "text",
+      "text": "05 / ZOOM BLUR",
+      "startSeconds": 6.6,
+      "endSeconds": 7.999999999999998,
+      "x": 0.5,
+      "y": 0.92,
+      "w": 0.9,
+      "fontSize": 14,
+      "color": "#ffffff",
+      "align": "center",
+      "shadow": false
+    },
+    {
+      "id": "label6",
+      "kind": "text",
+      "text": "06 / WHIP PAN",
+      "startSeconds": 7.999999999999998,
+      "endSeconds": 9.8,
+      "x": 0.5,
+      "y": 0.92,
+      "w": 0.9,
+      "fontSize": 14,
+      "color": "#ffffff",
+      "align": "center",
+      "shadow": false
+    }
+  ]
+}

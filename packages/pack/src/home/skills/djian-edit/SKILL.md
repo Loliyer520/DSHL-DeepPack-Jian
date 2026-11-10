@@ -9,11 +9,14 @@ description: 视频剪辑操作速查——剪段、拼接、画中画、字幕�
 
 ## 工作流
 
-1. `djian_timeline` 看大纲（每个片段/字幕/轨道都带 id）。需要素材清单时加 `assets:true` 或用 `djian_assets`。
-2. 把需求拆成一批 ops，一次 `djian_apply_ops` 提交，并写 `label`（会出现在用户的历史记录里）。
-3. 看回执：rejected/ignored 写明原因，只补缺失的操作；`conflicts` 表示对象刚被用户改过，以用户为准。
-4. `djian_frame` 抽查关键时间点；传数组可一次得到多帧联络图。
-5. 每一步开始时，用户的新修改会以 `<editor-activity>` 自动出现——尊重它们，不要改回去。
+1. `djian_context{task:"text"|"layout"|"motion"|"audio"}` 读取当前选中或播放头范围；可指定 ids/time/start/end。返回相关对象、依赖、素材、设计锁和审美简报；不要每步重新读全项目。只有字段被截断或需要工程全貌时读 `djian_timeline`。
+2. 参数不明时用 `djian_operation{names:["updateOverlay"]}` 按需查询；完整速查仍可读本技能。
+3. 较大修改先 `djian_rehearse{action:"preview",ops:[…],ids:[…],label:"…"}`：在独立快照校验并生成前后画面。返回失败回执时只修复失败原因；局部范围外的修改会阻断采用。
+4. 观察预演画面（默认修改后；`show` + `view:"before"` 看修改前），检查可读性、焦点、留白和风格。通过后 `djian_rehearse{action:"apply",id}` 采用。简单明确的局部修改仍可直接 `djian_apply_ops`。
+5. 预演根据改动字段只抽查受影响范围；音量修改不渲染画面。几何检查不等于审美评价；必要时再 `djian_design_review` 动态检查。
+6. `<editor-activity>` 里的用户新修改优先，不要改回去。项目、素材或审美规范改变后重新预演，不要复用旧方案。
+
+项目审美简报使用 `djian_style` 保存 audience/platform/mood/density/focalPoint/typeHierarchy/motionRules 及既有配色、字号和动效约束。只有用户明确的偏好或任务已有依据才写入；不把一次临时选择视为永久偏好。优先使用当前任务的明确要求。
 
 ## 时间线结构
 
@@ -55,6 +58,27 @@ description: 视频剪辑操作速查——剪段、拼接、画中画、字幕�
 5. 叠放：`arrangeOverlay{id, to:"front"}`；整页挪时间：`updateGroup{group, startSeconds}`；整页删除：`removeGroup{group}`。
 6. 做完用 `djian_frame` 在每页动画结束后的时间点抽查（如每页起点 +3s），检查文字溢出、重叠、对比度。
 
+### 阴影、发光、滤镜与混合
+
+所有可见元素都支持以下原生外观属性，使用 `addOverlay` 或 `updateOverlay{patch:{…}}`。不要复制多层半透明形状来模拟阴影；一件元素即可实现，并能在属性面板逐层修改。
+
+- 单层投影：`shadow:{color:"#000000",opacity:0.2,blur:24,x:0,y:8,spread:0}`。数值单位为画布像素；透明度与颜色自身 alpha 相乘。`spread` 正值扩展轮廓，负值收缩。
+- 悬浮卡片：`shadow:[{color:"#000000",opacity:0.12,blur:8,y:3},{color:"#000000",opacity:0.2,blur:32,y:16}]`。最多 8 层，第一层在上方，每层独立基于原元素轮廓，不会相互投影。
+- 蓝色光晕：`shadow:{color:"#38bdf8",opacity:0.6,blur:24,x:0,y:0,spread:2}`。发光要显式设 `y:0`，可用同色的近光与远光两层。`shadow:false` 关闭（包括默认字幕阴影），`shadow:null` 恢复默认。
+- 静态滤镜：`filter:{blur:6,brightness:1.1,contrast:1.05,saturate:0.8,grayscale:0,sepia:0,hueRotate:0}`。亮度/对比度/饱和度默认 1，其他默认 0；同名动画通道覆盖静态值，清除关键帧后恢复静态值。
+- 混合：`blendMode:"multiply"` 正片叠底、`"screen"` 滤色、`"overlay"` 叠加、`"soft-light"` 柔光，默认 `"normal"`。`filter:null` / `blendMode:null` 清除。
+- 渐变已有原生支持：`shape.fill:{type:"linear",angle:90,stops:[{offset:0,color:"#0f172a"},{offset:0.4,color:"#2563eb"},{offset:1,color:"#38bdf8"}]}`，2–8 个色标。不要用多条矩形拼渐变。
+
+阴影跟随元素的不透明度、移动、缩放和旋转，基于真实透明轮廓；不改变盒子尺寸。文字与形状属于同一元素时整体投影，不额外给内部文字叠一次阴影。滤镜模糊作用于元素自身，不是玻璃背景模糊。
+
+### 轻量 3D 与高级转场
+
+- 原生文字、图形、图片、图标、图表及媒体片段都可设置 `transform3d:{rotateX:12,rotateY:-25,z:0,perspective:1200,backface:"visible"}`，无需生成新素材。`z` 正值接近镜头；`perspective` 越小近大远小越明显。数值单位为画布像素和角度。
+- 关键帧用 `rotationX/rotationY/z/perspective`。例如 `setKeyframe{id,channel:"rotationY",t:0,v:75,e:"out"}` → `t:0.8,v:0`，卡片侧翻进入；显式关键帧优先于静态值与动画预设。
+- 预设：`flipInX/flipInY/flipOutX/flipOutY` 翻转进出、`depthIn/depthOut` 纵深推进/退场、`tilt3d` 立体摇摆、`spin3d` 平面自转。背面关闭时转过背面的平面会消失；需完整自转展示可保持 `backface:"visible"`。
+- 转场目录：`djian_catalog{what:"transitions"}`。在进入片段上设 `transition:{type:"cube",duration:0.8,direction:"left",ease:"inOut",intensity:1}`；新类型还有 `flip`、`iris`、`diagonal`、`zoomBlur`、`whip`。方向对 flip/cube/diagonal/whip 生效，强度控制 flip/cube 透视及 zoomBlur/whip 模糊程度；iris 从中心展开。总时长不变。
+- 以上是平面的 2.5D 透视效果，不是真实模型或带厚度的物体，没有光照与物理投影。需要真实产品三维模型时说明这个范围，不要把平面自转称为模型渲染。带 3D 效果的元素使用 `transform` 时会做交叉淡化，二维公式字形/轮廓匹配仅用于二维元素。
+
 排版要点：四周留 8–10% 安全边距；标题 56–96px、正文 26–40px（1080p）；一页一个重点；配色不超过 3 种（底色 + 文字色 + 一个强调色）；对齐到同一网格线；浅底深字或深底浅字，避免文字压在复杂背景上。
 
 ## 数学动画（3Blue1Brown 风格讲解视频）
@@ -94,3 +118,37 @@ description: 视频剪辑操作速查——剪段、拼接、画中画、字幕�
 ## 风格与好看
 
 做幻灯片、封面、信息图、AI 生图等「要好看」的画面时，先按 `djian-style` 技能选一套 MG 风格（15 套速查 + 完整规格），把风格的色板/字体气质/动效特征落到具体参数，再用 djian_frame 抽查关键帧迭代；不要凭空自由发挥。审美纪律与评审闭环见 `djian-style` 技能。
+
+### 组合、遮罩与路径运动（2.3.0）
+
+- 整组动画用 `updateGroup{group,state:{pivotX:0.5,pivotY:0.5,effects:[{preset:"flipInY"}]}}`，不要给每个成员复制旋转来冒充共享支点。`state` 整体替换，先读取并保留旧状态。
+- `mask:{type:"ellipse",w:0.8,h:0.8,feather:20,invert:false}` 只羽化可见边缘；自定义 `path` 用局部 0–100 坐标。
+- `motionPath:{path:"M 0 0 Q 20 -30 40 0",autoRotate:true}` 沿 SVG 单条路径移动，100 单位为画布宽/高，默认全时长匀速；用 `animations.pathProgress` 控制进度。`mask`/`motionPath` 支持元素和组合状态，清除字段写 null（组合 state 内删除字段）。
+
+### 动画编排（2.4.0）
+
+- 遮罩动画用 maskX/maskY/maskW/maskH/maskFeather 关键帧；0 尺寸可完全隐藏。组关键帧用 group 替代 id。
+- 父子绑定用 follow:{target,rotation?,scale?}；目标须先存在，双方同组或均未分组，禁止循环。保留排版偏移，默认仅跟随 2D 位移。
+- 自动箭头用 line/arrow/doubleArrow + connector:{from,to,fromAnchor?,toAnchor?}，锚点 center/top/bottom/left/right。
+- 错峰用 updateGroup 的 state.stagger:{interval:0.15,order:"forward",preset:"springRise",duration:0.6}，与成员动画组合，不改原时间。
+- 物理弹簧用 e:{type:"spring",stiffness:170,damping:18,mass:1,velocity:0}；也可用 springIn/springRise/springTurn 入场预设。
+
+### 内阴影、玻璃与共享元素（v12）
+
+使用原生效果：内阴影 `shadow:{color:'#000',blur:12,opacity:.4,inset:true}`；形状 `shape.stroke.color` 可为与 fill 相同的渐变对象。毛玻璃 `glass:{blur:18,saturation:1.3,tint:'#ffffff',opacity:.12,radius:16,borderOpacity:.25}`，形状用透明填充，保留清晰前景文字。
+相邻场景的对应元素设置 `shared:{key:'card',duration:.6,ease:'inOut'}`；源结束必须与目标开始相接，目标决定时长。用唯一 key 和显式宽高的平面元素；3D、连接器、组合遮罩/错峰跳过匹配，手动 morph 优先，过渡层位于普通元素之上。
+曲线缓动 `e:[.25,.1,.25,1]` 用于关键帧，也可用于 shared.ease；用户可在动画面板拖动关键帧及贝塞尔控制点。glass/shared 设 null 可清除。
+
+### 轨道遮罩、表面动画与动画复用（v13）
+
+- 先添加二维遮罩源，再给同组元素或视频设置 `trackMatte:{source:'maskId',mode:'alpha',invert:false,hideSource:true}`；视频的遮罩源不分组。形状、纯文字、图片、图标均可作为源，默认隐藏但仍按绝对时间和位置动画采样。`mode:'luma'` 表示黑隐藏、白显示。不可嵌套；来源不在时间区间时普通遮罩隐藏全画面，反向显示全画面。解除设 null。
+- 渐变填充/描边可带 `keyframes:[{t:0,angle:0,stops:[{offset:0,color:'#f00'},{offset:1,color:'#00f'}],e:'linear'},…]`，颜色/色标/角度插值。通道 `gradientAngle`、`gradientShift`、`gradientHue` 提供相对角度/色标/色相动画。
+- `sweep:{color:'#fff',width:.25,softness:.65,angle:20,opacity:.7}` 配合 `animations.sweepProgress:[{t:0,v:0},{t:2,v:1}]` 原生扫光，无需复制元素。可用于文字与图片。
+- `saveAnimation{id|group,name}` 保存动画，`applyAnimation{id|group,name,fit:'stretch'|'original',merge:false}` 复用，`removeAnimation{name}` 删除。默认按目标时长缩放；只复制动画，不复制源的扫光/渐变等外观配置。已保存内容在 timeline.animationLibrary 中。
+
+### 布局、路径节点与运动模糊（v14）
+
+- 原生元素 `motionBlur:{samples:8,shutterAngle:180}` 或组 `state.motionBlur` 使用真实时间采样。2–16 个采样，0–720 度快门；0 度关闭，180 度覆盖前半帧，360 度覆盖前一帧。组开启后不重复采样成员。该功能不用于视频和音频，不建议用于毛玻璃。
+- `autoSize:{maxWidth:.6,minWidth:.04,padding:16}` 让文字/带字形状按内容重算 w/h，支持自动换行。宽度为画布分数，内边距为像素。使用保守字宽估计，特殊字体可增加留白或手动尺寸。
+- `state.layout:{direction:'row'|'column'|'grid',x:.5,y:.5,width?,height?,gap:16,padding:16,align:'center',justify:'start',columns:3,background:'背景id'}` 自动排组内成员。缺省宽高包裹内容，背景引用要在同组。`layoutExclude:true` 可排除成员；连接器、跟随对象默认不参与流式排列。state 更新需保留旧动画等字段。
+- 可视化路径编辑器支持形状、运动路径和自定义遮罩。仍写回标准 SVG path；编辑圆弧时转为三次贝塞尔。节点移动连带平移相邻控制柄，可镜像控制柄并细分曲线，支持撤销。

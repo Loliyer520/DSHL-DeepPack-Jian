@@ -13,8 +13,18 @@ import { timecode } from '../../geometry';
 import { Field, ScrubNumber } from '../common';
 import { AnimationTab } from './ClipInspector';
 import { TextInspector, TimeSection, TransformSection, overlayTarget } from './TextInspector';
-import { ColorField, NumberField, Section, Seg, Toggle, useEdit } from './fields';
+import { ColorField, NumberField, Section, Seg, Toggle, useEdit, useInspectTime } from './fields';
 import { CameraPanel, MathPanel, MorphSection, PathSection, PlotPanel } from './MathInspector';
+
+import { MotionSection, GroupMotionSection } from './MotionSection';
+import { SharedSection } from './SharedSection';
+import { SpatialSection } from './SpatialSection';
+import { AutoSizeSection } from './LayoutSection';
+import { MotionBlurSection } from './MotionBlurSection';
+import { SurfaceMotionSection } from './SurfaceMotionSection';
+import { TrackMatteSection } from './TrackMatteSection';
+import { EasingField } from './EasingField';
+import { AppearanceSection } from './AppearanceSection';
 
 export type ElTab = 'style' | 'text' | 'layout' | 'animation';
 const STYLE_TAB: Record<string, string> = { shape: '形状', image: '图片', icon: '图标', chart: '图表', plot: '坐标系' };
@@ -44,11 +54,12 @@ function Chips<T extends string>({ value, options, onChange, label }: { value?: 
 }
 
 // ---------- 填充 / 描边 ----------
-function FillField({ value, onChange, allowNone = true }: { value: Fill | undefined; onChange: (f: Fill | null, label: string) => void; allowNone?: boolean }) {
+export function FillField({ value, onChange, allowNone = true, gradientOnly = false }: { value: Fill | undefined; onChange: (f: Fill | null, label: string) => void; allowNone?: boolean; gradientOnly?: boolean }) {
   const mode = value === undefined ? 'none' : typeof value === 'string' ? 'solid' : value.type;
   const stops = typeof value === 'object' && value ? value.stops : [{ offset: 0, color: typeof value === 'string' ? value : '#3b82f6' }, { offset: 1, color: '#8b5cf6' }];
-  const grad = (patch: { angle?: number; stops?: typeof stops; type?: 'linear' | 'radial' }) => ({ type: patch.type ?? (typeof value === 'object' && value ? value.type : 'linear'), angle: patch.angle ?? (typeof value === 'object' && value?.angle !== undefined ? value.angle : 90), stops: patch.stops ?? stops });
+  const grad = (patch: { angle?: number; stops?: typeof stops; type?: 'linear' | 'radial' }) => ({ ...(typeof value==='object'&&value.keyframes?{keyframes:value.keyframes}:{}), type: patch.type ?? (typeof value === 'object' && value ? value.type : 'linear'), angle: patch.angle ?? (typeof value === 'object' && value?.angle !== undefined ? value.angle : 90), stops: patch.stops ?? stops });
   const opts: ['none' | 'solid' | 'linear' | 'radial', string][] = [['solid', '纯色'], ['linear', '线性渐变'], ['radial', '径向渐变']];
+  if (gradientOnly) opts.shift();
   if (allowNone) opts.unshift(['none', '无']);
   return (
     <>
@@ -56,27 +67,21 @@ function FillField({ value, onChange, allowNone = true }: { value: Fill | undefi
       <div className="dj-grid" style={{ marginTop: 8 }}>
         {mode === 'solid' && typeof value === 'string' && <ColorField label="颜色" value={value} onChange={(c) => onChange(c, '填充颜色')} />}
         {(mode === 'linear' || mode === 'radial') && <>
-          <ColorField label="起始色" value={stops[0].color} onChange={(c) => onChange(grad({ stops: [{ ...stops[0], color: c }, ...stops.slice(1)] }), '渐变颜色')} />
-          <ColorField label="结束色" value={stops[stops.length - 1].color} onChange={(c) => onChange(grad({ stops: [...stops.slice(0, -1), { ...stops[stops.length - 1], color: c }] }), '渐变颜色')} />
+          {stops.map((stop, i) => <React.Fragment key={i}>
+            <ColorField label={'色标 ' + (i + 1)} value={stop.color} onChange={(color) => onChange(grad({ stops: stops.map((s, j) => j === i ? { ...s, color } : s) }), '渐变颜色')} />
+            <Field label="位置"><ScrubNumber value={stop.offset * 100} min={0} max={100} step={1} digits={0} suffix="%" label={'色标 ' + (i + 1) + ' 位置'} onCommit={(v) => onChange(grad({ stops: stops.map((s, j) => j === i ? { ...s, offset: v / 100 } : s) }), '渐变色标位置')} /></Field>
+            {stops.length > 2 && <button type="button" className="dj-chip" onClick={() => onChange(grad({ stops: stops.filter((_, j) => j !== i) }), '删除渐变色标')}>删除色标 {i + 1}</button>}
+          </React.Fragment>)}
+          {stops.length < 8 && <button type="button" className="dj-chip" onClick={() => {
+            let at = 0;
+            for (let i = 1; i < stops.length - 1; i++) if (stops[i + 1].offset - stops[i].offset > stops[at + 1].offset - stops[at].offset) at = i;
+            const added = { offset: (stops[at].offset + stops[at + 1].offset) / 2, color: stops[at].color };
+            onChange(grad({ stops: [...stops.slice(0, at + 1), added, ...stops.slice(at + 1)] }), '添加渐变色标');
+          }}>添加色标</button>}
           {mode === 'linear' && <Field label="角度"><ScrubNumber value={typeof value === 'object' && value ? value.angle ?? 0 : 0} step={5} min={-360} max={360} digits={0} suffix="°" label="渐变角度" onCommit={(v) => onChange(grad({ angle: v }), '渐变角度')} /></Field>}
         </>}
       </div>
     </>
-  );
-}
-
-function ShadowSection({ o }: { o: Overlay }) {
-  const { commit } = useEdit();
-  const shadow = o.shadow === false ? null : o.shadow;
-  return (
-    <Section title="阴影" extra={<Toggle label="" checked={Boolean(shadow)} onChange={(v) => commit(pu(o, { shadow: v ? { color: 'rgba(0,0,0,0.35)', blur: 24, y: 8 } : false }), v ? '开启阴影' : '关闭阴影')} />}>
-      {shadow && <div className="dj-grid">
-        <ColorField label="颜色" value={shadow.color} onChange={(v) => commit(pu(o, { shadow: { ...shadow, color: v } }), '阴影颜色')} />
-        <NumberField label="模糊" value={shadow.blur} step={1} min={0} max={80} digits={0} suffix="px" ops={(v) => pu(o, { shadow: { ...shadow, blur: v } })} editLabel="阴影模糊" />
-        <NumberField label="偏移 X" value={shadow.x ?? 0} step={1} min={-80} max={80} digits={0} ops={(v) => pu(o, { shadow: { ...shadow, x: v } })} editLabel="阴影偏移" />
-        <NumberField label="偏移 Y" value={shadow.y ?? 4} step={1} min={-80} max={80} digits={0} ops={(v) => pu(o, { shadow: { ...shadow, y: v } })} editLabel="阴影偏移" />
-      </div>}
-    </Section>
   );
 }
 
@@ -96,7 +101,7 @@ function ShapePanel({ o, timeline }: { o: Overlay; timeline: Timeline }) {
   const stroke = s.stroke;
   return (
     <>
-      <Section title="形状">
+      <GradientFrames o={o} fps={timeline.meta.fps}/><Section title="形状">
         <div className="dj-pickgrid">
           {SHAPE_TYPES.map((t) => (
             <button key={t} type="button" title={SHAPE_LABEL[t] ?? t} aria-label={SHAPE_LABEL[t] ?? t} aria-pressed={s.type === t}
@@ -119,7 +124,7 @@ function ShapePanel({ o, timeline }: { o: Overlay; timeline: Timeline }) {
       <Section title={line ? '线条' : '描边'} extra={!line && <Toggle label="" checked={Boolean(stroke)} onChange={(v) => set({ stroke: v ? { color: '#ffffff', width: 4 } : null }, v ? '开启描边' : '关闭描边')} />}>
         {(stroke || line) && <>
           <div className="dj-grid">
-            <ColorField label="颜色" value={stroke?.color ?? '#ffffff'} onChange={(v) => set({ stroke: { ...(stroke ?? { width: 6 }), color: v } }, '线条颜色')} />
+            <div style={{gridColumn:'1 / -1'}}><FillField value={stroke?.color ?? '#ffffff'} allowNone={false} onChange={(v,label)=>set({stroke:{...(stroke??{width:6}),color:v}},label)}/></div>
             <NumberField label="粗细" value={stroke?.width ?? 6} step={0.5} min={0} max={200} digits={1} suffix="px" ops={(v) => pu(o, { shape: { stroke: { ...(stroke ?? { color: '#ffffff' }), width: v } } })} editLabel="线条粗细" />
           </div>
           <div style={{ marginTop: 8 }}><Seg label="线型" value={stroke?.dash ?? 'solid'} options={[['solid', '实线'], ['dashed', '虚线'], ['dotted', '点线']]} onChange={(v) => set({ stroke: { ...(stroke ?? { color: '#ffffff', width: 6 }), dash: v } }, '线型')} /></div>
@@ -134,7 +139,6 @@ function ShapePanel({ o, timeline }: { o: Overlay; timeline: Timeline }) {
           </div>
         </Section>
       )}
-      <ShadowSection o={o} />
     </>
   );
 }
@@ -181,7 +185,6 @@ function ImagePanel({ o }: { o: Overlay }) {
           <NumberField label="粗细" value={img.border.width} step={1} min={0} max={200} digits={0} suffix="px" ops={(v) => pu(o, { image: { border: { ...img.border!, width: v } } })} editLabel="边框粗细" />
         </div>}
       </Section>
-      <ShadowSection o={o} />
     </>
   );
 }
@@ -224,7 +227,6 @@ function IconPanel({ o }: { o: Overlay }) {
           {icon.fill && <ColorField label="填充色" value={icon.fill} onChange={(v) => commit(pu(o, { icon: { fill: v } }), '图标填充色')} />}
         </div>
       </Section>
-      <ShadowSection o={o} />
     </>
   );
 }
@@ -411,7 +413,7 @@ function BoxLayout({ o, timeline, now, actions }: { o: Overlay; timeline: Timeli
   );
 }
 
-export function ElementInspector({ o, tab, timeline, now, actions }: { o: Overlay; tab: ElTab; timeline: Timeline; now: number; actions: Actions }) {
+function ElementInspectorBody({ o, tab, timeline, now, actions }: { o: Overlay; tab: ElTab; timeline: Timeline; now: number; actions: Actions }) {
   const fps = timeline.meta.fps;
   if (tab === 'animation') return <AnimationTab target={overlayTarget(o)} kind="overlay" effects={o.effects} fps={fps} now={now} />;
   if (tab === 'layout') {
@@ -427,6 +429,10 @@ export function ElementInspector({ o, tab, timeline, now, actions }: { o: Overla
   if (o.kind === 'plot' && o.plot) return <PlotPanel o={o} />;
   if (o.kind === 'camera') return <><CameraPanel o={o} timeline={timeline} now={now} /><TimeSection o={o} fps={fps} /></>;
   return <div className="dj-empty-state">这个元素缺少样式数据</div>;
+}
+
+export function ElementInspector(props: Parameters<typeof ElementInspectorBody>[0]) {
+  return <><ElementInspectorBody {...props} />{props.tab === 'animation' && props.o.kind !== 'camera' && <SharedSection o={props.o} timeline={props.timeline}/>}{props.tab === 'layout' && props.o.kind !== 'camera' && <MotionSection timeline={props.timeline} o={props.o} fps={props.timeline.meta.fps} now={props.now} />}{props.tab === 'layout' && props.o.kind !== 'camera' && <SpatialSection item={props.o} target={overlayTarget(props.o)} fps={props.timeline.meta.fps} now={props.now} kind="overlay" />}{['style', 'text'].includes(props.tab) && props.o.kind !== 'camera' && <><AppearanceSection o={props.o} /><AutoSizeSection o={props.o} timeline={props.timeline}/><MotionBlurSection value={props.o.motionBlur} ops={v=>pu(props.o,{motionBlur:v})}/><SurfaceMotionSection o={props.o} fps={props.timeline.meta.fps} now={props.now}/><TrackMatteSection item={props.o} timeline={props.timeline}/></>}</>;
 }
 
 // ---------- 整页幻灯片 ----------
@@ -448,7 +454,8 @@ export function GroupInspector({ group, members, timeline, actions }: { group: s
         </div>
         <p className="dj-hint">元素的先后出场间隔保持不变；改时长时与整页同时结束的元素一起延长。</p>
       </Section>
-      <Section title="整页入场动画">
+      <GroupMotionSection group={group} timeline={timeline} />
+      <Section title="成员入场动画">
         <div className="dj-chips">
           {SLIDE_ANIMS.map(([k, label]) => <button key={k} type="button" className="dj-chip" onClick={() => commit(members.map((o, i) => ({ op: 'updateOverlay', id: o.id, patch: { animationPreset: i === 0 && isBoxElement(o) && (o.w ?? 0) >= 0.98 ? 'fadeIn' : k } })), '整页动画「' + label + '」')}>{label}</button>)}
           <button type="button" className="dj-chip" onClick={() => commit(members.map((o) => ({ op: 'updateOverlay', id: o.id, patch: { animationPreset: 'fadeOut' } })), '整页淡出')}>+ 结尾淡出</button>
@@ -513,4 +520,23 @@ export function AlignSection({ overlays, timeline }: { overlays: Overlay[]; time
       </div>
     </Section>
   );
+}
+
+function GradientFrames({o,fps}:{o:Overlay;fps:number}){
+  const now=useInspectTime(),{commit}=useEdit(),ed=useEditor();
+  const [channel,setChannel]=useState<'fill'|'stroke'>('fill'),[selected,setSelected]=useState(0);
+  const fill=channel==='fill'?o.shape?.fill:o.shape?.stroke?.color;
+  if(!fill||typeof fill==='string')return <Section title="渐变关键帧"><div className="dj-chips"><button className="dj-chip" onClick={()=>setChannel(channel==='fill'?'stroke':'fill')}>当前：{channel==='fill'?'填充':'描边'} · 切换</button></div><p className="dj-hint">先把对应填充或描边设为渐变，即可为色标颜色、位置和角度添加关键帧。</p></Section>;
+  const frames=fill.keyframes??[],index=Math.min(selected,Math.max(0,frames.length-1)),frame=frames[index];
+  const t=Math.round(Math.max(0,Math.min(o.endSeconds-o.startSeconds,now-o.startSeconds))*fps)/fps;
+  const set=(next:typeof frames,label:string)=>commit([{op:'updateOverlay',id:o.id,patch:{shape:channel==='fill'?{fill:{...fill,keyframes:next}}:{stroke:{...o.shape?.stroke,color:{...fill,keyframes:next}}}}}],label);
+  return <Section title="渐变关键帧"><div className="dj-chips"><button className="dj-chip" onClick={()=>{setChannel(channel==='fill'?'stroke':'fill');setSelected(0);}}>当前：{channel==='fill'?'填充':'描边'} · 切换</button><button className="dj-chip" onClick={()=>{
+    const next=[...frames.filter(f=>Math.abs(f.t-t)>.5/fps),{t,angle:frame?.angle??fill.angle??0,stops:structuredClone(frame?.stops??fill.stops),e:'linear' as const}].sort((a,b)=>a.t-b.t);set(next,'添加渐变关键帧');setSelected(next.findIndex(f=>f.t===t));
+  }}>在播放头添加（{t.toFixed(2)} s）</button></div>
+  {!!frames.length&&<><Field label="编辑关键帧"><select className="dj-select" value={index} onChange={e=>{const i=Number(e.target.value);setSelected(i);ed.clock.seek(o.startSeconds+frames[i].t);}}>{frames.map((f,i)=><option key={i} value={i}>{f.t.toFixed(2)} s</option>)}</select></Field>
+    <FillField value={{type:fill.type,angle:frame.angle,stops:frame.stops}} allowNone={false} gradientOnly onChange={(value,label)=>{if(value&&typeof value!=='string')set(frames.map((f,i)=>i===index?{...f,angle:value.angle,stops:value.stops}:f),label);}}/>
+    <EasingField label="到下一帧的缓动" value={frame.e} ops={e=>[{op:'updateOverlay',id:o.id,patch:{shape:channel==='fill'?{fill:{...fill,keyframes:frames.map((f,i)=>i===index?{...f,e}:f)}}:{stroke:{...o.shape?.stroke,color:{...fill,keyframes:frames.map((f,i)=>i===index?{...f,e}:f)}}}}}]}/>
+    <button className="dj-chip" onClick={()=>set(frames.filter((_,i)=>i!==index),'删除渐变关键帧')}>删除当前帧</button></>}
+    <p className="dj-hint">在不同时刻保存色标，颜色、位置与角度会自动插值。删除所有帧恢复静态渐变。</p>
+  </Section>;
 }

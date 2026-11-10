@@ -1,0 +1,194 @@
+{
+  "meta": {
+    "fps": 30,
+    "width": 720,
+    "height": 1280,
+    "background": "#101827"
+  },
+  "version": 19,
+  "videoTracks": [
+    {
+      "id": "v1",
+      "name": "主轨道",
+      "clips": []
+    }
+  ],
+  "audioTracks": [],
+  "overlays": [
+    {
+      "id": "title",
+      "text": "长短不同的文案\n也能有序呈现",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "position": "bottom",
+      "fontSize": 64,
+      "color": "#f5f7fc",
+      "x": 0.5,
+      "y": 0.1431,
+      "w": 0.84,
+      "kind": "text",
+      "fontFamily": "sans",
+      "fontWeight": 700,
+      "lineHeight": 1.2,
+      "typography": {
+        "cjkSpacing": true,
+        "keepNumbers": true,
+        "balance": true
+      },
+      "designRole": "heading",
+      "align": "left",
+      "textFit": {
+        "minFontSize": 18,
+        "maxLines": 5,
+        "autoShrink": true,
+        "preferredFontSize": 64
+      },
+      "h": 0.1263,
+      "valign": "top",
+      "padding": 0
+    },
+    {
+      "id": "card0",
+      "text": "清晰的主次关系",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "position": "bottom",
+      "fontSize": 32,
+      "color": "#f5f7fc",
+      "x": 0.283,
+      "y": 0.3926,
+      "w": 0.406,
+      "kind": "text",
+      "fontFamily": "sans",
+      "fontWeight": 400,
+      "lineHeight": 1.5,
+      "typography": {
+        "cjkSpacing": true,
+        "keepNumbers": true,
+        "balance": false
+      },
+      "designRole": "body",
+      "align": "left",
+      "textFit": {
+        "minFontSize": 18,
+        "maxLines": 20,
+        "autoShrink": true,
+        "preferredFontSize": 32
+      },
+      "h": 0.3411,
+      "valign": "top",
+      "padding": 0
+    },
+    {
+      "id": "card1",
+      "text": "文字较长的第二张卡片，通过换行和字号适配保持完整内容。",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "position": "bottom",
+      "fontSize": 32,
+      "color": "#f5f7fc",
+      "x": 0.717,
+      "y": 0.3926,
+      "w": 0.406,
+      "kind": "text",
+      "fontFamily": "sans",
+      "fontWeight": 400,
+      "lineHeight": 1.5,
+      "typography": {
+        "cjkSpacing": true,
+        "keepNumbers": true,
+        "balance": false
+      },
+      "designRole": "body",
+      "align": "left",
+      "textFit": {
+        "minFontSize": 18,
+        "maxLines": 20,
+        "autoShrink": true,
+        "preferredFontSize": 32
+      },
+      "h": 0.3411,
+      "valign": "top",
+      "padding": 0
+    },
+    {
+      "id": "card2",
+      "text": "数字与单位：120 km/h",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "position": "bottom",
+      "fontSize": 32,
+      "color": "#f5f7fc",
+      "x": 0.283,
+      "y": 0.7494,
+      "w": 0.406,
+      "kind": "text",
+      "fontFamily": "sans",
+      "fontWeight": 400,
+      "lineHeight": 1.5,
+      "typography": {
+        "cjkSpacing": true,
+        "keepNumbers": true,
+        "balance": false
+      },
+      "designRole": "body",
+      "align": "left",
+      "textFit": {
+        "minFontSize": 18,
+        "maxLines": 20,
+        "autoShrink": true,
+        "preferredFontSize": 32
+      },
+      "h": 0.3411,
+      "valign": "top",
+      "padding": 0
+    },
+    {
+      "id": "card3",
+      "text": "最后一张卡片",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "position": "bottom",
+      "fontSize": 32,
+      "color": "#f5f7fc",
+      "x": 0.717,
+      "y": 0.7494,
+      "w": 0.406,
+      "kind": "text",
+      "fontFamily": "sans",
+      "fontWeight": 400,
+      "lineHeight": 1.5,
+      "typography": {
+        "cjkSpacing": true,
+        "keepNumbers": true,
+        "balance": false
+      },
+      "designRole": "body",
+      "align": "left",
+      "textFit": {
+        "minFontSize": 18,
+        "maxLines": 20,
+        "autoShrink": true,
+        "preferredFontSize": 32
+      },
+      "h": 0.3411,
+      "valign": "top",
+      "padding": 0
+    }
+  ],
+  "markers": [],
+  "design": {
+    "name": "品牌简洁",
+    "background": "#101827",
+    "text": "#f5f7fc",
+    "muted": "#a5b1c4",
+    "accent": "#55d9ca",
+    "headingFont": "sans",
+    "bodyFont": "sans",
+    "baseSize": 32,
+    "scale": 2,
+    "margin": 0.08,
+    "columns": 12,
+    "baseline": 8
+  }
+}

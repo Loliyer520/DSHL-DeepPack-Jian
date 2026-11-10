@@ -1,9 +1,16 @@
+import {protectDesignPatch,protectedDesignFields} from './designLocks.js';
+import {designLocksSchema,designSchema,typographySchema,textFitSchema,designSceneSchema} from './schema.js';
+import {designOperations,designPatch,effectiveDesign} from './design.js';
+import {OP_NAMES,SYSTEM_OPS,operationError} from './operationRegistry.js';
+import {createDraft,finishDraft,cloneValue,draftInfo} from './draft.js';
+import {modelIndex,inheritIndex} from './modelIndex.js';
 // D剪 时间线操作（ops）——唯一的语义实现。
 // 面板乐观更新、服务端权威应用、AI 工具都调用这里的 applyOps，保证三方行为一致。
 // 纯函数、无 zod 依赖（浏览器包体友好）；服务端在应用后再用 validateTimeline 做严格校验。
+import { parseTimeline, compositionSchema, focusSchema, scene3dSchema, cueSchema, themeSchema, componentSchema, particlesSchema, audioReactiveSchema, groupStateSchema, maskSchema, motionPathSchema, followSchema, connectorSchema, glassSchema, sharedElementSchema, trackMatteSchema, sweepSchema, animationClipSchema, gradientFrameSchema, motionBlurSchema, autoSizeSchema } from "./schema.js";
 import type { Animations, AudioClip, AudioTrack, Clip, Effect, Keyframe, Marker, Overlay, Timeline, VideoTrack } from "./schema.js";
 import {
-  ANIM_CHANNELS,
+  ANIM_CHANNELS, isMatteSource,
   BLEND_MODES,
   CHART_TYPES,
   DIRECTIONS,
@@ -30,6 +37,8 @@ import { ANIMATION_PRESETS, presetGroup, resolveAnimations } from "./presets.js"
 import { fontById } from "./fonts.js";
 import { RESERVED_NAMES, analyzeExpr } from "./expr.js";
 import { normalizeTex } from "./mathData.js";
+import { applyLayout } from "./layout.js";
+import { STUDIO_THEMES, themePatch, captureComponent, componentOps, adaptCanvasOps, copiedCues, prepareScheduledTimeline, repairRemovedCues } from './studio.js';
 import { parsePath } from "./paths.js";
 
 export type Actor = "user" | "ai" | "system";
@@ -64,22 +73,12 @@ export interface ApplyResult {
   changed: string[];
 }
 
-export const OP_NAMES = [
-  "addClip", "removeClip", "updateClip", "moveClip", "reorderClips", "splitClip", "duplicateClip",
-  "addAudio", "removeAudio", "updateAudioTrack",
-  "addTrack", "removeTrack", "updateTrack", "moveTrack",
-  "addOverlay", "removeOverlay", "updateOverlay", "splitOverlay", "arrangeOverlay", "transform",
-  "addSlide", "updateGroup", "removeGroup",
-  "setMeta",
-  "setKeyframe", "removeKeyframe", "clearKeyframes",
-  "addMarker", "updateMarker", "removeMarker",
-  "putClip", "putOverlay", "putTrack", "putMarker", "putMeta", "replaceTimeline",
-] as const;
+export {OP_NAMES,SYSTEM_OPS} from './operationRegistry.js';
 export type OpName = (typeof OP_NAMES)[number];
 export type Op = { op: OpName; [k: string]: unknown };
 const OP_SET = new Set<string>(OP_NAMES);
 /** 只允许系统（撤销/恢复/迁移）使用的底层操作 */
-export const SYSTEM_OPS = new Set<string>(["putClip", "putOverlay", "putTrack", "putMarker", "putMeta", "replaceTimeline"]);
+
 
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const defaultNewId = (prefix: string) => prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -114,12 +113,16 @@ export function sanitizeTransition(v: unknown): Clip["transition"] | undefined {
     const type = TRANSITION_TYPES.find((x) => x === v.type);
     if (!type) return undefined;
     const direction = DIRECTIONS.find((d) => d === v.direction);
-    return { type, duration: clampOr(v.duration, 0.5, 0.05, 3), ...(direction ? { direction } : {}) };
+    return { type, duration: clampOr(v.duration, 0.5, 0.05, 3), ...(direction ? { direction } : {}), ...(sanitizeEasing(v.ease) ? { ease: sanitizeEasing(v.ease) } : {}), ...(num(v.intensity) !== undefined ? { intensity: clampOr(v.intensity, 1, 0.1, 2) } : {}) };
   }
   return undefined;
 }
 
 export function sanitizeEasing(e: unknown): Keyframe["e"] | undefined {
+  if (isObj(e) && e.type === "spring") return {
+    type: "spring", stiffness: clampOr(e.stiffness, 170, 1, 1000), damping: clampOr(e.damping, 18, 0.1, 100),
+    mass: clampOr(e.mass, 1, 0.1, 20), velocity: clampOr(e.velocity, 0, -20, 20),
+  };
   if (typeof e === "string") return (EASING_NAMES as readonly string[]).includes(e) ? (e as Keyframe["e"]) : undefined;
   if (Array.isArray(e) && e.length === 4 && e.every((x) => num(x) !== undefined)) {
     const [x1, y1, x2, y2] = e.map((x) => num(x) as number);
@@ -129,9 +132,11 @@ export function sanitizeEasing(e: unknown): Keyframe["e"] | undefined {
 }
 
 const CHANNEL_RANGES: Record<string, [number, number]> = {
+  sweepProgress: [-1, 2], gradientAngle: [-3600,3600], gradientShift: [-1,1], gradientHue: [-3600,3600],
   opacity: [0, 1], volume: [0, 1], scale: [0, 20], scaleX: [-20, 20], scaleY: [-20, 20],
   x: [-5, 5], y: [-5, 5], rotation: [-3600, 3600], brightness: [0, 3], contrast: [0, 3], saturate: [0, 3], blur: [0, 50],
-  clipL: [0, 1], clipR: [0, 1], clipT: [0, 1], clipB: [0, 1], progress: [0, 1],
+  rotationX: [-3600, 3600], rotationY: [-3600, 3600], z: [-2000, 1000], perspective: [200, 5000],
+  clipL: [0, 1], clipR: [0, 1], clipT: [0, 1], clipB: [0, 1], progress: [0, 1], pathProgress: [0, 1], maskX: [-1, 2], maskY: [-1, 2], maskW: [0, 4], maskH: [0, 4], maskFeather: [0, 200],
 };
 export function sanitizeKeyframes(list: unknown, channel: string): Keyframe[] | undefined {
   if (!Array.isArray(list) || !list.length) return undefined;
@@ -165,6 +170,16 @@ export function sanitizeFilter(f: unknown): Clip["filter"] | undefined {
     const v = num(f[k]);
     if (v !== undefined) out[k] = clamp(v, lo, hi);
   }
+  return Object.keys(out).length ? out : undefined;
+}
+
+export function sanitizeTransform3d(v: unknown): Overlay["transform3d"] | undefined {
+  if (!isObj(v)) return undefined;
+  const out: NonNullable<Overlay["transform3d"]> = {};
+  for (const [key, lo, hi] of [["rotateX", -3600, 3600], ["rotateY", -3600, 3600], ["z", -2000, 1000], ["perspective", 200, 5000]] as const) {
+    if (num(v[key]) !== undefined) out[key] = clampOr(v[key], 0, lo, hi);
+  }
+  if (v.backface === "visible" || v.backface === "hidden") out.backface = v.backface;
   return Object.keys(out).length ? out : undefined;
 }
 
@@ -215,14 +230,15 @@ export function sanitizeFill(v: unknown): ShapeFill | undefined {
   const stops = v.stops
     .map((s, i, all) => (isObj(s) ? { offset: clampOr(s.offset, all.length > 1 ? i / (all.length - 1) : 0, 0, 1), color: sanitizeColor(s.color) } : undefined))
     .filter((s): s is { offset: number; color: string } => Boolean(s?.color))
-    .slice(0, 8);
+    .slice(0, 8).sort((a, b) => a.offset - b.offset);
   if (stops.length < 2) return stops[0]?.color;
-  return { type: v.type === "radial" ? "radial" : "linear", ...(num(v.angle) !== undefined ? { angle: clampOr(v.angle, 0, -360, 360) } : {}), stops };
+  const keyframes = Array.isArray(v.keyframes) ? v.keyframes.map(f => gradientFrameSchema.safeParse(f)).filter(r => r.success).map(r => r.data!).sort((a,b)=>a.t-b.t).slice(0,200) : undefined;
+  return { ...(keyframes?.length ? {keyframes} : {}), type: v.type === "radial" ? "radial" : "linear", ...(num(v.angle) !== undefined ? { angle: clampOr(v.angle, 0, -360, 360) } : {}), stops };
 }
 
-function sanitizeOutline(v: unknown, fallbackWidth = 2) {
+function sanitizeOutline(v: unknown, fallbackWidth = 2, gradient = false) {
   if (!isObj(v)) return undefined;
-  const color = sanitizeColor(v.color);
+  const color = gradient ? sanitizeFill(v.color) : sanitizeColor(v.color);
   if (!color) return undefined;
   const dash = pick(["solid", "dashed", "dotted"] as const, v.dash);
   return { color, width: clampOr(v.width, fallbackWidth, 0, 200), ...(dash && dash !== "solid" ? { dash } : {}) };
@@ -235,7 +251,7 @@ export function sanitizeShape(v: unknown, prev?: Overlay["shape"]): Overlay["sha
   const out: NonNullable<Overlay["shape"]> = { type };
   const base: Partial<NonNullable<Overlay["shape"]>> = prev ?? {};
   const fill = "fill" in raw ? sanitizeFill(raw.fill) : base.fill;
-  const stroke = "stroke" in raw ? sanitizeOutline(raw.stroke, 4) : base.stroke;
+  const stroke = "stroke" in raw ? sanitizeOutline(raw.stroke, 4, true) : base.stroke;
   if (fill !== undefined && raw.fill !== null) out.fill = fill;
   if (stroke && raw.stroke !== null) out.stroke = stroke;
   const radius = "radius" in raw ? num(raw.radius) : base.radius;
@@ -275,12 +291,13 @@ function sanitizeImageSpec(s: Scope, v: unknown, prev?: Overlay["image"]): Overl
   const src = "src" in raw ? checkAsset(s, raw.src) : prev?.src;
   if (!src) fail("图片元素缺少 image.src（素材文件名）");
   const out: NonNullable<Overlay["image"]> = { src: src! };
+  if(raw.focus)out.focus=focusSchema.parse(raw.focus);else if(prev?.focus)out.focus=prev.focus;
   const fit = "fit" in raw ? pick(["cover", "contain", "fill"] as const, raw.fit) : prev?.fit;
   if (fit) out.fit = fit;
   const radius = "radius" in raw ? num(raw.radius) : prev?.radius;
   if (radius !== undefined && raw.radius !== null) out.radius = clamp(radius, 0, 2000);
   const border = "border" in raw ? sanitizeOutline(raw.border) : prev?.border;
-  if (border && raw.border !== null) out.border = border;
+  if (border && raw.border !== null && typeof border.color === "string") out.border = { ...border, color: border.color };
   return out;
 }
 
@@ -545,22 +562,15 @@ type VideoHit = { kind: "video"; track: VideoTrack; trackIndex: number; index: n
 type AudioHit = { kind: "audio"; track: AudioTrack; trackIndex: number; index: number; clip: AudioClip };
 function findClip(t: Timeline, id: unknown): VideoHit | AudioHit | undefined {
   if (typeof id !== "string") return undefined;
-  for (let ti = 0; ti < t.videoTracks.length; ti++) {
-    const track = t.videoTracks[ti];
-    const index = track.clips.findIndex((c) => c.id === id);
-    if (index !== -1) return { kind: "video", track, trackIndex: ti, index, clip: track.clips[index] };
-  }
-  for (let ti = 0; ti < t.audioTracks.length; ti++) {
-    const track = t.audioTracks[ti];
-    const index = track.clips.findIndex((c) => c.id === id);
-    if (index !== -1) return { kind: "audio", track, trackIndex: ti, index, clip: track.clips[index] };
-  }
+  const loc=modelIndex(t).clips.get(id);
+  if(loc){const track=t[loc.kind==='video'?'videoTracks':'audioTracks'][loc.trackIndex],clip=track.clips[loc.index];return {kind:loc.kind,track,trackIndex:loc.trackIndex,index:loc.index,clip} as VideoHit|AudioHit;}
+
   return undefined;
 }
 
 function findOverlay(t: Timeline, op: Record<string, unknown>): { overlay: Overlay; index: number } | undefined {
   if (typeof op.id === "string") {
-    const index = t.overlays.findIndex((o) => o.id === op.id);
+    const index = modelIndex(t).overlays.get(op.id) ?? -1;
     return index === -1 ? undefined : { overlay: t.overlays[index], index };
   }
   const i = num(op.index);
@@ -663,7 +673,7 @@ function setOpt<T extends object, K extends keyof T>(target: T, key: K, value: T
   else target[key] = value;
 }
 
-const VIDEO_KEYS = new Set(["src", "type", "inPoint", "clipDuration", "transition", "volume", "atSeconds", "box", "speed", "filter", "animations", "animationPreset", "effects", "crop", "flipH", "flipV", "opacity", "blendMode", "fit", "freeze", "radius", "shadow", "muted", "fadeIn", "fadeOut", "track", "index"]);
+const VIDEO_KEYS = new Set(["focus", "src", "type", "inPoint", "clipDuration", "transition", "volume", "atSeconds", "box", "speed", "filter", "animations", "animationPreset", "effects", "crop", "flipH", "flipV", "opacity", "blendMode", "fit", "freeze", "radius", "shadow", "muted", "fadeIn", "fadeOut", "track", "index", "transform3d", "trackMatte"]);
 const AUDIO_KEYS = new Set(["src", "inPoint", "duration", "clipDuration", "volume", "atSeconds", "speed", "animations", "animationPreset", "muted", "fadeIn", "fadeOut", "track"]);
 
 function patchVideoClip(s: Scope, hit: VideoHit, patch: Record<string, unknown>) {
@@ -693,6 +703,8 @@ function patchVideoClip(s: Scope, hit: VideoHit, patch: Record<string, unknown>)
     if (isMain) s.warnings.push("主轨片段铺满画面，没有画中画 box");
     else setOpt(clip, "box", patch.box === null ? null : sanitizeRect(patch.box) ?? clip.box);
   }
+  if ("trackMatte" in patch) patchMatte(s, clip, patch.trackMatte);
+  if ("transform3d" in patch) setOpt(clip, "transform3d", sanitizeTransform3d(patch.transform3d) ?? null);
   if ("filter" in patch) setOpt(clip, "filter", sanitizeFilter(patch.filter) ?? null);
   if ("animations" in patch) setOpt(clip, "animations", sanitizeAnimations(patch.animations) ?? null);
   if ("effects" in patch) {
@@ -700,6 +712,7 @@ function patchVideoClip(s: Scope, hit: VideoHit, patch: Record<string, unknown>)
     setOpt(clip, "effects", fx && fx.length ? fx : null);
   }
   if ("animationPreset" in patch) applyPresetPatch(s, clip, patch.animationPreset);
+  if("focus" in patch)setOpt(clip,"focus",patch.focus===null?null:focusSchema.parse(patch.focus));
   if ("crop" in patch) setOpt(clip, "crop", patch.crop === null ? null : sanitizeRect(patch.crop, 0.05) ?? clip.crop);
   for (const key of ["flipH", "flipV", "freeze", "shadow", "muted"] as const) {
     if (key in patch) setOpt(clip, key, patch[key] === null ? null : bool(patch[key]) ?? clip[key]);
@@ -783,12 +796,71 @@ function patchAudioClip(s: Scope, hit: AudioHit, patch: Record<string, unknown>)
 
 const OVERLAY_KEYS = new Set(["text", "startSeconds", "endSeconds", "position", "fontSize", "color", "fontFamily", "fontWeight", "animations", "animationPreset", "effects", "x", "y", "align", "maxWidth", "lineHeight", "letterSpacing", "italic", "underline", "stroke", "shadow", "background", "kind", "track",
   "name", "group", "w", "h", "rotate", "opacity", "valign", "padding", "list", "accent", "counter", "textEffect", "shape", "image", "icon", "chart",
-  "plot", "morph", "tex"]);
+  "designLocks", "textFit", "designRole", "typography", "composition", "scene3d", "styleRole", "componentSlot", "cues", "particles", "audioReactive", "plot", "morph", "tex", "filter", "blendMode", "transform3d", "mask", "motionPath", "follow", "connector", "glass", "shared", "sweep", "trackMatte", "motionBlur", "autoSize", "layoutExclude"]);
 const BOX_FIELDS = { shape: "shape", image: "image", icon: "icon", chart: "chart", plot: "plot" } as const;
 
+function shiftGradientFrames(o: Overlay, offset: number) {
+  for (const fill of [o.shape?.fill,o.shape?.stroke?.color]) if(fill && typeof fill!=='string' && fill.keyframes) fill.keyframes=fill.keyframes.map(f=>({...f,t:f.t-offset}));
+}
+function patchMatte(s: Scope, item: Clip | Overlay, value: unknown) {
+  if(value===null){delete item.trackMatte;return;}
+  const parsed=trackMatteSchema.safeParse(value);
+  if(!parsed.success) return fail('轨道遮罩参数无效');
+  const spec=parsed.data, source=s.t.overlays.find(o=>o.id===spec.source);
+  if(!source || source.id===item.id || !isMatteSource(source) || source.trackMatte) return fail('遮罩源需为另一个形状、文字、图标或图片元素，且不能带 3D、富文本特效、羽化遮罩或变形');
+  if('startSeconds' in item && source.group!==(item as Overlay).group) fail('遮罩源与目标元素需在同一分组');
+  if('clipDuration' in item && source.group) fail('视频的遮罩源不可分组');
+  if(s.t.overlays.some(o=>o.trackMatte?.source===item.id)||s.t.videoTracks.some(tr=>tr.clips.some(c=>c.trackMatte?.source===item.id))) fail('已作为遮罩源的元素不能再使用轨道遮罩');
+  item.trackMatte=spec;
+}
+function animationLibraryOp(s: Scope, op: Record<string,unknown>) {
+  const name=shortStr(op.name,64)?.trim() || fail('动画片段需要 name（1–64 字符）');
+  if(['__proto__','constructor','prototype'].includes(name))return fail('动画片段名称不可使用保留名称');
+  if(op.op==='removeAnimation'||op.op==='putAnimation'&&op.animation===null){
+    if(s.t.animationLibrary){delete s.t.animationLibrary[name];if(!Object.keys(s.t.animationLibrary).length)delete s.t.animationLibrary;}
+    s.touched.add('animation:'+name);return;
+  }
+  if(op.op==='putAnimation'){
+    const r=animationClipSchema.safeParse(op.animation);if(!r.success)return fail('动画片段无效');
+    (s.t.animationLibrary??={})[name]=r.data;s.touched.add('animation:'+name);return;
+  }
+  const members=typeof op.group==='string'?s.t.overlays.filter(o=>o.group===op.group&&o.kind!=='camera'):[];
+  if(typeof op.group==='string'&&!members.length)fail('分组不存在');
+  const target=typeof op.group==='string'?{item:((s.t.groups??={})[op.group]??={}),key:'group:'+op.group,duration:Math.max(...members.map(o=>o.endSeconds))-Math.min(...members.map(o=>o.startSeconds)),kind:'overlay'}:keyframeTarget(s,op.id);
+  if(op.op==='saveAnimation'){
+    const animations=resolveAnimations(target.item,target.duration);
+    if(!animations||!Object.values(animations).some(a=>a?.length))fail('当前对象没有可保存的动画');
+    if(!s.t.animationLibrary?.[name]&&Object.keys(s.t.animationLibrary??{}).length>=100)fail('每个项目最多保存 100 个动画片段');
+    (s.t.animationLibrary??={})[name]={duration:target.duration,animations:cloneValue(animations!)};
+    s.touched.add('animation:'+name);return;
+  }
+  const saved=s.t.animationLibrary?.[name] ?? fail('找不到动画片段「'+name+'」');
+  if('lock' in target&&target.lock)assertUnlocked(s,target.lock);
+  const factor=op.fit==='original'?1:target.duration/saved.duration;
+  const animations:Animations={};
+  for(const [key,frames] of Object.entries(saved.animations)){
+    if(target.kind==='audio'&&key!=='volume')continue;
+    (animations as Record<string,Keyframe[]>)[key]=(frames as Keyframe[]).map(f=>({...f,t:Math.round(f.t*factor*s.t.meta.fps)/s.t.meta.fps}));
+  }
+  if(!Object.keys(animations).length)fail('该动画片段没有适用于目标的通道');
+  target.item.animations=op.merge?{...resolveAnimations(target.item,target.duration),...animations}:animations;
+  delete target.item.effects;s.touched.add(target.key);
+}
+
 function patchOverlay(s: Scope, ov: Overlay, patch: Record<string, unknown>) {
+  if(s.actor==='ai'&&Object.keys(patch).some(k=>protectedDesignFields(ov).has(k)))fail('修改涉及手工保护字段，请先由用户解除对应设计锁');
+  if ("trackMatte" in patch) patchMatte(s, ov, patch.trackMatte);
   const frame = frameOf(s.t);
+  for (const [key, schema] of [["composition", compositionSchema], ["scene3d", scene3dSchema], ["cues", cueSchema.array().max(100)], ["particles", particlesSchema], ["audioReactive", audioReactiveSchema], ["mask", maskSchema], ["motionPath", motionPathSchema], ["glass", glassSchema], ["shared", sharedElementSchema], ["sweep", sweepSchema], ["motionBlur", motionBlurSchema], ["autoSize", autoSizeSchema]] as const) {
+    if (!(key in patch)||patch[key]===undefined) continue;
+    if (patch[key] === null) { delete ov[key]; continue; }
+    const parsed = schema.safeParse(patch[key]);
+    if (parsed.success) { if(key==='composition'){const comp=parsed.data as NonNullable<Overlay["composition"]>;comp.timeline=JSON.stringify(parseTimeline(comp.timeline,1));} (ov as unknown as Record<string, unknown>)[key] = parsed.data; }
+    else if(key==='composition'||key==='scene3d'||key==='cues')fail(key+" 无效："+parsed.error.issues[0]?.message);
+    else s.warnings.push(key + " 无效：" + parsed.error.issues[0]?.message);
+  }
   for (const key of Object.keys(patch)) if (!OVERLAY_KEYS.has(key)) s.warnings.push("元素忽略字段「" + key + "」");
+  if ("layoutExclude" in patch) setOpt(ov,"layoutExclude",patch.layoutExclude ? true : null);
   if ("text" in patch) ov.text = String(patch.text ?? "").slice(0, 2000);
   if (typeof patch.tex === "string") { ov.text = patch.tex.slice(0, 2000); if (!("kind" in patch) && !ov.kind) patch = { ...patch, kind: "math" }; }
   if ("startSeconds" in patch) ov.startSeconds = clampOr(patch.startSeconds, ov.startSeconds, 0, 86400);
@@ -824,10 +896,30 @@ function patchOverlay(s: Scope, ov: Overlay, patch: Record<string, unknown>) {
   }
   if ("shadow" in patch) {
     const sh = patch.shadow;
+    const clean = (v: unknown) => {
+      if (!isObj(v)) return undefined;
+      const color = sanitizeColor(v.color);
+      if (!color) return undefined;
+      return { color, blur: clampOr(v.blur, 8, 0, 200),
+        ...(typeof v.inset === "boolean" ? { inset: v.inset } : {}),
+        ...(num(v.x) !== undefined ? { x: clampOr(v.x, 0, -1000, 1000) } : {}),
+        ...(num(v.y) !== undefined ? { y: clampOr(v.y, 2, -1000, 1000) } : {}),
+        ...(num(v.opacity) !== undefined ? { opacity: clampOr(v.opacity, 1, 0, 1) } : {}),
+        ...(num(v.spread) !== undefined ? { spread: clampOr(v.spread, 0, -100, 200) } : {}),
+      };
+    };
     if (sh === false) ov.shadow = false;
-    else if (isObj(sh) && sanitizeColor(sh.color)) {
-      ov.shadow = { color: sanitizeColor(sh.color)!, blur: clampOr(sh.blur, 8, 0, 80), ...(num(sh.x) !== undefined ? { x: clampOr(sh.x, 0, -80, 80) } : {}), ...(num(sh.y) !== undefined ? { y: clampOr(sh.y, 2, -80, 80) } : {}) };
-    } else delete ov.shadow;
+    else if (Array.isArray(sh)) {
+      const layers = sh.map(clean).filter((v): v is NonNullable<typeof v> => !!v).slice(0, 8);
+      setOpt(ov, "shadow", layers.length ? layers : null);
+      if (layers.length !== sh.length) s.warnings.push("阴影仅保留有效颜色的前 8 层");
+    } else setOpt(ov, "shadow", clean(sh) ?? null);
+  }
+  if ("transform3d" in patch) setOpt(ov, "transform3d", sanitizeTransform3d(patch.transform3d) ?? null);
+  if ("filter" in patch) setOpt(ov, "filter", sanitizeFilter(patch.filter) ?? null);
+  if ("blendMode" in patch) {
+    const mode = BLEND_MODES.find((m) => m === patch.blendMode);
+    setOpt(ov, "blendMode", mode && mode !== "normal" ? mode : null);
   }
   if ("background" in patch) {
     const bg = patch.background;
@@ -841,6 +933,12 @@ function patchOverlay(s: Scope, ov: Overlay, patch: Record<string, unknown>) {
   }
   if ("track" in patch) setOpt(ov, "track", patch.track === null ? null : clamp(Math.round(num(patch.track) ?? 0), 0, 31));
   // ---- v6 元素 ----
+  if("fontSize" in patch&&ov.textFit&&!("textFit" in patch))ov.textFit={...ov.textFit,preferredFontSize:ov.fontSize};
+  if("designLocks" in patch)setOpt(ov,"designLocks",patch.designLocks===null?null:designLocksSchema.parse(patch.designLocks));
+  if("textFit" in patch)setOpt(ov,"textFit",patch.textFit===null?null:textFitSchema.parse(patch.textFit));
+  if("typography" in patch)setOpt(ov,"typography",patch.typography===null?null:typographySchema.parse(patch.typography));
+  if("designRole" in patch)setOpt(ov,"designRole",patch.designRole===null?null:overlayDesignRole(patch.designRole));
+  for(const key of ["styleRole","componentSlot"] as const)if(key in patch)setOpt(ov,key,shortStr(patch[key],64)??null);
   if ("name" in patch) setOpt(ov, "name", shortStr(patch.name, 40) ?? null);
   if ("group" in patch) setOpt(ov, "group", typeof patch.group === "string" && ID_RE.test(patch.group) ? patch.group : null);
   for (const key of ["w", "h"] as const) if (key in patch) setOpt(ov, key, patch[key] === null ? null : Math.round(clampOr(patch[key], 0.2, 0.002, 4) * 10000) / 10000);
@@ -862,7 +960,34 @@ function patchOverlay(s: Scope, ov: Overlay, patch: Record<string, unknown>) {
   if (!("kind" in patch) && !isBoxElement(ov)) {
     for (const key of Object.keys(BOX_FIELDS) as (keyof typeof BOX_FIELDS)[]) if (key in patch && ov[key]) { ov.kind = key; break; }
   }
+  for (const key of ["follow", "connector"] as const) {
+    if (!(key in patch)||patch[key]===undefined) continue;
+    if (patch[key] === null) { delete ov[key]; continue; }
+    const schema = key === "follow" ? followSchema : connectorSchema;
+    const parsed = schema.safeParse(patch[key]);
+    if (!parsed.success) { s.warnings.push(key + " 参数无效"); continue; }
+    const spec = parsed.data;
+    const refs = "target" in spec ? [spec.target] : [spec.from, spec.to];
+    const members = refs.map(id => s.t.overlays.find(o => o.id === id));
+    if (members.some(o => !o || o.id === ov.id || o.kind === "camera" || !!o.connector || o.group !== (patch.group ?? ov.group))) {
+      s.warnings.push("绑定对象必须存在、不是自身或镜头，并与当前元素在同一分组"); continue;
+    }
+    if (key === "follow") {
+      let parent = members[0]; const seen = new Set([ov.id]);
+      while (parent && !seen.has(parent.id)) { seen.add(parent.id); parent = s.t.overlays.find(o => o.id === parent!.follow?.target); }
+      if (parent) { s.warnings.push("不能创建循环跟随"); continue; }
+    } else if (ov.kind !== "shape" || !["line", "arrow", "doubleArrow"].includes(ov.shape?.type ?? "")) {
+      s.warnings.push("连接线需要 line/arrow/doubleArrow 形状"); continue;
+    }
+    (ov as unknown as Record<string, unknown>)[key] = spec;
+  }
   if ("morph" in patch) setOpt(ov, "morph", patch.morph === null ? null : sanitizeMorph(s, patch.morph, ov) ?? null);
+  if (ov.trackMatte) patchMatte(s,ov,ov.trackMatte);
+  if(['kind','group','trackMatte','transform3d','mask','morph','textEffect','list','animations'].some(key=>key in patch)){
+  const consumers = s.t.overlays.filter(o=>o.trackMatte?.source===ov.id);
+  const clipConsumers = s.t.videoTracks.flatMap(tr=>tr.clips).filter(c=>c.trackMatte?.source===ov.id);
+  if ((consumers.length||clipConsumers.length) && (!isMatteSource(ov)||consumers.some(o=>o.group!==ov.group)||clipConsumers.length&&ov.group)) fail('该元素正用作轨道遮罩源，请先解除引用后再改变类型或分组');
+  }
   if (ov.kind === "shape" && !ov.shape) ov.shape = sanitizeShape({ type: "rect" });
   if (ov.kind === "image" && !ov.image) fail("图片元素需要 image:{src}（素材文件名）");
   if (ov.kind === "icon" && !ov.icon) fail("图标元素需要 icon:{name}");
@@ -926,7 +1051,7 @@ function addClipOp(s: Scope, op: Record<string, unknown>) {
     speed: sanitizeSpeed(op.speed) ?? 1,
   };
   const rest: Record<string, unknown> = {};
-  for (const key of ["filter", "animations", "effects", "animationPreset", "crop", "flipH", "flipV", "opacity", "blendMode", "fit", "freeze", "radius", "shadow", "muted", "fadeIn", "fadeOut"]) {
+  for (const key of ["filter", "animations", "effects", "animationPreset", "crop", "flipH", "flipV", "opacity", "blendMode", "fit", "freeze", "radius", "shadow", "muted", "fadeIn", "fadeOut", "transform3d", "trackMatte"]) {
     if (key in op) rest[key] = op[key];
   }
   if (isOverlay) {
@@ -976,7 +1101,7 @@ function removeClipOp(s: Scope, op: Record<string, unknown>) {
   if (!hit) {
     // 兼容：removeClip 传了字幕 id
     const ov = findOverlay(s.t, { id: op.id });
-    if (ov) { s.t.overlays.splice(ov.index, 1); trackOfOverlayTouch(s, ov.overlay.id); return; }
+    if (ov) { s.t.overlays.splice(ov.index, 1); trackOfOverlayTouch(s, ov.overlay.id); dropMorphRefs(s, new Set([ov.overlay.id])); return; }
     s.warnings.push("id「" + String(op.id) + "」不存在");
     return;
   }
@@ -1036,10 +1161,19 @@ function splitOverlayOp(s: Scope, op: Record<string, unknown>) {
   const ov = hit.overlay;
   const off = at === undefined ? null : splitOffset(ov.startSeconds, ov.endSeconds - ov.startSeconds, at, s.t.meta.fps);
   if (off === null) { s.warnings.push("切点须落在字幕区间内部且两侧各留至少一帧"); return; }
-  const base = bakeEffects(ov, ov.endSeconds - ov.startSeconds);
+  const scheduled=ov.cues?.length?prepareScheduledTimeline(s.t).overlays.find(o=>o.id===ov.id):undefined;
+  const base = bakeEffects(scheduled??ov, ov.endSeconds - ov.startSeconds);
+  if (base.motionPath && !base.animations?.pathProgress?.length) {
+    base.animations = { ...base.animations, pathProgress: [{ t: 0, v: 0 }, { t: ov.endSeconds - ov.startSeconds, v: 1 }] };
+  }
   const cut = ov.startSeconds + off;
   const left: Overlay = { ...base, endSeconds: cut };
   const right: Overlay = { ...base, id: takeId(s, op.newId, "o"), startSeconds: cut };
+  delete right.cues;
+  if(right.composition)right.composition={...right.composition,inPoint:right.composition.inPoint+off*right.composition.speed};
+  if(right.scene3d)right.scene3d={...right.scene3d,timeOffset:(right.scene3d.timeOffset??0)+off};
+  right.shape = right.shape ? cloneValue(right.shape) : undefined;
+  shiftGradientFrames(right, off);
   delete right.morph; // 变形只发生在左半段开头
   if (base.animations) right.animations = shiftAnimations(base.animations, off);
   s.t.overlays.splice(hit.index, 1, left, right);
@@ -1053,13 +1187,14 @@ function duplicateClipOp(s: Scope, op: Record<string, unknown>) {
     if (!ov) { s.warnings.push("id「" + String(op.id) + "」不存在"); return; }
     const len = ov.overlay.endSeconds - ov.overlay.startSeconds;
     const start = clampOr(op.atSeconds, ov.overlay.endSeconds, 0, 86400);
-    const copy: Overlay = { ...structuredClone(ov.overlay), id: takeId(s, op.newId, "o"), startSeconds: start, endSeconds: start + len };
+    const copy: Overlay = { ...cloneValue(ov.overlay), id: takeId(s, op.newId, "o"), startSeconds: start, endSeconds: start + len };
+    copy.cues=copiedCues(copy.cues,copy.id);
     s.t.overlays.splice(ov.index + 1, 0, copy);
     trackOfOverlayTouch(s, copy.id);
     return;
   }
   assertUnlocked(s, hit.track);
-  const copy = { ...structuredClone(hit.clip), id: takeId(s, op.newId, "c") };
+  const copy = { ...cloneValue(hit.clip), id: takeId(s, op.newId, "c") };
   if (hit.kind === "video" && hit.trackIndex === 0) {
     (hit.track.clips as Clip[]).splice(hit.index + 1, 0, copy as Clip);
   } else if (hit.kind === "video") {
@@ -1174,6 +1309,7 @@ const BOX_KIND_DEFAULT_W: Record<string, number> = { shape: 0.25, image: 0.4, ic
 const DEFAULT_FONT_SIZE: Record<string, number> = { chart: 28, plot: 28, text: 40, math: 72 };
 
 /** 新建一个元素（addOverlay 与幻灯片模板共用）：按 kind 补缺省尺寸与样式，插到 index（缺省末尾 = 最上层） */
+function overlayDesignRole(value:unknown): "heading"|"subheading"|"body"|"caption"|"accent" {if(!["heading","subheading","body","caption","accent"].includes(String(value)))fail("未知设计角色");return value as any;}
 function createOverlay(s: Scope, op: Record<string, unknown>, index?: number): Overlay {
   const inferred = pick(ELEMENT_KINDS, op.kind)
     ?? (op.shape !== undefined ? "shape" : op.image !== undefined ? "image" : op.icon !== undefined ? "icon" : op.chart !== undefined ? "chart"
@@ -1195,6 +1331,7 @@ function createOverlay(s: Scope, op: Record<string, unknown>, index?: number): O
     color: sanitizeColor(op.color) ?? "#ffffff",
   };
   const patch: Record<string, unknown> = {};
+  if((s.t.design||s.t.designScenes) && (!inferred || ["text","title","subtitle"].includes(inferred))){const defaults=designPatch({...ov,designRole:(op.designRole as any)??(inferred==="subtitle"?"caption":inferred==="title"?"heading":"body")},effectiveDesign(s.t,start));for(const [key,value] of Object.entries(defaults))if(!(key in op))patch[key]=value;if(!("fontSize" in op))ov.fontSize=defaults.fontSize as number;if(!("color" in op))ov.color=defaults.color as string;}
   for (const key of OVERLAY_KEYS) if (key in op && !["text", "tex", "startSeconds", "position", "fontSize", "color"].includes(key)) patch[key] = op[key];
   patch.endSeconds = ov.endSeconds;
   if (inferred && !("kind" in op)) patch.kind = inferred;
@@ -1239,10 +1376,14 @@ function transformOp(s: Scope, op: Record<string, unknown>) {
   const at = snapToFrame(s.t, clampOr(op.atSeconds ?? op.startSeconds, A.endSeconds, 0, 86400));
   if (at < A.startSeconds + frame || at > A.endSeconds + frame / 2) fail("atSeconds 必须在元素区间内（" + A.startSeconds + "–" + A.endSeconds + "s）");
   const origEnd = A.endSeconds;
+  if (A.motionPath && !A.animations?.pathProgress?.length) {
+    A.animations = { ...A.animations, pathProgress: [{ t: 0, v: 0 }, { t: origEnd - A.startSeconds, v: 1 }] };
+  }
   const end = Math.max(at + frame, clampOr(op.endSeconds, at < origEnd - frame / 2 ? origEnd : at + 3, 0, 86400));
   const off = at - A.startSeconds;
   // B 继承 A 的样子：显式关键帧平移到新起点（progress 去掉，B 一出现就是完整的），预设只留出场/循环
-  const B: Overlay = { ...structuredClone(A), id: takeId(s, op.newId, "o"), startSeconds: at, endSeconds: end };
+  const B: Overlay = { ...cloneValue(A), id: takeId(s, op.newId, "o"), startSeconds: at, endSeconds: end };
+  shiftGradientFrames(B,off);
   delete B.morph;
   if (A.animations) {
     const shifted = shiftAnimations(A.animations, off) as Record<string, Keyframe[] | undefined> | undefined;
@@ -1263,6 +1404,12 @@ function transformOp(s: Scope, op: Record<string, unknown>) {
 
 /** 删掉元素后，把以它为变形来源的元素改回普通入场 */
 function dropMorphRefs(s: Scope, removed: Set<string>) {
+  for (const o of s.t.overlays) {
+    if (o.trackMatte && removed.has(o.trackMatte.source)) { delete o.trackMatte; trackOfOverlayTouch(s, o.id); }
+    if (o.follow && removed.has(o.follow.target)) { delete o.follow; trackOfOverlayTouch(s, o.id); }
+    if (o.connector && (removed.has(o.connector.from) || removed.has(o.connector.to))) { delete o.connector; trackOfOverlayTouch(s, o.id); }
+  }
+  for (const tr of s.t.videoTracks) for (const c of tr.clips) if(c.trackMatte && removed.has(c.trackMatte.source)) { delete c.trackMatte; s.touched.add("clip:"+c.id); }
   for (const o of s.t.overlays) if (o.morph && removed.has(o.morph.from)) { delete o.morph; trackOfOverlayTouch(s, o.id); }
 }
 
@@ -1369,7 +1516,23 @@ function updateGroupOp(s: Scope, op: Record<string, unknown>) {
       if (o.startSeconds > o.endSeconds - frame) o.startSeconds = Math.max(curStart, o.endSeconds - frame);
     }
   }
-  if (op.ungroup === true) for (const o of els) delete o.group;
+  if ("state" in op) {
+    if (op.state === null) { if (s.t.groups) delete s.t.groups[group]; }
+    else {
+      const parsed = groupStateSchema.safeParse(op.state);
+      if (!parsed.success) fail("组合动画参数无效：" + parsed.error.issues[0]?.message);
+      s.t.groups ??= {};
+      if (parsed.data!.stagger?.preset && presetGroup(parsed.data!.stagger.preset) !== "入场") fail("错峰预设需要入场动画");
+      s.t.groups[group] = parsed.data!;
+    }
+    s.touched.add("group:" + group);
+  }
+  if (op.ungroup === true) {
+    for (const o of els) delete o.group;
+    if (s.t.groups) delete s.t.groups[group];
+    s.touched.add("group:" + group);
+  }
+  if (s.t.groups && !Object.keys(s.t.groups).length) delete s.t.groups;
   if (isObj(op.patch)) for (const o of els) patchOverlay(s, o, op.patch as Record<string, unknown>);
   for (const o of els) trackOfOverlayTouch(s, o.id);
   void gEnd;
@@ -1377,6 +1540,8 @@ function updateGroupOp(s: Scope, op: Record<string, unknown>) {
 
 function removeGroupOp(s: Scope, op: Record<string, unknown>) {
   const group = typeof op.group === "string" ? op.group : typeof op.id === "string" ? op.id : "";
+  if (s.t.groups?.[group]) { delete s.t.groups[group]; s.touched.add("group:" + group); }
+  if (s.t.groups && !Object.keys(s.t.groups).length) delete s.t.groups;
   const before = s.t.overlays.length;
   const removed = new Set<string>();
   s.t.overlays = s.t.overlays.filter((o) => {
@@ -1389,8 +1554,13 @@ function removeGroupOp(s: Scope, op: Record<string, unknown>) {
   dropMorphRefs(s, removed);
 }
 function keyframeOp(s: Scope, op: Record<string, unknown>, mode: "set" | "remove" | "clear") {
-  const target = keyframeTarget(s, op.id);
-  if (target.lock) assertUnlocked(s, target.lock);
+  const members = typeof op.group === "string" ? s.t.overlays.filter(o => o.group === op.group && o.kind !== "camera") : [];
+  if (typeof op.group === "string" && !members.length) fail("分组不存在");
+  const target = typeof op.group === "string" ? {
+    item: ((s.t.groups ??= {})[op.group] ??= {}), key: "group:" + op.group,
+    duration: Math.max(...members.map(o => o.endSeconds)) - Math.min(...members.map(o => o.startSeconds)), kind: "overlay",
+  } : keyframeTarget(s, op.id);
+  if ("lock" in target && target.lock) assertUnlocked(s, target.lock);
   const channel = op.channel as string | undefined;
   if (mode !== "clear" || channel !== undefined) {
     if (!channel || !(ANIM_CHANNELS as readonly string[]).includes(channel)) fail("未知动画通道「" + String(channel) + "」，可用：" + ANIM_CHANNELS.join("/"));
@@ -1463,7 +1633,7 @@ function putClipOp(s: Scope, op: Record<string, unknown>) {
   if (!track) fail("putClip 目标轨道「" + String(op.trackId) + "」不存在");
   detachClip(s.t, clip!.id);
   const list = track!.track.clips as unknown[];
-  list.splice(clamp(Math.round(num(op.index) ?? list.length), 0, list.length), 0, structuredClone(clip));
+  list.splice(clamp(Math.round(num(op.index) ?? list.length), 0, list.length), 0, cloneValue(clip));
   s.usedIds.add(clip!.id);
   s.touched.add("clip:" + clip!.id);
 }
@@ -1483,7 +1653,7 @@ function putTrackOp(s: Scope, op: Record<string, unknown>) {
     list.splice(at, 0, { ...props, clips });
   } else {
     const at = clamp(Math.round(num(op.index) ?? list.length), kind === "video" ? Math.min(1, list.length) : 0, list.length);
-    list.splice(at, 0, { ...props, clips: Array.isArray(track!.clips) ? structuredClone(track!.clips) : [] });
+    list.splice(at, 0, { ...props, clips: Array.isArray(track!.clips) ? cloneValue(track!.clips) : [] });
   }
   s.usedIds.add(track!.id as string);
   s.touched.add("track:" + String(track!.id));
@@ -1495,7 +1665,7 @@ function putOverlayOp(s: Scope, op: Record<string, unknown>) {
   const i = s.t.overlays.findIndex((o) => o.id === ov!.id);
   if (i !== -1) s.t.overlays.splice(i, 1);
   const at = clamp(Math.round(num(op.index) ?? s.t.overlays.length), 0, s.t.overlays.length);
-  s.t.overlays.splice(at, 0, structuredClone(ov!));
+  s.t.overlays.splice(at, 0, cloneValue(ov!));
   s.usedIds.add(ov!.id);
   trackOfOverlayTouch(s, ov!.id);
 }
@@ -1506,15 +1676,78 @@ function putMarkerOp(s: Scope, op: Record<string, unknown>) {
   const markers = (s.t.markers ??= []);
   const i = markers.findIndex((x) => x.id === m!.id);
   if (i !== -1) markers.splice(i, 1);
-  markers.push(structuredClone(m!));
+  markers.push(cloneValue(m!));
   markers.sort((a, b) => a.t - b.t);
   s.touched.add("marker:" + m!.id);
+}
+
+
+function studioOp(s:Scope,op:Record<string,unknown>){
+ const kind=String(op.op),name=shortStr(op.name,64)?.trim();
+ const validName=()=>{if(!name||['__proto__','constructor','prototype'].includes(name))fail('需要有效的名称');return name!;};
+ const run=(ops:Op[])=>{for(const child of ops)applyOne(s,child);};
+ if(kind==='putTheme'){if(op.theme===null)delete s.t.theme;else s.t.theme=themeSchema.parse(op.theme);s.touched.add('theme');return;}
+ if(kind==='putComponent'){const n=validName();if(op.component===null){delete s.t.components?.[n];if(!Object.keys(s.t.components??{}).length)delete s.t.components;}else(s.t.components??={})[n]=componentSchema.parse(op.component);s.touched.add('component:'+n);return;}
+ if(kind==='setTheme'){
+  const theme=themeSchema.parse(op.theme??STUDIO_THEMES[String(op.preset)]);s.t.theme=theme;s.touched.add('theme');
+  if(theme.background)run([{op:'setMeta',patch:{background:theme.background}}]);
+  if(theme.gap!==undefined)for(const [group,state] of Object.entries(s.t.groups??{}))if(state.layout)run([{op:'updateGroup',group,state:{...state,layout:{...state.layout,gap:theme.gap}}}]);
+  for(const o of s.t.overlays)if(o.styleRole)run([{op:'updateOverlay',id:o.id,patch:protectDesignPatch(o,themePatch(o,theme))}]);return;
+ }
+ if(kind==='bindStyle'){const o=s.t.overlays.find(o=>o.id===op.id)??fail('元素不存在');const role=shortStr(op.role,64);if(role&&!s.t.theme?.roles[role])fail('主题中没有该样式角色');run([{op:'updateOverlay',id:o.id,patch:{styleRole:role??null,...(role?themePatch({...o,styleRole:role},s.t.theme!):{})}}]);return;}
+ if(kind==='saveComponent'){
+  const n=validName();if(!s.t.components?.[n]&&Object.keys(s.t.components??{}).length>=100)fail('组件最多 100 个');
+  const def=componentSchema.parse(op.component??captureComponent(s.t,String(op.group)));(s.t.components??={})[n]=def;s.touched.add('component:'+n);
+  for(const [group,state] of Object.entries(s.t.groups??{}))if(state.component?.name===n){const members=s.t.overlays.filter(o=>o.group===group);if(members.length)run(componentOps(s.t,n,group,Math.min(...members.map(o=>o.startSeconds)),state.component.values,true));}return;
+ }
+ if(kind==='instantiateComponent'){
+  const group=takeId(s,op.id,'inst'),n=validName();run(componentOps(s.t,n,group,clampOr(op.startSeconds,0,0,86400),isObj(op.values)?op.values as any:{}));if(s.t.theme)for(const member of s.t.overlays.filter(o=>o.group===group&&o.styleRole))run([{op:'updateOverlay',id:member.id,patch:themePatch(member,s.t.theme)}]);return;
+ }
+ if(kind==='setComponentParams'){
+  const group=String(op.group),binding=s.t.groups?.[group]?.component??fail('不是组件实例');
+  const members=s.t.overlays.filter(o=>o.group===group);if(!members.length)fail('组件实例为空');
+  const values={...binding.values,...(isObj(op.values)?op.values:{})} as NonNullable<typeof binding.values>;run(componentOps(s.t,binding.name,group,Math.min(...members.map(o=>o.startSeconds)),values,true));return;
+ }
+ if(kind==='detachComponent'){
+  const group=String(op.group),state=cloneValue(s.t.groups?.[group]??{});delete state.component;run([{op:'updateGroup',group,state}]);return;
+ }
+ if(kind==='removeComponent'){
+  const n=validName();delete s.t.components?.[n];if(!Object.keys(s.t.components??{}).length)delete s.t.components;s.touched.add('component:'+n);
+  for(const [group,state] of Object.entries(s.t.groups??{}))if(state.component?.name===n){const next={...state};delete next.component;run([{op:'updateGroup',group,state:next}]);}return;
+ }
+ if(kind==='adaptCanvas'){
+  const width=Math.round(clampOr(op.width,s.t.meta.width,16,7680)/2)*2,height=Math.round(clampOr(op.height,s.t.meta.height,16,7680)/2)*2;
+  run(adaptCanvasOps(s.t,width,height,op.mode==='contain'?'contain':'reflow').map(child=>{if(child.op!=='updateOverlay')return child;const o=s.t.overlays.find(o=>o.id===child.id);return o?{...child,patch:protectDesignPatch(o,child.patch as Record<string,unknown>)}:child;}));return;
+ }
+ if(kind==='replaceAsset'){
+  const from=String(op.from??''),to=checkAsset(s,op.to);if(!from)fail('缺少原素材 from');if(from===to)return;
+  const plans:Op[]=[];const duration=s.ctx.assetDuration?.(to);
+  for(const track of [...s.t.videoTracks,...s.t.audioTracks])for(const c of track.clips)if(c.src===from){
+   const video='clipDuration' in c;const image=IMAGE_EXT.test(to);if(!video&&image)fail('音频不能替换为图片');if(video&&/\.(wav|mp3|m4a|flac|ogg|aac|opus)$/i.test(to))fail('视频轨不能替换为纯音频素材');
+   const patch:Record<string,unknown>={src:to};if(video)patch.type=image?'image':'video';
+   if(!image&&duration!==undefined){const length=video?c.clipDuration:c.duration;let inPoint=Math.min(c.inPoint,Math.max(0,duration-length*c.speed));const speed=Math.min(c.speed,(duration-inPoint)/length);if(speed<.1)fail('替换素材太短，无法在允许倍速范围内保持原时长');patch.inPoint=inPoint;patch.speed=speed;}
+   plans.push({op:'updateClip',id:c.id,patch});
+  }
+  for(const o of s.t.overlays)if(o.image?.src===from){if(!IMAGE_EXT.test(to))fail('图片元素只能替换为图片素材');plans.push({op:'updateOverlay',id:o.id,patch:{image:{...o.image,src:to}}});}
+  for(const [name,def] of Object.entries(s.t.components??{}))for(const o of def.overlays){if(o.image?.src===from){if(!IMAGE_EXT.test(to))fail('组件中的图片只能替换为图片');o.image.src=to;s.touched.add('component:'+name);}if(o.audioReactive?.src===from){delete o.audioReactive;s.touched.add('component:'+name);}}
+  for(const [group,state] of Object.entries(s.t.groups??{}))if(state.component?.values){let changed=false;const values=cloneValue(state.component.values);for(const value of Object.values(values))if(value.imageSrc===from){value.imageSrc=to;changed=true;}if(changed)plans.push({op:'updateGroup',group,state:{...state,component:{...state.component,values}}});}
+  const relinkNested=(o:Overlay)=>{if(o.composition){const result=applyOps(JSON.parse(o.composition.timeline),[{op:'replaceAsset',from,to}],s.ctx);if(result.receipts.some(r=>r.status==='rejected'))fail('内部合成素材替换失败');o.composition.timeline=JSON.stringify(result.timeline);}};
+  for(const o of s.t.overlays)if(o.composition){relinkNested(o);s.touched.add(o.id);}
+  for(const [name,def] of Object.entries(s.t.components??{}))for(const o of def.overlays)if(o.composition){relinkNested(o);s.touched.add('component:'+name);}
+  for(const plan of plans)run([plan]);
+  for(const o of s.t.overlays)if(o.audioReactive?.src===from)run([{op:'updateOverlay',id:o.id,patch:{audioReactive:null}}]);
+  return;
+ }
 }
 
 function applyOne(s: Scope, op: Op) {
   const o = op as Record<string, unknown>;
   if (SYSTEM_OPS.has(op.op) && s.actor !== "system") fail("「" + op.op + "」是撤销/恢复专用的系统操作");
   switch (op.op) {
+    case "putDesignScenes": if(o.scenes===null)delete s.t.designScenes;else {const scenes:NonNullable<Timeline['designScenes']>={};for(const [id,scene] of Object.entries(o.scenes as Record<string,unknown>)){if(!/^[a-zA-Z0-9_-]{1,64}$/.test(id)||['__proto__','constructor','prototype'].includes(id))fail('无效场景 ID');scenes[id]=designSceneSchema.parse(scene);}s.t.designScenes=scenes;}s.touched.add('designScenes');return;
+    case "putDesign": if(o.design===null)delete s.t.design;else s.t.design=designSchema.parse(o.design);s.touched.add('design');return;
+    case "setDesignScene": case "removeDesignScene": case "setDesign": case "bindDesignRole": case "applyDesignLayout": case "typesetText": for(const next of designOperations(s.t,o)){if(next.op==='putDesignScenes'){s.t.designScenes=next.scenes as Timeline['designScenes'];s.touched.add('designScenes');}else if(next.op==='putDesign'){s.t.design=designSchema.parse(next.design);s.touched.add('design');}else applyOne(s,next as Op);}return;
+    case "setTheme": case "bindStyle": case "saveComponent": case "instantiateComponent": case "setComponentParams": case "detachComponent": case "removeComponent": case "putComponent": case "putTheme": case "replaceAsset": case "adaptCanvas": return studioOp(s,o);
     case "addClip": return addClipOp(s, o);
     case "addAudio": return addAudioOp(s, o);
     case "removeClip":
@@ -1566,6 +1799,7 @@ function applyOne(s: Scope, op: Op) {
     case "addSlide": return addSlideOp(s, o);
     case "updateGroup": return updateGroupOp(s, o);
     case "removeGroup": return removeGroupOp(s, o);
+    case "saveAnimation": case "applyAnimation": case "removeAnimation": case "putAnimation": return animationLibraryOp(s,o);
     case "setMeta": {
       const patch = sanitizeMetaPatch(isObj(o.patch) ? o.patch : o);
       if (!Object.keys(patch).length) fail("setMeta 缺少有效的 fps/width/height/background");
@@ -1583,15 +1817,24 @@ function applyOne(s: Scope, op: Op) {
     case "putTrack": return putTrackOp(s, o);
     case "putOverlay": return putOverlayOp(s, o);
     case "putMarker": return putMarkerOp(s, o);
+    case "putGroupState": {
+      if (typeof o.group !== "string" || !o.group) fail("缺少 group");
+      const group = o.group as string;
+      if (o.state === null) { if (s.t.groups) delete s.t.groups[group]; }
+      else { s.t.groups ??= {}; s.t.groups[group] = groupStateSchema.parse(o.state); }
+      if (s.t.groups && !Object.keys(s.t.groups).length) delete s.t.groups;
+      s.touched.add("group:" + group);
+      return;
+    }
     case "putMeta": {
       if (!isObj(o.meta)) fail("putMeta 缺少 meta");
-      s.t.meta = structuredClone(o.meta) as Timeline["meta"];
+      s.t.meta = cloneValue(o.meta) as Timeline["meta"];
       s.touched.add("meta");
       return;
     }
     case "replaceTimeline": {
       if (!isObj(o.timeline)) fail("replaceTimeline 缺少 timeline");
-      const next = structuredClone(o.timeline) as unknown as Timeline;
+      const next = cloneValue(o.timeline) as unknown as Timeline;
       for (const key of Object.keys(s.t)) delete (s.t as unknown as Record<string, unknown>)[key];
       Object.assign(s.t, next);
       s.touched.add("*");
@@ -1608,29 +1851,35 @@ function applyOne(s: Scope, op: Op) {
  * 部分字段被忽略 → partial；完全没有效果 → ignored。
  */
 export function applyOps(timeline: Timeline, rawOps: readonly unknown[], ctx: OpContext = {}): ApplyResult {
-  const t = structuredClone(timeline);
-  t.markers ??= [];
-  const usedIds = collectIds(t);
-  const changed = new Set<string>();
-  const receipts: Receipt[] = [];
+  let t = timeline;
+  const usedIds = collectIds(t), changed = new Set<string>(), receipts: Receipt[] = [];
   const actor = ctx.actor ?? "user";
   rawOps.forEach((raw, index) => {
     const { op, error } = normalizeOp(raw);
     if (!op) { receipts.push({ index, op: String(isObj(raw) ? raw.op ?? raw.type ?? "?" : "?"), status: "rejected", reason: error }); return; }
-    const before = JSON.stringify(t);
-    const s: Scope = { t, ctx, actor, touched: new Set(), warnings: [], newIds: [], usedIds };
+    const before=t, draft=createDraft(t), previousIndex=modelIndex(t);
+    const s: Scope = { t:draft, ctx, actor, touched: new Set(), warnings: [], newIds: [], usedIds };
     try {
+      const contractError=operationError(op);if(contractError)fail(contractError);
       applyOne(s, op);
+      const paths=draftInfo(draft)!.paths;
+      let next=finishDraft(draft);
+      if (actor !== "system" && next!==before) {
+        if(previousIndex.hasCues){const repaired=createDraft(next);for(const key of repairRemovedCues(repaired,before))s.touched.add(key);next=finishDraft(repaired);}
+        if(previousIndex.hasLayout||paths.some(p=>p[0]==='groups'||p.includes('autoSize')||p.includes('textFit')||(p[0]==='overlays'&&p.length===2&&!!(next.overlays[Number(p[1])]?.autoSize||next.overlays[Number(p[1])]?.textFit)))){
+          const ids=new Set<string>(),groups=new Set<string>();let all=false;
+          for(const p of paths){if(p[0]==='meta'||p.length<3){all=true;break;}if(p[0]==='groups')groups.add(p[1]);if(p[0]==='overlays'){const i=Number(p[1]);for(const o of [before.overlays[i],next.overlays[i]])if(o){ids.add(o.id);if(o.group)groups.add(o.group);}}}
+          const laidOut=applyLayout(next,all?undefined:{ids,groups});
+          laidOut.overlays.forEach((o,i)=>{if(o!==next.overlays[i])s.touched.add('overlay:'+o.id);});next=laidOut;
+        }
+      }
+      inheritIndex(before,next,paths);t=next;
     } catch (e) {
-      // 单条失败：回滚这一条的部分修改
-      const restored = JSON.parse(before) as Timeline;
-      for (const key of Object.keys(t)) delete (t as unknown as Record<string, unknown>)[key];
-      Object.assign(t, restored);
-      receipts.push({ index, op: op.op, status: "rejected", reason: e instanceof Error ? e.message : String(e) });
-      return;
+      for(const id of s.newIds)usedIds.delete(id);
+      receipts.push({ index, op: op.op, status: "rejected", reason: e instanceof Error ? e.message : String(e) });return;
     }
-    const effective = JSON.stringify(t) !== before;
-    for (const key of s.touched) changed.add(key);
+    const effective = t!==before;
+    if(effective)for (const key of s.touched) changed.add(key);
     const id = typeof (op as Record<string, unknown>).id === "string" ? ((op as Record<string, unknown>).id as string) : undefined;
     receipts.push({
       index,

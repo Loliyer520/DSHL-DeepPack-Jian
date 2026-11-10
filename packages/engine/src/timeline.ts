@@ -1,11 +1,12 @@
 // 时间线纯函数（不依赖 zod）：面板、服务端、渲染层共用。
 // 只用 `import type` 引用 schema，保证打进浏览器包时不会带上 zod 运行时。
+import { springEase } from "./spring.js";
 import type { Animations, AudioClip, Clip, Keyframe, Overlay, Timeline } from "./schema.js";
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 20;
 
 // 共享常量（schema 与 ops 共用；放在这里避免浏览器端引入 zod）
-export const ANIM_CHANNELS = ["x", "y", "scale", "scaleX", "scaleY", "opacity", "rotation", "volume", "brightness", "contrast", "saturate", "blur", "clipL", "clipR", "clipT", "clipB", "progress"] as const;
+export const ANIM_CHANNELS = ["x", "y", "scale", "scaleX", "scaleY", "opacity", "rotation", "volume", "brightness", "contrast", "saturate", "blur", "clipL", "clipR", "clipT", "clipB", "progress", "rotationX", "rotationY", "z", "perspective", "pathProgress", "maskX", "maskY", "maskW", "maskH", "maskFeather", "sweepProgress", "gradientAngle", "gradientShift", "gradientHue"] as const;
 // v6 元素（幻灯片式图层）：overlays 里每一项都是一个元素，kind 决定画什么
 // v7 数学动画：math 公式（text 为 LaTeX）/ plot 坐标系与函数图像 / camera 镜头（不可见，推拉平移同组元素）
 export const ELEMENT_KINDS = ["subtitle", "title", "text", "shape", "image", "icon", "chart", "math", "plot", "camera"] as const;
@@ -20,7 +21,7 @@ export const CHART_TYPES = ["column", "bar", "line", "area", "pie", "donut", "pr
 export const TEXT_EFFECTS = ["fadeIn", "fadeUp", "pop", "blur", "drop", "typewriter"] as const;
 export const LIST_STYLES = ["bullet", "number", "check"] as const;
 export const EASING_NAMES = ["linear", "in", "out", "inOut", "bounce", "elastic", "hold"] as const;
-export const TRANSITION_TYPES = ["dissolve", "fadeBlack", "fadeWhite", "slide", "wipe", "push", "zoom", "blur"] as const;
+export const TRANSITION_TYPES = ["dissolve", "fadeBlack", "fadeWhite", "slide", "wipe", "push", "zoom", "blur", "flip", "cube", "iris", "diagonal", "zoomBlur", "whip"] as const;
 export const DIRECTIONS = ["left", "right", "up", "down"] as const;
 export const BLEND_MODES = ["normal", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn", "hard-light", "soft-light", "difference", "exclusion"] as const;
 export const FILTER_RANGES = { brightness: [0, 3], contrast: [0, 3], saturate: [0, 3], blur: [0, 20], grayscale: [0, 1], sepia: [0, 1], hueRotate: [0, 360] } as const;
@@ -69,7 +70,8 @@ export const cubicBezier = (x1: number, y1: number, x2: number, y2: number) => (
   return sampleY(t);
 };
 
-export const easingFn = (e: Keyframe["e"]): ((f: number) => number) => {
+export const easingFn = (e: Keyframe["e"], duration = 1): ((f: number) => number) => {
+  if (e && !Array.isArray(e) && typeof e === "object" && e.type === "spring") return (f) => springEase(f, duration, e);
   if (Array.isArray(e) && e.length === 4) return cubicBezier(e[0], e[1], e[2], e[3]);
   if (e === "hold") return () => 0;
   return EASING[(e as string | undefined) ?? "linear"] ?? EASING.linear;
@@ -89,7 +91,7 @@ export const evalKeyframes = (kfs: readonly Keyframe[] | undefined, sec: number)
     if (sec >= a.t && sec <= b.t) {
       const span = b.t - a.t;
       if (span <= 0) return b.v;
-      const eased = easingFn(a.e)((sec - a.t) / span);
+      const eased = easingFn(a.e, span)((sec - a.t) / span);
       return a.v + (b.v - a.v) * eased;
     }
   }
@@ -232,3 +234,6 @@ export function formatNumber(v: number, decimals = 0, separator = false): string
   }
   return s;
 }
+
+/** Matte sources are basic 2D artwork; their shadows and glass are not part of the matte. */
+export const isMatteSource = (o: Overlay): boolean => ["shape","text","title","subtitle","image","icon"].includes(o.kind??"subtitle") && !o.trackMatte && !o.transform3d && !o.mask && !o.morph && !o.textEffect && !o.list && !["rotationX","rotationY","z"].some(k=>o.animations?.[k as keyof Animations]?.some(f=>f.v!==0));

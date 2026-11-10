@@ -1,0 +1,403 @@
+{
+  "meta": {
+    "width": 960,
+    "height": 640,
+    "fps": 30,
+    "background": "#eef2f7"
+  },
+  "overlays": [
+    {
+      "id": "title",
+      "kind": "text",
+      "x": 0.5,
+      "y": 0.065,
+      "w": 0.86,
+      "text": "NATIVE ELEMENT EFFECTS",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "fontSize": 18,
+      "color": "#64748b",
+      "align": "left",
+      "valign": "middle",
+      "fontWeight": 600
+    },
+    {
+      "id": "subtitle",
+      "kind": "text",
+      "x": 0.5,
+      "y": 0.132,
+      "w": 0.86,
+      "text": "One element. More depth.",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "fontSize": 38,
+      "color": "#0f172a",
+      "align": "left",
+      "valign": "middle",
+      "fontWeight": 600
+    },
+    {
+      "id": "soft",
+      "kind": "shape",
+      "x": 0.2,
+      "y": 0.43,
+      "w": 0.23,
+      "h": 0.21,
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "radius": 18,
+        "fill": "#ffffff"
+      },
+      "shadow": {
+        "color": "#0f172a",
+        "opacity": 0.16,
+        "blur": 16,
+        "y": 8
+      }
+    },
+    {
+      "id": "softicon",
+      "kind": "icon",
+      "x": 0.2,
+      "y": 0.40499999999999997,
+      "w": 0.042,
+      "h": 0.063,
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "icon": {
+        "name": "layers"
+      },
+      "color": "#2563eb"
+    },
+    {
+      "id": "softlabel",
+      "kind": "text",
+      "x": 0.20500000000000002,
+      "y": 0.492,
+      "w": 0.2,
+      "text": "Soft shadow",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "fontSize": 17,
+      "color": "#0f172a",
+      "align": "left",
+      "valign": "middle",
+      "fontWeight": 600
+    },
+    {
+      "id": "float",
+      "kind": "shape",
+      "x": 0.5,
+      "y": 0.43,
+      "w": 0.23,
+      "h": 0.21,
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "radius": 18,
+        "fill": "#ffffff"
+      },
+      "shadow": [
+        {
+          "color": "#0f172a",
+          "opacity": 0.12,
+          "blur": 4,
+          "y": 2
+        },
+        {
+          "color": "#0f172a",
+          "opacity": 0.18,
+          "blur": 22,
+          "y": 14
+        }
+      ]
+    },
+    {
+      "id": "floaticon",
+      "kind": "icon",
+      "x": 0.5,
+      "y": 0.40499999999999997,
+      "w": 0.042,
+      "h": 0.063,
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "icon": {
+        "name": "rocket"
+      },
+      "color": "#2563eb"
+    },
+    {
+      "id": "floatlabel",
+      "kind": "text",
+      "x": 0.505,
+      "y": 0.492,
+      "w": 0.2,
+      "text": "Layered elevation",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "fontSize": 17,
+      "color": "#0f172a",
+      "align": "left",
+      "valign": "middle",
+      "fontWeight": 600
+    },
+    {
+      "id": "hard",
+      "kind": "shape",
+      "x": 0.8,
+      "y": 0.43,
+      "w": 0.23,
+      "h": 0.21,
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "radius": 18,
+        "fill": "#ffffff"
+      },
+      "shadow": {
+        "color": "#64748b",
+        "opacity": 0.5,
+        "blur": 0,
+        "x": 9,
+        "y": 9
+      }
+    },
+    {
+      "id": "hardicon",
+      "kind": "icon",
+      "x": 0.8,
+      "y": 0.40499999999999997,
+      "w": 0.042,
+      "h": 0.063,
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "icon": {
+        "name": "gem"
+      },
+      "color": "#2563eb"
+    },
+    {
+      "id": "hardlabel",
+      "kind": "text",
+      "x": 0.805,
+      "y": 0.492,
+      "w": 0.2,
+      "text": "Hard offset",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "fontSize": 17,
+      "color": "#0f172a",
+      "align": "left",
+      "valign": "middle",
+      "fontWeight": 600
+    },
+    {
+      "id": "glowbase",
+      "kind": "shape",
+      "x": 0.2,
+      "y": 0.765,
+      "w": 0.25,
+      "h": 0.25,
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "radius": 18,
+        "fill": "#0f172a"
+      }
+    },
+    {
+      "id": "glow",
+      "kind": "icon",
+      "x": 0.2,
+      "y": 0.743,
+      "w": 0.057,
+      "h": 0.085,
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "icon": {
+        "name": "sparkles"
+      },
+      "color": "#7dd3fc",
+      "shadow": [
+        {
+          "color": "#38bdf8",
+          "opacity": 0.8,
+          "blur": 5,
+          "y": 0
+        },
+        {
+          "color": "#38bdf8",
+          "opacity": 0.5,
+          "blur": 16,
+          "y": 0,
+          "spread": 1
+        }
+      ]
+    },
+    {
+      "id": "glowlabel",
+      "kind": "text",
+      "x": 0.20800000000000002,
+      "y": 0.842,
+      "w": 0.2,
+      "text": "Contour glow",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "fontSize": 17,
+      "color": "#e0f2fe",
+      "align": "left",
+      "valign": "middle",
+      "fontWeight": 600
+    },
+    {
+      "id": "gradient",
+      "kind": "shape",
+      "x": 0.5,
+      "y": 0.765,
+      "w": 0.23,
+      "h": 0.21,
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "radius": 18,
+        "fill": {
+          "type": "linear",
+          "angle": 30,
+          "stops": [
+            {
+              "offset": 0,
+              "color": "#2563eb"
+            },
+            {
+              "offset": 0.5,
+              "color": "#7c3aed"
+            },
+            {
+              "offset": 1,
+              "color": "#ec4899"
+            }
+          ]
+        }
+      },
+      "shadow": {
+        "color": "#7c3aed",
+        "opacity": 0.2,
+        "blur": 14,
+        "y": 8
+      }
+    },
+    {
+      "id": "gradientlabel",
+      "kind": "text",
+      "x": 0.503,
+      "y": 0.827,
+      "w": 0.2,
+      "text": "3-stop gradient",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "fontSize": 17,
+      "color": "#fff",
+      "align": "left",
+      "valign": "middle",
+      "fontWeight": 600
+    },
+    {
+      "id": "blendbase",
+      "kind": "shape",
+      "x": 0.8,
+      "y": 0.765,
+      "w": 0.23,
+      "h": 0.21,
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "radius": 18,
+        "fill": "#ffffff"
+      },
+      "shadow": {
+        "color": "#0f172a",
+        "opacity": 0.12,
+        "blur": 14,
+        "y": 8
+      }
+    },
+    {
+      "id": "blendcircle1",
+      "kind": "shape",
+      "x": 0.777,
+      "y": 0.74,
+      "w": 0.072,
+      "h": 0.108,
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "ellipse",
+        "fill": "#60a5fa"
+      }
+    },
+    {
+      "id": "blendcircle2",
+      "kind": "shape",
+      "x": 0.823,
+      "y": 0.74,
+      "w": 0.072,
+      "h": 0.108,
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "ellipse",
+        "fill": "#f9a8d4"
+      },
+      "blendMode": "multiply"
+    },
+    {
+      "id": "blendlabel",
+      "kind": "text",
+      "x": 0.8039999999999999,
+      "y": 0.827,
+      "w": 0.2,
+      "text": "Multiply blend",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "fontSize": 17,
+      "color": "#0f172a",
+      "align": "left",
+      "valign": "middle",
+      "fontWeight": 600
+    },
+    {
+      "id": "footer",
+      "kind": "text",
+      "x": 0.5,
+      "y": 0.95,
+      "w": 0.86,
+      "text": "D剪 · Element appearance",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "fontSize": 14,
+      "color": "#64748b",
+      "align": "left",
+      "valign": "middle",
+      "fontWeight": 600
+    }
+  ]
+}

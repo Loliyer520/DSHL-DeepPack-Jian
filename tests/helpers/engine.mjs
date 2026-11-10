@@ -13,7 +13,7 @@ export const freePort = () => new Promise((resolve) => {
   s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); });
 });
 
-export async function startEngine({ warm = false, env = {} } = {}) {
+export async function startEngine({ warm = false, env = {}, portAttempt = 0 } = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'djian-test-'));
   const port = await freePort();
   const child = spawn(process.execPath, [path.join(ROOT, 'packages/webui/server/index.mjs')], {
@@ -27,7 +27,8 @@ export async function startEngine({ warm = false, env = {} } = {}) {
   for (let i = 0; i < 100; i++) {
     try { const r = await fetch(base + '/api/health'); if (r.ok) break; } catch {}
     await new Promise((r) => setTimeout(r, 100));
-    if (i === 99) throw new Error('引擎未启动：\n' + log);
+    if(child.exitCode!==null){fs.rmSync(dataDir,{recursive:true,force:true});if(log.includes('已被占用')&&portAttempt<3)return startEngine({warm,env,portAttempt:portAttempt+1});throw new Error('引擎启动失败：\n'+log);}
+    if (i === 99) {child.kill();throw new Error('引擎未启动：\n' + log);}
   }
   const api = async (method, url, body, headers = {}) => {
     const r = await fetch(base + url, {

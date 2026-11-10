@@ -112,6 +112,21 @@ export function describeOp(op: Op, receipt: Receipt | undefined, before: Timelin
   const newId = newIds.find((id) => findAnyClip(after, id) || after.overlays.some((x) => x.id === id) || (after.markers ?? []).some((m) => m.id === id)) ?? receipt?.id;
   const where = (id: unknown) => findAnyClip(after, id)?.where ?? findAnyClip(before, id)?.where ?? "";
   switch (op.op) {
+    case 'setDesignScene': return '设置场景设计';
+    case 'removeDesignScene': return '移除场景设计';
+    case 'setDesign': return '更新项目设计规范';
+    case 'bindDesignRole': return '绑定设计角色';
+    case 'applyDesignLayout': return '应用设计版式';
+    case 'typesetText': return '优化中文排版';
+    case 'setTheme': return '更新项目主题';
+    case 'bindStyle': return '关联主题样式 '+String(o.role??'（解除）');
+    case 'saveComponent': return '保存并同步组件「'+String(o.name)+'」';
+    case 'instantiateComponent': return '插入组件实例「'+String(o.name)+'」';
+    case 'setComponentParams': return '更新组件实例参数';
+    case 'detachComponent': return '解除组件关联';
+    case 'removeComponent': return '删除组件定义';
+    case 'replaceAsset': return '替换素材「'+String(o.from)+'」→「'+String(o.to)+'」';
+    case 'adaptCanvas': return '适配画布 '+String(o.width)+'×'+String(o.height);
     case "addClip": {
       const hit = findAnyClip(after, newId);
       if (!hit) return "添加片段";
@@ -158,6 +173,9 @@ export function describeOp(op: Op, receipt: Receipt | undefined, before: Timelin
       if (ov) return "在 " + sec(o.atSeconds) + " 处分割" + elName(ov);
       return "在 " + sec(o.atSeconds) + " 处分割" + where(o.id) + "片段" + clipName(before, o.id);
     }
+    case "saveAnimation": return "保存动画片段「" + String(o.name) + "」";
+    case "applyAnimation": return "应用动画片段「" + String(o.name) + "」";
+    case "removeAnimation": return "删除动画片段「" + String(o.name) + "」";
     case "splitOverlay": {
       const ov = before.overlays.find((x) => x.id === o.id) ?? before.overlays[Number(o.index)];
       return "在 " + sec(o.atSeconds) + " 处分割" + elName(ov);
@@ -229,6 +247,7 @@ export function describeOp(op: Op, receipt: Receipt | undefined, before: Timelin
     case "updateGroup": {
       const a = before.overlays.filter((x) => x.group === o.group), b = after.overlays.filter((x) => a.some((y) => y.id === x.id));
       if (!a.length) return undefined;
+      if ("state" in o) return (o.state === null ? "清除" : "调整") + "分组 " + String(o.group) + " 的整体动画";
       const span = (l: Overlay[]) => sec(Math.min(...l.map((x) => x.startSeconds))) + "–" + sec(Math.max(...l.map((x) => x.endSeconds)));
       return "调整分组 " + String(o.group) + "（" + a.length + " 个元素）：" + span(a) + "→" + span(b) + (o.ungroup ? "，并取消分组" : "");
     }
@@ -287,13 +306,14 @@ export function describeDiff(before: Timeline, after: Timeline, limit = 12): str
   const at = tracks(before), bt = tracks(after);
   for (const [id, name] of bt) if (!at.has(id)) lines.push("新增轨道「" + name + "」");
   for (const [id, name] of at) if (!bt.has(id)) lines.push("移除轨道「" + name + "」");
+  for (const name of new Set([...Object.keys(before.animationLibrary??{}),...Object.keys(after.animationLibrary??{})])) if(JSON.stringify(before.animationLibrary?.[name])!==JSON.stringify(after.animationLibrary?.[name]))lines.push("动画片段「"+name+"」已更新");
   if (lines.length > limit) return [...lines.slice(0, limit), "…另有 " + (lines.length - limit) + " 处变化"];
   return lines;
 }
 
 /** 整批操作的描述；系统批次（撤销/恢复）退化为实体级差异 */
 export function describeBatch(before: Timeline, after: Timeline, ops: readonly Op[], receipts: readonly Receipt[], label?: string): string[] {
-  const system = ops.some((op) => ["putClip", "putOverlay", "putTrack", "putMarker", "putMeta", "replaceTimeline"].includes(op.op));
+  const system = ops.some((op) => ["putDesignScenes", "putDesign", "putTheme", "putComponent", "putClip", "putOverlay", "putTrack", "putMarker", "putMeta", "putGroupState", "putAnimation", "replaceTimeline"].includes(op.op));
   if (system) {
     const lines = describeDiff(before, after);
     return label ? lines.map((l) => label + "：" + l) : lines;

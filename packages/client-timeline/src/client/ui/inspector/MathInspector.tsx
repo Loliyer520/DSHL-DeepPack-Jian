@@ -10,6 +10,8 @@ import { useEditor } from '../../context';
 import { engineBase, type Op } from '../../engine';
 import { KIND_NAME, type Actions } from '../../actions';
 import { Field } from '../common';
+import { PathEditor } from './PathEditor';
+import { toPathD, verticesPath } from '../../../../../engine/src/paths';
 import { ColorField, NumberField, Section, Seg, Toggle, useEdit } from './fields';
 
 const pu = (o: Overlay, patch: Record<string, unknown>): Op[] => [{ op: 'updateOverlay', id: o.id, patch }];
@@ -408,7 +410,7 @@ export function PathSection({ o }: { o: Overlay }) {
         <Field label="SVG 路径（盒子坐标 0–100）"><TextInput mono value={s.path ?? ''} max={4000} label="SVG 路径" onCommit={(v) => set({ path: v }, '修改路径')} /></Field>
       )}
       {open && <div style={{ marginTop: 8 }}><Seg label="箭头" value={s.arrow ?? 'none'} options={[['none', '无箭头'], ['end', '末端'], ['start', '起点'], ['both', '两端']]} onChange={(v) => set({ arrow: v === 'none' ? null : v }, '路径箭头')} /></div>}
-      <p className="dj-hint">路径坐标以元素盒子为 0–100：拖动缩放盒子即缩放路径；“动画 › 进度 › 描边绘制”让路径一笔画出来。</p>
+      <PathEditor key={o.id} value={s.vertices?toPathD(verticesPath(s.vertices,s.closed??false,s.smooth??false)):s.path??''} ops={path=>pu(o,{shape:{path,vertices:null}})}/><p className="dj-hint">路径坐标以元素盒子为 0–100：拖动缩放盒子即缩放路径；“动画 › 进度 › 描边绘制”让路径一笔画出来。</p>
     </Section>
   );
 }

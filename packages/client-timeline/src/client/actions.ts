@@ -1,5 +1,6 @@
+import {copiedCues} from '../../../engine/src/studio';
 // 编辑命令：键盘、右键菜单、按钮共用；每条命令生成一批 ops 并带人类可读的 label
-import type { Clip, Overlay, Timeline } from '../../../engine/src/schema';
+import type { Clip, Overlay, Timeline, GroupState } from '../../../engine/src/schema';
 import { elementLabel, locateClip, mainTrackStarts, srcLabel } from '../../../engine/src/timeline';
 import { splitOffset } from '../../../engine/src/ops';
 import type { Editor } from './context';
@@ -50,7 +51,7 @@ export function editPoints(t: Timeline): number[] {
   return [...pts].map((p) => snapT(t, p)).sort((a, b) => a - b);
 }
 
-let clipboard: { clips: { clip: Record<string, unknown>; kind: 'main' | 'pip' | 'audio'; offset: number }[]; overlays: { overlay: Overlay; offset: number }[] } | null = null;
+let clipboard: { groups?: Timeline['groups']; clips: { clip: Record<string, unknown>; kind: 'main' | 'pip' | 'audio'; offset: number }[]; overlays: { overlay: Overlay; offset: number }[] } | null = null;
 
 export function createActions(ed: Editor) {
   const t = () => ed.store.current;
@@ -122,7 +123,12 @@ export function createActions(ed: Editor) {
       for (const members of groups.values()) {
         const g = newGroupId();
         const span = Math.max(...members.map((o) => o.endSeconds)) - Math.min(...members.map((o) => o.startSeconds));
-        for (const { id: _id, ...rest } of members) ops.push({ op: 'addOverlay', ...rest, group: g, startSeconds: rest.startSeconds + span, endSeconds: rest.endSeconds + span });
+        const ids = new Map(members.map((o, i) => [o.id, g + 'e' + i]));
+        const cueScope=g,allCues=new Set([...members.flatMap(o=>o.cues??[]),...(tl.groups?.[members[0].group!]?.cues??[])].map(c=>c.id));
+        for (const { id, follow: _follow, connector: _connector, trackMatte: _trackMatte, ...rest } of members) ops.push({ op: 'addOverlay', ...rest, cues:copiedCues(rest.cues,cueScope,allCues), id: ids.get(id), group: g, startSeconds: rest.startSeconds + span, endSeconds: rest.endSeconds + span });
+        ops.push(...referenceCopies(members, ids));
+        const state = tl.groups?.[members[0].group!];
+        if (state) ops.push({ op: 'updateGroup', group: g, state: copyGroupState(state,ids,cueScope,allCues) });
       }
       for (const s of items) if (!inGroup.has(s.id)) ops.push({ op: 'duplicateClip', id: s.id });
       run(ops, groups.size ? '复制 ' + groups.size + ' 页幻灯片' : '复制 ' + items.length + ' 项');
@@ -132,7 +138,7 @@ export function createActions(ed: Editor) {
       const items = sel();
       const starts = items.map((s) => (s.kind === 'clip' ? locateClip(tl, s.id)?.start : tl.overlays.find((o) => o.id === s.id)?.startSeconds)).filter((v): v is number => v !== undefined);
       const base = starts.length ? Math.min(...starts) : 0;
-      clipboard = { clips: [], overlays: [] };
+      clipboard = { clips: [], overlays: [], groups: structuredClone(tl.groups ?? {}) };
       for (const s of items) {
         if (s.kind === 'clip') {
           const loc = locateClip(tl, s.id);
@@ -156,12 +162,17 @@ export function createActions(ed: Editor) {
         else ops.push({ op: 'addClip', ...rest, atSeconds: at + offset });
       }
       const regroup = new Map<string, string>();
+      const base = newGroupId();
+      const ids = new Map(clipboard.overlays.map(({overlay},i)=>[overlay.id,base+'e'+i]));
+      const allCues=new Set([...clipboard.overlays.flatMap(x=>x.overlay.cues??[]),...Object.values(clipboard.groups??{}).flatMap(s=>s.cues??[])].map(c=>c.id));
       for (const { overlay, offset } of clipboard.overlays) {
-        const { id: _id, ...rest } = overlay;
+        const { id, follow: _follow, connector: _connector, trackMatte: _trackMatte, ...rest } = overlay;
         const len = overlay.endSeconds - overlay.startSeconds;
         if (rest.group) { if (!regroup.has(rest.group)) regroup.set(rest.group, newGroupId()); rest.group = regroup.get(rest.group); }
-        ops.push({ op: 'addOverlay', ...rest, startSeconds: at + offset, endSeconds: at + offset + len });
+        ops.push({ op: 'addOverlay', ...rest, cues:copiedCues(rest.cues,base,allCues), id: ids.get(id), startSeconds: at + offset, endSeconds: at + offset + len });
       }
+      ops.push(...referenceCopies(clipboard.overlays.map(x=>x.overlay), ids));
+      for (const [old, group] of regroup) if (clipboard.groups?.[old]) ops.push({ op: 'updateGroup', group, state: copyGroupState(clipboard.groups[old],ids,base,allCues) });
       run(ops, '粘贴 ' + ops.length + ' 项');
     },
     nudge(seconds: number) {
@@ -334,3 +345,18 @@ export function createActions(ed: Editor) {
   };
 }
 export type Actions = ReturnType<typeof createActions>;
+
+/** Bind copies only after every new target exists, and never retain links to originals. */
+export function referenceCopies(overlays: Overlay[], ids: Map<string,string>): Op[] {
+  return overlays.flatMap(o=>{
+    const patch: Record<string,unknown>={};
+    if(o.trackMatte&&ids.has(o.trackMatte.source))patch.trackMatte={...o.trackMatte,source:ids.get(o.trackMatte.source)};
+    if(o.follow&&ids.has(o.follow.target))patch.follow={...o.follow,target:ids.get(o.follow.target)};
+    if(o.connector&&ids.has(o.connector.from)&&ids.has(o.connector.to))patch.connector={...o.connector,from:ids.get(o.connector.from),to:ids.get(o.connector.to)};
+    return Object.keys(patch).length?[{op:'updateOverlay' as const,id:ids.get(o.id),patch}]:[];
+  });
+}
+
+export function copyGroupState(state:GroupState,ids:Map<string,string>,scope:string=[...ids.values()][0]??'copy',allIds?:Set<string>):GroupState {
+  const out=structuredClone(state);out.cues=copiedCues(out.cues,scope,allIds);if(!out.cues)delete out.cues;if(out.layout?.background)out.layout.background=ids.get(out.layout.background);return out;
+}

@@ -245,6 +245,18 @@ export class TimelineStore {
     this.publish();
   }
 
+  /** Record a confirmed server-side edit without applying its patch twice to the live view. */
+  recordExternalEdit(patch: Op[], inverse: Op[], label: string) {
+    if (!this.view || !patch.length || !inverse.length) return;
+    const after = applyOps(this.view, patch, {actor:'system'}).timeline;
+    const before = applyOps(after, inverse, {actor:'system'}).timeline;
+    this.undoStack.push({label,before,after});
+    if(this.undoStack.length>100)this.undoStack.shift();
+    this.redoStack=[];
+    this.publish();
+    void this.catchUp();
+  }
+
   undo() {
     const entry = this.undoStack.pop();
     if (!entry || !this.view) return;

@@ -1,0 +1,688 @@
+{
+  "meta": {
+    "fps": 30,
+    "width": 960,
+    "height": 640,
+    "background": "#080f1b"
+  },
+  "version": 13,
+  "videoTracks": [
+    {
+      "id": "v1",
+      "name": "主轨道",
+      "clips": []
+    }
+  ],
+  "audioTracks": [],
+  "overlays": [
+    {
+      "id": "title",
+      "text": "SURFACES IN MOTION",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 34,
+      "color": "#f8fafc",
+      "fontWeight": 800,
+      "x": 0.5,
+      "y": 0.08,
+      "align": "center",
+      "shadow": false,
+      "kind": "text",
+      "w": 0.9,
+      "h": 0.09
+    },
+    {
+      "id": "subtitle",
+      "text": "D剪 2.6.0  /  Editable effects & reusable animation",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 15,
+      "color": "#64748b",
+      "x": 0.5,
+      "y": 0.14,
+      "align": "center",
+      "shadow": false,
+      "kind": "text",
+      "w": 0.9,
+      "h": 0.09
+    },
+    {
+      "id": "panel0",
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 64,
+      "color": "#ffffff",
+      "x": 0.255,
+      "y": 0.36,
+      "kind": "shape",
+      "w": 0.455,
+      "h": 0.345,
+      "shape": {
+        "type": "rect",
+        "fill": "#111d2e",
+        "stroke": {
+          "color": "#25334a",
+          "width": 1
+        },
+        "radius": 22
+      }
+    },
+    {
+      "id": "panel1",
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 64,
+      "color": "#ffffff",
+      "x": 0.745,
+      "y": 0.36,
+      "kind": "shape",
+      "w": 0.455,
+      "h": 0.345,
+      "shape": {
+        "type": "rect",
+        "fill": "#111d2e",
+        "stroke": {
+          "color": "#25334a",
+          "width": 1
+        },
+        "radius": 22
+      }
+    },
+    {
+      "id": "panel2",
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 64,
+      "color": "#ffffff",
+      "x": 0.255,
+      "y": 0.755,
+      "kind": "shape",
+      "w": 0.455,
+      "h": 0.345,
+      "shape": {
+        "type": "rect",
+        "fill": "#111d2e",
+        "stroke": {
+          "color": "#25334a",
+          "width": 1
+        },
+        "radius": 22
+      }
+    },
+    {
+      "id": "panel3",
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 64,
+      "color": "#ffffff",
+      "x": 0.745,
+      "y": 0.755,
+      "kind": "shape",
+      "w": 0.455,
+      "h": 0.345,
+      "shape": {
+        "type": "rect",
+        "fill": "#111d2e",
+        "stroke": {
+          "color": "#25334a",
+          "width": 1
+        },
+        "radius": 22
+      }
+    },
+    {
+      "id": "label1",
+      "text": "01   ANIMATED GRADIENT",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 14,
+      "color": "#67e8f9",
+      "x": 0.255,
+      "y": 0.245,
+      "align": "center",
+      "shadow": false,
+      "kind": "text",
+      "w": 0.42,
+      "h": 0.09
+    },
+    {
+      "id": "label2",
+      "text": "02   CONTOUR LIGHT SWEEP",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 14,
+      "color": "#fde68a",
+      "x": 0.745,
+      "y": 0.245,
+      "align": "center",
+      "shadow": false,
+      "kind": "text",
+      "w": 0.43,
+      "h": 0.09
+    },
+    {
+      "id": "label3",
+      "text": "03   TRACK MATTE",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 14,
+      "color": "#c4b5fd",
+      "x": 0.255,
+      "y": 0.64,
+      "align": "center",
+      "shadow": false,
+      "kind": "text",
+      "w": 0.43,
+      "h": 0.09
+    },
+    {
+      "id": "label4",
+      "text": "04   REUSABLE ANIMATION",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 14,
+      "color": "#6ee7b7",
+      "x": 0.745,
+      "y": 0.64,
+      "align": "center",
+      "shadow": false,
+      "kind": "text",
+      "w": 0.43,
+      "h": 0.09
+    },
+    {
+      "id": "gradient",
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 64,
+      "color": "#ffffff",
+      "x": 0.255,
+      "y": 0.385,
+      "kind": "shape",
+      "w": 0.37,
+      "h": 0.17,
+      "shape": {
+        "type": "rect",
+        "fill": {
+          "type": "linear",
+          "angle": 20,
+          "stops": [
+            {
+              "offset": 0,
+              "color": "#22d3ee"
+            },
+            {
+              "offset": 1,
+              "color": "#a78bfa"
+            }
+          ],
+          "keyframes": [
+            {
+              "t": 0,
+              "angle": 0,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#22d3ee"
+                },
+                {
+                  "offset": 1,
+                  "color": "#a78bfa"
+                }
+              ],
+              "e": "inOut"
+            },
+            {
+              "t": 3,
+              "angle": 160,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#f472b6"
+                },
+                {
+                  "offset": 1,
+                  "color": "#fb923c"
+                }
+              ],
+              "e": "inOut"
+            },
+            {
+              "t": 6,
+              "angle": 360,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#22d3ee"
+                },
+                {
+                  "offset": 1,
+                  "color": "#a78bfa"
+                }
+              ]
+            }
+          ]
+        },
+        "radius": 18
+      }
+    },
+    {
+      "sweep": {
+        "color": "#fff5cb",
+        "width": 0.3,
+        "softness": 0.8,
+        "angle": 15,
+        "opacity": 1
+      },
+      "id": "shine",
+      "text": "SHINE",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 64,
+      "color": "#657285",
+      "fontWeight": 900,
+      "animations": {
+        "sweepProgress": [
+          {
+            "t": 0,
+            "v": 0
+          },
+          {
+            "t": 2.2,
+            "v": 1
+          },
+          {
+            "t": 3,
+            "v": 0
+          },
+          {
+            "t": 5.2,
+            "v": 1
+          },
+          {
+            "t": 6,
+            "v": 0
+          }
+        ]
+      },
+      "x": 0.745,
+      "y": 0.375,
+      "align": "center",
+      "shadow": false,
+      "kind": "text",
+      "w": 0.4,
+      "h": 0.09
+    },
+    {
+      "trackMatte": {
+        "source": "revealText",
+        "mode": "alpha"
+      },
+      "id": "revealPaint",
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 64,
+      "color": "#ffffff",
+      "x": 0.255,
+      "y": 0.77,
+      "kind": "shape",
+      "w": 0.4,
+      "h": 0.18,
+      "shape": {
+        "type": "rect",
+        "fill": {
+          "type": "linear",
+          "angle": 20,
+          "stops": [
+            {
+              "offset": 0,
+              "color": "#22d3ee"
+            },
+            {
+              "offset": 1,
+              "color": "#a78bfa"
+            }
+          ],
+          "keyframes": [
+            {
+              "t": 0,
+              "angle": 0,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#22d3ee"
+                },
+                {
+                  "offset": 1,
+                  "color": "#a78bfa"
+                }
+              ],
+              "e": "inOut"
+            },
+            {
+              "t": 3,
+              "angle": 160,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#f472b6"
+                },
+                {
+                  "offset": 1,
+                  "color": "#fb923c"
+                }
+              ],
+              "e": "inOut"
+            },
+            {
+              "t": 6,
+              "angle": 360,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#22d3ee"
+                },
+                {
+                  "offset": 1,
+                  "color": "#a78bfa"
+                }
+              ]
+            }
+          ]
+        },
+        "radius": 18
+      }
+    },
+    {
+      "id": "revealText",
+      "text": "REVEAL",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 49,
+      "color": "#ffffff",
+      "fontWeight": 900,
+      "animations": {
+        "scale": [
+          {
+            "t": 0,
+            "v": 0.8
+          },
+          {
+            "t": 1,
+            "v": 1,
+            "e": "inOut"
+          },
+          {
+            "t": 3,
+            "v": 1
+          },
+          {
+            "t": 4,
+            "v": 0.8
+          },
+          {
+            "t": 6,
+            "v": 1
+          }
+        ]
+      },
+      "x": 0.255,
+      "y": 0.77,
+      "align": "center",
+      "shadow": false,
+      "kind": "text",
+      "w": 0.4,
+      "h": 0.09
+    },
+    {
+      "id": "card0",
+      "text": "1",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 31,
+      "color": "#d1fae5",
+      "fontWeight": 800,
+      "animations": {
+        "y": [
+          {
+            "t": 0,
+            "v": 0.04,
+            "e": "out"
+          },
+          {
+            "t": 1,
+            "v": 0
+          },
+          {
+            "t": 3,
+            "v": 0,
+            "e": "inOut"
+          },
+          {
+            "t": 4,
+            "v": 0.04,
+            "e": "out"
+          },
+          {
+            "t": 6,
+            "v": 0
+          }
+        ],
+        "opacity": [
+          {
+            "t": 0,
+            "v": 0
+          },
+          {
+            "t": 0.8,
+            "v": 1
+          }
+        ]
+      },
+      "x": 0.625,
+      "y": 0.77,
+      "kind": "shape",
+      "w": 0.085,
+      "h": 0.12,
+      "shape": {
+        "type": "rect",
+        "fill": "#059669",
+        "radius": 18
+      }
+    },
+    {
+      "id": "card1",
+      "text": "2",
+      "startSeconds": 0.18,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 31,
+      "color": "#d1fae5",
+      "fontWeight": 800,
+      "animations": {
+        "y": [
+          {
+            "t": 0,
+            "v": 0.04,
+            "e": "out"
+          },
+          {
+            "t": 0.9666666666666667,
+            "v": 0
+          },
+          {
+            "t": 2.9,
+            "v": 0,
+            "e": "inOut"
+          },
+          {
+            "t": 3.8666666666666667,
+            "v": 0.04,
+            "e": "out"
+          },
+          {
+            "t": 5.833333333333333,
+            "v": 0
+          }
+        ],
+        "opacity": [
+          {
+            "t": 0,
+            "v": 0
+          },
+          {
+            "t": 0.7666666666666667,
+            "v": 1
+          }
+        ]
+      },
+      "x": 0.745,
+      "y": 0.77,
+      "kind": "shape",
+      "w": 0.085,
+      "h": 0.12,
+      "shape": {
+        "type": "rect",
+        "fill": "#10b981",
+        "radius": 18
+      }
+    },
+    {
+      "id": "card2",
+      "text": "3",
+      "startSeconds": 0.36,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 31,
+      "color": "#d1fae5",
+      "fontWeight": 800,
+      "animations": {
+        "y": [
+          {
+            "t": 0,
+            "v": 0.04,
+            "e": "out"
+          },
+          {
+            "t": 0.9333333333333333,
+            "v": 0
+          },
+          {
+            "t": 2.8333333333333335,
+            "v": 0,
+            "e": "inOut"
+          },
+          {
+            "t": 3.7666666666666666,
+            "v": 0.04,
+            "e": "out"
+          },
+          {
+            "t": 5.633333333333334,
+            "v": 0
+          }
+        ],
+        "opacity": [
+          {
+            "t": 0,
+            "v": 0
+          },
+          {
+            "t": 0.7666666666666667,
+            "v": 1
+          }
+        ]
+      },
+      "x": 0.865,
+      "y": 0.77,
+      "kind": "shape",
+      "w": 0.085,
+      "h": 0.12,
+      "shape": {
+        "type": "rect",
+        "fill": "#34d399",
+        "radius": 18
+      }
+    },
+    {
+      "id": "footer",
+      "text": "Native layers  ·  Alpha / Luma  ·  Color keyframes  ·  Shared animation library",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 13,
+      "color": "#64748b",
+      "x": 0.5,
+      "y": 0.967,
+      "align": "center",
+      "shadow": false,
+      "kind": "text",
+      "w": 0.95,
+      "h": 0.09
+    }
+  ],
+  "markers": [],
+  "animationLibrary": {
+    "Soft card rise": {
+      "duration": 6,
+      "animations": {
+        "y": [
+          {
+            "t": 0,
+            "v": 0.04,
+            "e": "out"
+          },
+          {
+            "t": 1,
+            "v": 0
+          },
+          {
+            "t": 3,
+            "v": 0,
+            "e": "inOut"
+          },
+          {
+            "t": 4,
+            "v": 0.04,
+            "e": "out"
+          },
+          {
+            "t": 6,
+            "v": 0
+          }
+        ],
+        "opacity": [
+          {
+            "t": 0,
+            "v": 0
+          },
+          {
+            "t": 0.8,
+            "v": 1
+          }
+        ]
+      }
+    }
+  }
+}

@@ -13,7 +13,7 @@ export function stableStringify(v: unknown): string {
   }
   return JSON.stringify(v);
 }
-const same = (a: unknown, b: unknown) => stableStringify(a) === stableStringify(b);
+const same = (a: unknown, b: unknown) => a===b || stableStringify(a) === stableStringify(b);
 
 type ClipEntry = { clip: Record<string, unknown>; trackId: string; index: number; kind: "video" | "audio" };
 function clipMap(t: Timeline): Map<string, ClipEntry> {
@@ -30,8 +30,18 @@ const trackProps = (tr: VideoTrack | AudioTrack) => {
 /** 生成把 a 变成 b 的系统操作序列（applyOps(a, diff, {actor:"system"}) ≡ b） */
 export function diffTimelines(a: Timeline, b: Timeline): Op[] {
   const ops: Op[] = [];
+  if(!same(a.designScenes,b.designScenes))ops.push({op:'putDesignScenes',scenes:b.designScenes??null});
+  if(!same(a.design,b.design))ops.push({op:'putDesign',design:b.design??null});
+  if(!same(a.theme,b.theme))ops.push({op:'putTheme',theme:b.theme??null});
+  for(const name of new Set([...Object.keys(a.components??{}),...Object.keys(b.components??{})]))if(!same(a.components?.[name],b.components?.[name]))ops.push({op:'putComponent',name,component:b.components?.[name]??null});
   if (!same(a.meta, b.meta)) ops.push({ op: "putMeta", meta: b.meta });
 
+  for (const group of new Set([...Object.keys(a.groups ?? {}), ...Object.keys(b.groups ?? {})])) {
+    if (!same(a.groups?.[group], b.groups?.[group])) ops.push({ op: "putGroupState", group, state: b.groups?.[group] ?? null });
+  }
+  for (const name of new Set([...Object.keys(a.animationLibrary ?? {}), ...Object.keys(b.animationLibrary ?? {})])) {
+    if (!same(a.animationLibrary?.[name], b.animationLibrary?.[name])) ops.push({op:"putAnimation", name, animation:b.animationLibrary?.[name] ?? null});
+  }
   // 1) 轨道：新增/属性变化/位置变化 → putTrack（不带片段，片段单独 putClip）
   for (const kind of ["video", "audio"] as const) {
     const aList = (kind === "video" ? a.videoTracks : a.audioTracks) as (VideoTrack | AudioTrack)[];

@@ -1,15 +1,25 @@
+import {cjkSpace,keepNumbers} from './typography.js';
+import { CompositionRenderer } from './renderContext';
 // 元素渲染（预览与导出共用）：字幕/标题/文本框/形状/图片/图标/图表。
 // 坐标约定：x/y 为元素中心在画布上的比例位置，w/h 为盒子占画布宽/高的比例；字号、描边、圆角、内边距为画布像素。
 // 动画：x/y 通道为画布比例偏移；clipL/R/T/B 为擦除；progress 驱动打字机/描边/数字滚动/图表生长。
 import React from "react";
+import { SampleAnchor } from "./TemporalBlur";
 import { Img, useCurrentFrame, useVideoConfig } from "remotion";
 import type { Animations, Fill, Overlay, ShapeSpec } from "./schema";
 import { evalKeyframes, formatNumber, isBoxElement } from "./timeline";
 export { formatNumber };
+import { spatialState } from "./spatial";
+import { maskState } from "./masks";
+import { gradientOverlay } from "./gradient";
+import { glassStyle } from "./glass";
+import { pathMotion } from "./motionPath";
+import { useElementAppearance } from "./appearance";
 import { resolveAnimations } from "./presets";
 import { overlayFontFamily } from "./fonts";
 import { iconByName } from "./icons";
 import { AssetResolver, MediaErrorHandler } from "./renderContext";
+import { SceneView } from './SceneView';
 import { ChartSvg } from "./charts";
 import { PlotSvg } from "./plot";
 import { MathGlyphs, mathSize, useMath } from "./math";
@@ -22,7 +32,8 @@ const outCubic = (f: number) => 1 - Math.pow(1 - f, 3);
 // ---------- 动画通道 ----------
 export interface Motion {
   dx: number; dy: number; scale: number; sx: number; sy: number; rot: number;
-  opacity: number; filter?: string; clipPath?: string; progress: number;
+  spatial?: string; backfaceVisibility?: "visible" | "hidden";
+  mask?: Overlay["mask"]; opacity: number; filter?: string; clipPath?: string; progress: number;
 }
 const FILTER_CH = [["brightness", "brightness", ""], ["contrast", "contrast", ""], ["saturate", "saturate", ""], ["blur", "blur", "px"]] as const;
 
@@ -30,17 +41,25 @@ export function elementMotion(ov: Overlay, anims: Animations | undefined, sec: n
   const ev = (ch: keyof Animations) => evalKeyframes(anims?.[ch], sec);
   const filters: string[] = [];
   for (const [ch, css, unit] of FILTER_CH) {
-    const v = ev(ch);
+    const v = ev(ch) ?? ov.filter?.[ch];
     if (v !== undefined && !(ch === "blur" ? v === 0 : v === 1)) filters.push(css + "(" + v + unit + ")");
   }
+  for (const [key, css, unit] of [["grayscale", "grayscale", ""], ["sepia", "sepia", ""], ["hueRotate", "hue-rotate", "deg"]] as const) {
+    const v = ov.filter?.[key];
+    if (v) filters.push(css + "(" + v + unit + ")");
+  }
   const cl = clamp01(ev("clipL") ?? 0), cr = clamp01(ev("clipR") ?? 0), ct = clamp01(ev("clipT") ?? 0), cb = clamp01(ev("clipB") ?? 0);
+  const spatial = spatialState(ov.transform3d, anims, sec);
+  const path = pathMotion(ov.motionPath, ev("pathProgress") ?? Math.min(1, Math.max(0, sec / Math.max(0.001, ov.endSeconds - ov.startSeconds))), W, H);
   return {
-    dx: (ev("x") ?? 0) * W,
-    dy: (ev("y") ?? 0) * H,
+    mask: maskState(ov.mask, anims, sec),
+    spatial: spatial.transform, backfaceVisibility: spatial.backfaceVisibility,
+    dx: (ev("x") ?? 0) * W + path.x,
+    dy: (ev("y") ?? 0) * H + path.y,
     scale: ev("scale") ?? 1,
     sx: ev("scaleX") ?? 1,
     sy: ev("scaleY") ?? 1,
-    rot: (ov.rotate ?? 0) + (ev("rotation") ?? 0),
+    rot: (ov.rotate ?? 0) + (ev("rotation") ?? 0) + path.angle,
     opacity: clamp01((ov.opacity ?? 1) * (ev("opacity") ?? 1)),
     filter: filters.length ? filters.join(" ") : undefined,
     clipPath: cl || cr || ct || cb ? "inset(" + ct * 100 + "% " + cr * 100 + "% " + cb * 100 + "% " + cl * 100 + "%)" : undefined,
@@ -48,9 +67,10 @@ export function elementMotion(ov: Overlay, anims: Animations | undefined, sec: n
   };
 }
 
-export const motionTransform = (m: Pick<Motion, "dx" | "dy" | "rot" | "scale" | "sx" | "sy">) => {
+export const motionTransform = (m: Pick<Motion, "dx" | "dy" | "rot" | "scale" | "sx" | "sy" | "spatial">) => {
   const parts: string[] = [];
   if (m.dx || m.dy) parts.push("translate(" + m.dx + "px, " + m.dy + "px)");
+  if (m.spatial) parts.push(m.spatial);
   if (m.rot) parts.push("rotate(" + m.rot + "deg)");
   if (m.scale !== 1) parts.push("scale(" + m.scale + ")");
   if (m.sx !== 1 || m.sy !== 1) parts.push("scale(" + m.sx + ", " + m.sy + ")");
@@ -103,8 +123,7 @@ export function displayText(ov: Overlay, progress = 1): string {
 // ---------- 文字体 ----------
 const DEFAULT_SHADOW = "0 2px 8px rgba(0,0,0,0.85)";
 const textShadowCss = (ov: Overlay): string | undefined => {
-  if (ov.shadow === false) return "none";
-  if (ov.shadow) return (ov.shadow.x ?? 0) + "px " + (ov.shadow.y ?? 2) + "px " + ov.shadow.blur + "px " + ov.shadow.color;
+  if (ov.shadow !== undefined) return "none"; // explicit shadows are applied once to the complete element
   // 字幕/标题默认带阴影保证可读；文本框、形状里的文字默认不带（幻灯片常用浅色底）
   return ov.kind === "text" || ov.kind === "shape" || ov.kind === "chart" ? undefined : DEFAULT_SHADOW;
 };
@@ -140,7 +159,7 @@ const unitStyle = (type: string, p: number): React.CSSProperties => {
 
 /** 文字内容：富文本 + 列表 + 打字机（progress）+ 逐字/逐词/逐行入场 */
 export const TextBody: React.FC<{ ov: Overlay; progress: number; sec: number }> = ({ ov, progress, sec }) => {
-  const lines = parseRich(displayText(ov, progress), ov.kind !== "subtitle");
+  const lines = parseRich(displayText(ov, progress), ov.kind !== "subtitle").map(line=>line.map(r=>({...r,text:ov.textEffect||ov.counter||progress<1?r.text:ov.typography?.keepNumbers?keepNumbers(ov.typography.cjkSpacing?cjkSpace(r.text):r.text):ov.typography?.cjkSpacing?cjkSpace(r.text):r.text})));
   const reveal = ov.counter ? 1 : progress;
   const total = reveal >= 1 ? 0 : lines.reduce((n, l) => n + l.reduce((m, r) => m + graphemes(r.text).length, 0), 0);
   const visible = reveal >= 1 ? Infinity : Math.floor(total * reveal + 1e-6);
@@ -185,14 +204,14 @@ export const TextBody: React.FC<{ ov: Overlay; progress: number; sec: number }> 
     const content = runs.length ? runs.flatMap((r, j) => renderRun(r, i + "-" + j)) : ["​"];
     const lineStyle: React.CSSProperties = fx && by === "line" ? unitStyle(fx.type, unitP(unit++)) : {};
     const markerHidden = lineStart >= visible && runs.length > 0;
-    if (!list) return <div key={i} style={{ ...lineStyle, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{content}</div>;
+    if (!list) return <div lang={ov.typography?"zh-CN":undefined} key={i} style={{ ...lineStyle, whiteSpace: "pre-wrap", wordBreak: ov.typography ? "normal" : "break-word", lineBreak: ov.typography ? "strict" : undefined, textWrap: ov.typography?.balance ? "balance" : undefined }}>{content}</div>;
     const marker = list === "number" ? i + 1 + "." : list === "check" ? "✓" : null;
     return (
       <div key={i} style={{ ...lineStyle, display: "flex", alignItems: "flex-start", gap: "0.5em", textAlign: "left" }}>
         <span style={{ flex: "none", minWidth: list === "number" ? "1.4em" : "0.9em", color: accent, fontWeight: 800, opacity: markerHidden ? 0 : 1, display: "flex", justifyContent: "center" }}>
           {marker ?? <span style={{ display: "inline-block", width: "0.38em", height: "0.38em", marginTop: "calc((" + (ov.lineHeight ?? 1.3) + "em - 0.38em) / 2)", borderRadius: "50%", background: accent }} />}
         </span>
-        <span style={{ flex: 1, minWidth: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{content}</span>
+        <span style={{ flex: 1, minWidth: 0, whiteSpace: "pre-wrap", wordBreak: ov.typography ? "normal" : "break-word", lineBreak: ov.typography ? "strict" : undefined, textWrap: ov.typography?.balance ? "balance" : undefined }}>{content}</span>
       </div>
     );
   });
@@ -297,7 +316,8 @@ const PathShape: React.FC<{ spec: ShapeSpec; w: number; h: number; progress: num
   if (!subs.length) return null;
   const drawing = progress < 1;
   const sw = spec.stroke?.width ?? 0;
-  const color = spec.stroke?.color ?? solidOf(spec.fill) ?? "#ffffff";
+  const strokePaint = spec.stroke?.color ?? solidOf(spec.fill) ?? "#ffffff";
+  const color = typeof strokePaint === "string" ? strokePaint : "url(#" + gid + "-stroke)";
   const fillRef = spec.fill === undefined ? "none" : typeof spec.fill === "string" ? spec.fill : "url(#" + gid + ")";
   // 箭头：只给单条开放路径加，路径末端让出箭头长度
   const lw = Math.max(1, sw || 6);
@@ -315,6 +335,7 @@ const PathShape: React.FC<{ spec: ShapeSpec; w: number; h: number; progress: num
   return (
     <svg width={w} height={h} viewBox={"0 0 " + w + " " + h} style={{ position: "absolute", inset: 0, overflow: "visible" }}>
       {spec.fill !== undefined && typeof spec.fill !== "string" && <defs><Paint fill={spec.fill} id={gid} /></defs>}
+      {spec.stroke?.color && typeof spec.stroke.color !== "string" && <defs><Paint fill={spec.stroke.color} id={gid + "-stroke"} /></defs>}
       {spec.fill !== undefined && <path d={d} fill={fillRef} stroke="none" fillOpacity={drawing ? clamp01((progress - 0.55) / 0.45) : undefined} />}
       {(sw > 0 || drawing) && (
         <path d={d} fill="none" stroke={color} strokeWidth={sw > 0 ? sw : 2} strokeLinecap="round" strokeLinejoin="round"
@@ -342,19 +363,22 @@ const dashArray = (dash: string | undefined, sw: number) => (dash === "dashed" ?
 
 export const ShapeSvg: React.FC<{ spec: ShapeSpec; w: number; h: number; progress: number; uid: string }> = ({ spec, w, h, progress, uid }) => {
   const sw = spec.stroke?.width ?? 0;
-  const gid = "dj-fill-" + uid;
+  const instance = React.useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const gid = "dj-fill-" + uid + instance;
   const fillRef = spec.fill === undefined ? "none" : typeof spec.fill === "string" ? spec.fill : "url(#" + gid + ")";
   const drawing = progress < 1;
   if (spec.type === "path") return <PathShape spec={spec} w={w} h={h} progress={progress} gid={gid} />;
   if (isLine(spec.type)) {
     const lw = Math.max(1, sw || 6);
-    const color = spec.stroke?.color ?? solidOf(spec.fill) ?? "#ffffff";
+    const strokePaint = spec.stroke?.color ?? solidOf(spec.fill) ?? "#ffffff";
+  const color = typeof strokePaint === "string" ? strokePaint : "url(#" + gid + "-stroke)";
     const cy = h / 2;
     const hl = spec.type === "line" ? 0 : Math.max(lw * 3, 12), hw = Math.max(lw * 2.2, 9);
     const start = spec.type === "doubleArrow" ? hl : 0, end = w - hl;
     const headOpacity = drawing ? clamp01((progress - 0.85) / 0.15) : 1;
     return (
       <svg width={w} height={h} viewBox={"0 0 " + w + " " + h} style={{ position: "absolute", inset: 0, overflow: "visible" }}>
+        {typeof strokePaint !== "string" && <defs><Paint fill={strokePaint} id={gid + "-stroke"} /></defs>}
         <path d={"M" + f2(start) + "," + f2(cy) + "L" + f2(end) + "," + f2(cy)} stroke={color} strokeWidth={lw} strokeLinecap={spec.type === "line" ? "round" : "butt"} fill="none"
           {...(drawing ? { pathLength: 1, strokeDasharray: 1, strokeDashoffset: 1 - progress } : { strokeDasharray: dashArray(spec.stroke?.dash, lw) })} />
         {spec.type !== "line" && <path opacity={headOpacity} fill={color} d={poly([[w, cy], [w - hl, cy - hw], [w - hl, cy + hw]])} />}
@@ -363,12 +387,14 @@ export const ShapeSvg: React.FC<{ spec: ShapeSpec; w: number; h: number; progres
     );
   }
   const { d, evenOdd } = shapePath(spec, w, h, sw);
-  const outlineColor = spec.stroke?.color ?? solidOf(spec.fill) ?? "#ffffff";
+  const strokePaint = spec.stroke?.color ?? solidOf(spec.fill) ?? "#ffffff";
+  const outlineColor = typeof strokePaint === "string" ? strokePaint : "url(#" + gid + "-stroke)";
   return (
     <svg width={w} height={h} viewBox={"0 0 " + w + " " + h} style={{ position: "absolute", inset: 0, overflow: "visible" }}>
       {spec.fill !== undefined && typeof spec.fill !== "string" && <defs><Paint fill={spec.fill} id={gid} /></defs>}
+      {spec.stroke?.color && typeof spec.stroke.color !== "string" && <defs><Paint fill={spec.stroke.color} id={gid + "-stroke"} /></defs>}
       <path d={d} fill={fillRef} fillRule={evenOdd ? "evenodd" : undefined} fillOpacity={drawing ? clamp01((progress - 0.55) / 0.45) : undefined}
-        stroke={sw > 0 && !drawing ? spec.stroke!.color : "none"} strokeWidth={sw || undefined} strokeLinejoin="round" strokeDasharray={!drawing ? dashArray(spec.stroke?.dash, sw) : undefined} />
+        stroke={sw > 0 && !drawing ? outlineColor : "none"} strokeWidth={sw || undefined} strokeLinejoin="round" strokeDasharray={!drawing ? dashArray(spec.stroke?.dash, sw) : undefined} />
       {drawing && <path d={d} fill="none" stroke={outlineColor} strokeWidth={Math.max(2, sw)} strokeLinejoin="round" pathLength={1} strokeDasharray={1} strokeDashoffset={1 - progress} />}
     </svg>
   );
@@ -382,7 +408,7 @@ const ImageBox: React.FC<{ ov: Overlay }> = ({ ov }) => {
   const radius = spec.radius ?? 0;
   return (
     <div style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: radius }}>
-      <Img src={resolve(spec.src)} onError={reportError ? () => reportError(spec.src) : undefined} style={{ width: "100%", height: "100%", objectFit: spec.fit ?? "cover", display: "block" }} />
+      <Img src={resolve(spec.src)} onError={reportError ? () => reportError(spec.src) : undefined} style={{ width: "100%", height: "100%", objectFit: spec.fit ?? "cover", objectPosition:spec.focus?`${spec.focus.x*100}% ${spec.focus.y*100}%`:undefined, display: "block" }} />
       {spec.border && spec.border.width > 0 && (
         <div style={{ position: "absolute", inset: 0, borderRadius: radius, border: spec.border.width + "px " + (spec.border.dash ?? "solid") + " " + spec.border.color, boxSizing: "border-box" }} />
       )}
@@ -404,6 +430,7 @@ export const IconSvg: React.FC<{ name: string | undefined; color: string; stroke
   );
 };
 
+import { Ambient } from './AmbientEffects';
 // ---------- 元素 ----------
 /** 盒子尺寸（画布像素）：形状/图片/图表缺省 h=w（按像素等宽），图标缺省正方形 */
 export function elementBoxPx(ov: Overlay, W: number, H: number): { w: number; h: number | undefined } {
@@ -412,19 +439,18 @@ export function elementBoxPx(ov: Overlay, W: number, H: number): { w: number; h:
   return { w, h };
 }
 
-const dropShadow = (ov: Overlay): string | undefined =>
-  ov.shadow ? "drop-shadow(" + (ov.shadow.x ?? 0) + "px " + (ov.shadow.y ?? 4) + "px " + ov.shadow.blur + "px " + ov.shadow.color + ")" : undefined;
-
 const BoxElement: React.FC<{ ov: Overlay; m: Motion; sec: number; W: number; H: number }> = ({ ov, m, sec, W, H }) => {
+  const sampleAnchor=React.useContext(SampleAnchor);
   const { w, h } = elementBoxPx(ov, W, H);
   const boxKind = isBoxElement(ov);
-  const filters = [m.filter, boxKind ? dropShadow(ov) : undefined].filter(Boolean).join(" ");
+  const appearance = useElementAppearance(ov, w, h ?? ov.fontSize, h === undefined, m.mask, sec);
+  const filters = [m.filter, appearance.filter].filter(Boolean).join(" ");
   const hasText = (ov.kind === "shape" || !boxKind) && (ov.text?.trim() || ov.counter);
   const valign = ov.valign ?? "middle";
   const bg = !boxKind ? ov.background : undefined;
   const pad = ov.padding ?? (ov.kind === "shape" ? Math.round(Math.min(w, h ?? w) * 0.08) : bg ? bg.padding ?? 12 : 0);
   const textBlock = hasText ? (
-    <div style={{
+    <div data-djian-text="true" style={{
       position: h !== undefined ? "absolute" : "relative", inset: h !== undefined ? 0 : undefined,
       display: "flex", flexDirection: "column", justifyContent: valign === "top" ? "flex-start" : valign === "bottom" ? "flex-end" : "center",
       padding: pad, boxSizing: "border-box", textAlign: ov.align ?? (boxKind ? "center" : "left"), ...textStyle(ov),
@@ -433,41 +459,49 @@ const BoxElement: React.FC<{ ov: Overlay; m: Motion; sec: number; W: number; H: 
     </div>
   ) : null;
   return (
-    <div data-el={ov.id} style={{
+    <div ref={appearance.ref} data-el={sampleAnchor ? ov.id : undefined} style={{
       position: "absolute", left: (ov.x ?? 0.5) * W, top: (ov.y ?? 0.5) * H, width: w, height: h ?? "auto",
       transformOrigin: "0 0", transform: (motionTransform(m) + " translate(-50%, -50%)").trim(),
-      opacity: m.opacity, filter: filters || undefined, clipPath: m.clipPath,
+      ...glassStyle(ov.glass), opacity: m.opacity, filter: filters || undefined, clipPath: m.clipPath, mixBlendMode: appearance.mixBlendMode, maskImage: appearance.maskImage, maskSize: "100% 100%", maskRepeat: "no-repeat", backfaceVisibility: m.backfaceVisibility,
     }}>
+      {appearance.defs}
       {bg && <div style={{ position: "absolute", inset: 0, background: bg.color, opacity: bg.opacity ?? 0.75, borderRadius: bg.radius ?? 8 }} />}
-      {ov.kind === "shape" && ov.shape && <ShapeSvg spec={ov.shape} w={w} h={h ?? w} progress={m.progress} uid={ov.id} />}
+      {ov.kind === "shape" && !ov.composition && !ov.scene3d && !ov.particles && !ov.audioReactive?.waveform && ov.shape && <ShapeSvg spec={gradientOverlay(ov,sec,resolveAnimations(ov,ov.endSeconds-ov.startSeconds)).shape!} w={w} h={h ?? w} progress={m.progress} uid={ov.id} />}
       {ov.kind === "image" && ov.image && <ImageBox ov={ov} />}
       {ov.kind === "icon" && <IconSvg name={ov.icon?.name} color={ov.color} strokeWidth={ov.icon?.strokeWidth} fill={ov.icon?.fill} progress={m.progress} />}
       {ov.kind === "chart" && ov.chart && <ChartSvg ov={ov} spec={ov.chart} w={w} h={h ?? w} progress={m.progress} />}
       {ov.kind === "plot" && ov.plot && <PlotSvg ov={ov} spec={ov.plot} w={w} h={h ?? w} progress={m.progress} sec={sec} unit={Math.min(W, H) / 1080} />}
+      {(ov.particles||ov.audioReactive?.waveform)&&<Ambient ov={ov} w={w} h={h??w} seconds={sec}/> }
+      {ov.composition&&<CompositionBox document={ov.composition.timeline} seconds={ov.composition.inPoint+sec*ov.composition.speed} width={w} height={h??w}/>}
+      {ov.scene3d&&<SceneView scene={ov.scene3d} seconds={sec} width={w} height={h??w}/>}
       {textBlock}
     </div>
   );
 };
 
 // ---------- 公式：text 为 LaTeX，按字号自然大小排版，x/y 为中心 ----------
-const MathElement: React.FC<{ ov: Overlay; m: Motion; W: number; H: number }> = ({ ov, m, W, H }) => {
+const MathElement: React.FC<{ ov: Overlay; m: Motion; W: number; H: number; sec: number }> = ({ ov, m, W, H, sec }) => {
+  const sampleAnchor=React.useContext(SampleAnchor);
   const res = useMath(ov.text);
+  const size = res && !isMathError(res) ? mathSize(res, ov.fontSize) : { w: ov.fontSize * 2, h: ov.fontSize };
+  const appearance = useElementAppearance(ov, size.w, size.h, false, m.mask, sec);
   const frame: React.CSSProperties = {
     position: "absolute", left: (ov.x ?? 0.5) * W, top: (ov.y ?? 0.5) * H,
     transformOrigin: "0 0", transform: (motionTransform(m) + " translate(-50%, -50%)").trim(),
-    opacity: m.opacity, filter: [m.filter, dropShadow(ov)].filter(Boolean).join(" ") || undefined, clipPath: m.clipPath,
+    ...glassStyle(ov.glass), opacity: m.opacity, filter: [m.filter, appearance.filter].filter(Boolean).join(" ") || undefined, clipPath: m.clipPath, mixBlendMode: appearance.mixBlendMode, maskImage: appearance.maskImage, maskSize: "100% 100%", maskRepeat: "no-repeat", backfaceVisibility: m.backfaceVisibility,
   };
-  if (!res) return <div data-el={ov.id} style={{ ...frame, width: ov.fontSize * 2, height: ov.fontSize }} />;
+  if (!res) return <div data-el={sampleAnchor ? ov.id : undefined} style={{ ...frame, width: ov.fontSize * 2, height: ov.fontSize }} />;
   if (isMathError(res)) {
     return (
-      <div data-el={ov.id} style={{ ...frame, color: "#f87171", font: Math.max(14, ov.fontSize * 0.4) + "px monospace", border: "2px dashed #f87171", padding: "0.3em 0.6em", borderRadius: 8, background: "rgba(0,0,0,0.6)", whiteSpace: "pre" }}>
+      <div data-el={sampleAnchor ? ov.id : undefined} style={{ ...frame, color: "#f87171", font: Math.max(14, ov.fontSize * 0.4) + "px monospace", border: "2px dashed #f87171", padding: "0.3em 0.6em", borderRadius: 8, background: "rgba(0,0,0,0.6)", whiteSpace: "pre" }}>
         {ov.text + "\n" + res.error}
       </div>
     );
   }
   const { w, h } = mathSize(res, ov.fontSize);
   return (
-    <div data-el={ov.id} style={{ ...frame, width: w, height: h }}>
+    <div data-el={sampleAnchor ? ov.id : undefined} style={{ ...frame, width: w, height: h }}>
+      {appearance.defs}
       <svg width={w} height={h} viewBox={res.vb.join(" ")} style={{ position: "absolute", inset: 0, overflow: "visible" }}>
         <MathGlyphs data={res} color={ov.color} progress={m.progress} unitPx={ov.fontSize / 1000} fontFamily={overlayFontFamily(ov.fontFamily)} />
       </svg>
@@ -484,6 +518,7 @@ const LEGACY_POS: Record<string, React.CSSProperties> = {
 const justify = (align: string) => (align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center");
 
 const LegacyText: React.FC<{ ov: Overlay; m: Motion; sec: number; W: number; H: number }> = ({ ov, m, sec, W, H }) => {
+  const sampleAnchor=React.useContext(SampleAnchor);
   const free = ov.x !== undefined || ov.y !== undefined;
   const align = ov.align ?? "center";
   const width = (ov.maxWidth ?? 0.9) * 100;
@@ -492,17 +527,19 @@ const LegacyText: React.FC<{ ov: Overlay; m: Motion; sec: number; W: number; H: 
     : { position: "absolute", ...LEGACY_POS[ov.position], display: "flex", justifyContent: justify(align), paddingInline: (100 - width) / 2 + "%", textAlign: align };
   const bg = ov.background;
   const pad = bg ? bg.padding ?? 12 : 0;
+  const appearance = useElementAppearance(ov, W * (ov.maxWidth ?? 0.9), ov.fontSize, true, m.mask, sec);
   return (
     <div style={outer}>
-      <div data-el={ov.id} style={{
+      <div ref={appearance.ref} data-el={sampleAnchor ? ov.id : undefined} style={{
         position: "relative", display: "inline-block", maxWidth: "100%",
         ...textStyle(ov),
         padding: bg ? pad + "px " + Math.round(pad * 1.4) + "px" : undefined,
-        opacity: m.opacity, filter: m.filter, clipPath: m.clipPath,
+        ...glassStyle(ov.glass), opacity: m.opacity, filter: [m.filter, appearance.filter].filter(Boolean).join(" ") || undefined, clipPath: m.clipPath, mixBlendMode: appearance.mixBlendMode, maskImage: appearance.maskImage, maskSize: "100% 100%", maskRepeat: "no-repeat", backfaceVisibility: m.backfaceVisibility,
         transform: motionTransform(m) || undefined,
       }}>
+        {appearance.defs}
         {bg && <span aria-hidden style={{ position: "absolute", inset: 0, background: bg.color, opacity: bg.opacity ?? 0.75, borderRadius: bg.radius ?? 8, zIndex: -1 }} />}
-        <div style={{ position: "relative" }}><TextBody ov={ov} progress={m.progress} sec={sec} /></div>
+        <div data-djian-text="true" style={{ position: "relative" }}><TextBody ov={ov} progress={m.progress} sec={sec} /></div>
       </div>
     </div>
   );
@@ -514,7 +551,9 @@ export const ElementView: React.FC<{ ov: Overlay }> = ({ ov }) => {
   if (ov.kind === "camera") return null;
   const anims = resolveAnimations(ov, ov.endSeconds - ov.startSeconds);
   const m = elementMotion(ov, anims, sec, W, H);
-  if (ov.kind === "math") return <MathElement ov={ov} m={m} W={W} H={H} />;
+  if (ov.kind === "math") return <MathElement ov={ov} m={m} W={W} H={H} sec={sec} />;
   if (isBoxElement(ov) || ov.w !== undefined) return <BoxElement ov={ov} m={m} sec={sec} W={W} H={H} />;
   return <LegacyText ov={ov} m={m} sec={sec} W={W} H={H} />;
 };
+
+function CompositionBox(props:{document:string;seconds:number;width:number;height:number}){const Renderer=React.useContext(CompositionRenderer);return Renderer?<Renderer {...props}/>:null;}

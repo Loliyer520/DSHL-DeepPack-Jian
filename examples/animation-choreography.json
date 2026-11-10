@@ -1,0 +1,572 @@
+{
+  "meta": {
+    "width": 960,
+    "height": 640,
+    "fps": 30,
+    "background": "#0b1222"
+  },
+  "groups": {
+    "steps": {
+      "stagger": {
+        "interval": 0.32,
+        "preset": "springIn",
+        "duration": 1
+      }
+    }
+  },
+  "overlays": [
+    {
+      "id": "title",
+      "kind": "text",
+      "text": "ANIMATION CHOREOGRAPHY",
+      "x": 0.5,
+      "y": 0.075,
+      "w": 0.9,
+      "fontSize": 32,
+      "color": "#e2e8f0",
+      "align": "center",
+      "shadow": false,
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "fontWeight": 800
+    },
+    {
+      "id": "subtitle",
+      "kind": "text",
+      "text": "Editable motion · D剪 2.4.0",
+      "x": 0.5,
+      "y": 0.135,
+      "w": 0.9,
+      "fontSize": 15,
+      "color": "#64748b",
+      "align": "center",
+      "shadow": false,
+      "startSeconds": 0,
+      "endSeconds": 6
+    },
+    {
+      "id": "panel0",
+      "kind": "shape",
+      "text": "",
+      "x": 0.255,
+      "y": 0.35,
+      "w": 0.46,
+      "h": 0.34,
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "shape": {
+        "type": "rect",
+        "fill": "#111e33",
+        "radius": 20,
+        "stroke": {
+          "color": "#24334c",
+          "width": 2
+        }
+      }
+    },
+    {
+      "id": "panel1",
+      "kind": "shape",
+      "text": "",
+      "x": 0.745,
+      "y": 0.35,
+      "w": 0.46,
+      "h": 0.34,
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "shape": {
+        "type": "rect",
+        "fill": "#111e33",
+        "radius": 20,
+        "stroke": {
+          "color": "#24334c",
+          "width": 2
+        }
+      }
+    },
+    {
+      "id": "panel2",
+      "kind": "shape",
+      "text": "",
+      "x": 0.255,
+      "y": 0.74,
+      "w": 0.46,
+      "h": 0.34,
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "shape": {
+        "type": "rect",
+        "fill": "#111e33",
+        "radius": 20,
+        "stroke": {
+          "color": "#24334c",
+          "width": 2
+        }
+      }
+    },
+    {
+      "id": "panel3",
+      "kind": "shape",
+      "text": "",
+      "x": 0.745,
+      "y": 0.74,
+      "w": 0.46,
+      "h": 0.34,
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "shape": {
+        "type": "rect",
+        "fill": "#111e33",
+        "radius": 20,
+        "stroke": {
+          "color": "#24334c",
+          "width": 2
+        }
+      }
+    },
+    {
+      "id": "label1",
+      "kind": "text",
+      "text": "01   ANIMATED MASK",
+      "x": 0.255,
+      "y": 0.23,
+      "w": 0.4,
+      "fontSize": 16,
+      "color": "#67e8f9",
+      "align": "center",
+      "shadow": false,
+      "startSeconds": 0,
+      "endSeconds": 6
+    },
+    {
+      "id": "label2",
+      "kind": "text",
+      "text": "02   PARENT + CONNECTOR",
+      "x": 0.745,
+      "y": 0.23,
+      "w": 0.43,
+      "fontSize": 16,
+      "color": "#c4b5fd",
+      "align": "center",
+      "shadow": false,
+      "startSeconds": 0,
+      "endSeconds": 6
+    },
+    {
+      "id": "label3",
+      "kind": "text",
+      "text": "03   STAGGERED ENTRANCE",
+      "x": 0.255,
+      "y": 0.62,
+      "w": 0.43,
+      "fontSize": 16,
+      "color": "#93c5fd",
+      "align": "center",
+      "shadow": false,
+      "startSeconds": 0,
+      "endSeconds": 6
+    },
+    {
+      "id": "label4",
+      "kind": "text",
+      "text": "04   PHYSICAL SPRING",
+      "x": 0.745,
+      "y": 0.62,
+      "w": 0.43,
+      "fontSize": 16,
+      "color": "#6ee7b7",
+      "align": "center",
+      "shadow": false,
+      "startSeconds": 0,
+      "endSeconds": 6
+    },
+    {
+      "id": "reveal",
+      "kind": "shape",
+      "text": "REVEAL",
+      "x": 0.255,
+      "y": 0.365,
+      "w": 0.36,
+      "h": 0.16,
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "shape": {
+        "type": "rect",
+        "fill": "#0891b2",
+        "radius": 16
+      },
+      "fontSize": 38,
+      "fontWeight": 800,
+      "color": "#ecfeff",
+      "mask": {
+        "type": "ellipse",
+        "feather": 16
+      },
+      "animations": {
+        "maskW": [
+          {
+            "t": 0,
+            "v": 0
+          },
+          {
+            "t": 1.4,
+            "v": 2,
+            "e": "inOut"
+          },
+          {
+            "t": 4.4,
+            "v": 2
+          },
+          {
+            "t": 6,
+            "v": 0,
+            "e": "inOut"
+          }
+        ],
+        "maskH": [
+          {
+            "t": 0,
+            "v": 0
+          },
+          {
+            "t": 1.4,
+            "v": 2,
+            "e": "inOut"
+          },
+          {
+            "t": 4.4,
+            "v": 2
+          },
+          {
+            "t": 6,
+            "v": 0,
+            "e": "inOut"
+          }
+        ]
+      }
+    },
+    {
+      "id": "connector",
+      "kind": "shape",
+      "text": "",
+      "x": 0.75,
+      "y": 0.35,
+      "w": 0.2,
+      "h": 0.012,
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "shape": {
+        "type": "arrow",
+        "fill": "#a78bfa"
+      },
+      "connector": {
+        "from": "leader",
+        "to": "fixed",
+        "fromAnchor": "right",
+        "toAnchor": "left"
+      }
+    },
+    {
+      "id": "fixed",
+      "kind": "shape",
+      "text": "",
+      "x": 0.9,
+      "y": 0.36,
+      "w": 0.032,
+      "h": 0.048,
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "shape": {
+        "type": "ellipse",
+        "fill": "#a78bfa"
+      }
+    },
+    {
+      "id": "leader",
+      "kind": "shape",
+      "text": "",
+      "x": 0.6,
+      "y": 0.36,
+      "w": 0.042,
+      "h": 0.063,
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "shape": {
+        "type": "ellipse",
+        "fill": "#38bdf8"
+      },
+      "motionPath": {
+        "path": "M 0 0 Q 9 -17 18 0"
+      },
+      "animations": {
+        "pathProgress": [
+          {
+            "t": 0,
+            "v": 0
+          },
+          {
+            "t": 3,
+            "v": 1,
+            "e": "inOut"
+          },
+          {
+            "t": 6,
+            "v": 0,
+            "e": "inOut"
+          }
+        ]
+      }
+    },
+    {
+      "id": "follower",
+      "kind": "text",
+      "text": "FOLLOW",
+      "x": 0.6,
+      "y": 0.425,
+      "w": 0.14,
+      "fontSize": 14,
+      "color": "#c4b5fd",
+      "align": "center",
+      "shadow": false,
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "follow": {
+        "target": "leader"
+      }
+    },
+    {
+      "id": "step0",
+      "kind": "shape",
+      "text": "1",
+      "x": 0.105,
+      "y": 0.75,
+      "w": 0.075,
+      "h": 0.12,
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "shape": {
+        "type": "rect",
+        "fill": "#1d4ed8",
+        "radius": 16
+      },
+      "fontSize": 32,
+      "fontWeight": 800,
+      "color": "#fff",
+      "group": "steps",
+      "shadow": {
+        "color": "#000",
+        "opacity": 0.25,
+        "blur": 14,
+        "y": 8
+      }
+    },
+    {
+      "id": "step1",
+      "kind": "shape",
+      "text": "2",
+      "x": 0.205,
+      "y": 0.75,
+      "w": 0.075,
+      "h": 0.12,
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "shape": {
+        "type": "rect",
+        "fill": "#2563eb",
+        "radius": 16
+      },
+      "fontSize": 32,
+      "fontWeight": 800,
+      "color": "#fff",
+      "group": "steps",
+      "shadow": {
+        "color": "#000",
+        "opacity": 0.25,
+        "blur": 14,
+        "y": 8
+      }
+    },
+    {
+      "id": "step2",
+      "kind": "shape",
+      "text": "3",
+      "x": 0.305,
+      "y": 0.75,
+      "w": 0.075,
+      "h": 0.12,
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "shape": {
+        "type": "rect",
+        "fill": "#3b82f6",
+        "radius": 16
+      },
+      "fontSize": 32,
+      "fontWeight": 800,
+      "color": "#fff",
+      "group": "steps",
+      "shadow": {
+        "color": "#000",
+        "opacity": 0.25,
+        "blur": 14,
+        "y": 8
+      }
+    },
+    {
+      "id": "step3",
+      "kind": "shape",
+      "text": "4",
+      "x": 0.405,
+      "y": 0.75,
+      "w": 0.075,
+      "h": 0.12,
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "shape": {
+        "type": "rect",
+        "fill": "#60a5fa",
+        "radius": 16
+      },
+      "fontSize": 32,
+      "fontWeight": 800,
+      "color": "#fff",
+      "group": "steps",
+      "shadow": {
+        "color": "#000",
+        "opacity": 0.25,
+        "blur": 14,
+        "y": 8
+      }
+    },
+    {
+      "id": "rail",
+      "kind": "shape",
+      "text": "",
+      "x": 0.75,
+      "y": 0.755,
+      "w": 0.33,
+      "h": 0.006,
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "shape": {
+        "type": "rect",
+        "fill": "#334155"
+      }
+    },
+    {
+      "id": "endpoint",
+      "kind": "shape",
+      "text": "",
+      "x": 0.87,
+      "y": 0.755,
+      "w": 0.006,
+      "h": 0.06,
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "shape": {
+        "type": "rect",
+        "fill": "#64748b"
+      }
+    },
+    {
+      "id": "spring",
+      "kind": "shape",
+      "text": "",
+      "x": 0.6,
+      "y": 0.755,
+      "w": 0.045,
+      "h": 0.068,
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "shape": {
+        "type": "ellipse",
+        "fill": "#34d399"
+      },
+      "animations": {
+        "x": [
+          {
+            "t": 0,
+            "v": 0,
+            "e": {
+              "type": "spring",
+              "stiffness": 140,
+              "damping": 10,
+              "mass": 1
+            }
+          },
+          {
+            "t": 2,
+            "v": 0.27,
+            "e": {
+              "type": "spring",
+              "stiffness": 90,
+              "damping": 9
+            }
+          },
+          {
+            "t": 4,
+            "v": 0,
+            "e": {
+              "type": "spring",
+              "stiffness": 140,
+              "damping": 10,
+              "mass": 1
+            }
+          },
+          {
+            "t": 6,
+            "v": 0.27
+          }
+        ]
+      },
+      "shadow": {
+        "color": "#34d399",
+        "opacity": 0.4,
+        "blur": 15,
+        "y": 0
+      }
+    },
+    {
+      "id": "maskhint",
+      "kind": "text",
+      "text": "Reveal without blurring the content",
+      "x": 0.255,
+      "y": 0.47,
+      "w": 0.42,
+      "fontSize": 13,
+      "color": "#64748b",
+      "align": "center",
+      "shadow": false,
+      "startSeconds": 0,
+      "endSeconds": 6
+    },
+    {
+      "id": "springhint",
+      "kind": "text",
+      "text": "Stiffness 140  /  Damping 10",
+      "x": 0.745,
+      "y": 0.845,
+      "w": 0.4,
+      "fontSize": 13,
+      "color": "#64748b",
+      "align": "center",
+      "shadow": false,
+      "startSeconds": 0,
+      "endSeconds": 6
+    },
+    {
+      "id": "footer",
+      "kind": "text",
+      "text": "Native elements · Keyframes · Shared preview and export",
+      "x": 0.5,
+      "y": 0.958,
+      "w": 0.9,
+      "fontSize": 13,
+      "color": "#64748b",
+      "align": "center",
+      "shadow": false,
+      "startSeconds": 0,
+      "endSeconds": 6
+    }
+  ]
+}

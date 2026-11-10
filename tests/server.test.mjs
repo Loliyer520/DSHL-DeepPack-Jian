@@ -49,14 +49,16 @@ test('ops advance the revision, return receipts and readable summaries', async (
   assert.equal(noop.body.rev, 1, 'ineffective batches do not create revisions');
 });
 
-test('stale baseRev still applies but reports overlap with other actors', async () => {
+test('stale baseRev distinguishes edits to different fields from actual conflicts', async () => {
   const pid = await bind('sess-conflict');
   await api('POST', '/api/p/' + pid + '/ops', { ops: [{ op: 'addOverlay', id: 'x', text: 'a', startSeconds: 0, endSeconds: 1 }], clientId: 'panel' });
   await api('POST', '/api/p/' + pid + '/ops', { ops: [{ op: 'updateOverlay', id: 'x', patch: { text: 'AI 改的' } }], actor: 'ai', clientId: 'ai' });
   const r = await api('POST', '/api/p/' + pid + '/ops', { ops: [{ op: 'updateOverlay', id: 'x', patch: { color: '#ff0000' } }], baseRev: 1, clientId: 'panel' });
   assert.equal(r.body.rev, 3);
-  assert.equal(r.body.conflicts.length, 1);
-  assert.equal(r.body.conflicts[0].actor, 'ai');
+  assert.equal(r.body.conflicts.length, 0);
+  const same=await api('POST','/api/p/'+pid+'/ops',{ops:[{op:'updateOverlay',id:'x',patch:{text:'用户改的'}}],baseRev:1,clientId:'panel'});
+  assert.equal(same.body.conflicts.length,1);
+  assert.equal(same.body.conflicts[0].actor,'ai');
 });
 
 test('SSE delivers live patches and replays from a revision', async () => {

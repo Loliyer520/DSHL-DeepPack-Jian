@@ -1,0 +1,408 @@
+{
+  "meta": {
+    "width": 960,
+    "height": 640,
+    "fps": 30,
+    "background": "#0b1222"
+  },
+  "overlays": [
+    {
+      "id": "title",
+      "kind": "text",
+      "text": "SURFACE & MOTION",
+      "x": 0.5,
+      "y": 0.09,
+      "w": 0.9,
+      "fontSize": 38,
+      "color": "#e2e8f0",
+      "align": "center",
+      "shadow": false,
+      "startSeconds": 0,
+      "endSeconds": 5
+    },
+    {
+      "id": "subtitle",
+      "kind": "text",
+      "text": "D剪 2.5.0 · Native effects, editable curves",
+      "x": 0.5,
+      "y": 0.16,
+      "w": 0.9,
+      "fontSize": 17,
+      "color": "#e2e8f0",
+      "align": "center",
+      "shadow": false,
+      "startSeconds": 0,
+      "endSeconds": 5
+    },
+    {
+      "id": "inset",
+      "kind": "shape",
+      "text": "",
+      "x": 0.26,
+      "y": 0.4,
+      "w": 0.39,
+      "h": 0.3,
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "fill": "#182b46",
+        "radius": 22,
+        "stroke": {
+          "color": {
+            "type": "linear",
+            "angle": 25,
+            "stops": [
+              {
+                "offset": 0,
+                "color": "#22d3ee"
+              },
+              {
+                "offset": 1,
+                "color": "#a78bfa"
+              }
+            ]
+          },
+          "width": 5
+        }
+      },
+      "shadow": [
+        {
+          "color": "#000",
+          "blur": 18,
+          "x": 8,
+          "y": 8,
+          "opacity": 0.8,
+          "inset": true
+        },
+        {
+          "color": "#67e8f9",
+          "blur": 12,
+          "x": -4,
+          "y": -4,
+          "opacity": 0.15,
+          "inset": true
+        }
+      ]
+    },
+    {
+      "id": "insetLabel",
+      "kind": "text",
+      "text": "INSET + GRADIENT STROKE",
+      "x": 0.26,
+      "y": 0.4,
+      "w": 0.37,
+      "fontSize": 19,
+      "color": "#e2e8f0",
+      "align": "center",
+      "shadow": false,
+      "startSeconds": 0,
+      "endSeconds": 5
+    },
+    {
+      "id": "stripe0",
+      "kind": "shape",
+      "text": "",
+      "x": 0.56,
+      "y": 0.4,
+      "w": 0.028,
+      "h": 0.31,
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "fill": "#0891b2",
+        "radius": 22
+      },
+      "rotate": 20
+    },
+    {
+      "id": "stripe1",
+      "kind": "shape",
+      "text": "",
+      "x": 0.6070000000000001,
+      "y": 0.4,
+      "w": 0.028,
+      "h": 0.31,
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "fill": "#a78bfa",
+        "radius": 22
+      },
+      "rotate": 20
+    },
+    {
+      "id": "stripe2",
+      "kind": "shape",
+      "text": "",
+      "x": 0.654,
+      "y": 0.4,
+      "w": 0.028,
+      "h": 0.31,
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "fill": "#0891b2",
+        "radius": 22
+      },
+      "rotate": 20
+    },
+    {
+      "id": "stripe3",
+      "kind": "shape",
+      "text": "",
+      "x": 0.7010000000000001,
+      "y": 0.4,
+      "w": 0.028,
+      "h": 0.31,
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "fill": "#a78bfa",
+        "radius": 22
+      },
+      "rotate": 20
+    },
+    {
+      "id": "stripe4",
+      "kind": "shape",
+      "text": "",
+      "x": 0.748,
+      "y": 0.4,
+      "w": 0.028,
+      "h": 0.31,
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "fill": "#0891b2",
+        "radius": 22
+      },
+      "rotate": 20
+    },
+    {
+      "id": "stripe5",
+      "kind": "shape",
+      "text": "",
+      "x": 0.795,
+      "y": 0.4,
+      "w": 0.028,
+      "h": 0.31,
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "fill": "#a78bfa",
+        "radius": 22
+      },
+      "rotate": 20
+    },
+    {
+      "id": "stripe6",
+      "kind": "shape",
+      "text": "",
+      "x": 0.8420000000000001,
+      "y": 0.4,
+      "w": 0.028,
+      "h": 0.31,
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "fill": "#0891b2",
+        "radius": 22
+      },
+      "rotate": 20
+    },
+    {
+      "id": "stripe7",
+      "kind": "shape",
+      "text": "",
+      "x": 0.889,
+      "y": 0.4,
+      "w": 0.028,
+      "h": 0.31,
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "fill": "#a78bfa",
+        "radius": 22
+      },
+      "rotate": 20
+    },
+    {
+      "id": "glass",
+      "kind": "shape",
+      "text": "",
+      "x": 0.735,
+      "y": 0.4,
+      "w": 0.39,
+      "h": 0.28,
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "fill": "transparent",
+        "radius": 22
+      },
+      "glass": {
+        "blur": 16,
+        "opacity": 0.15,
+        "radius": 22,
+        "borderOpacity": 0.4
+      },
+      "shadow": {
+        "color": "#000",
+        "blur": 25,
+        "y": 12,
+        "opacity": 0.35
+      }
+    },
+    {
+      "id": "glassLabel",
+      "kind": "text",
+      "text": "REAL BACKDROP GLASS",
+      "x": 0.735,
+      "y": 0.4,
+      "w": 0.38,
+      "fontSize": 19,
+      "color": "#e2e8f0",
+      "align": "center",
+      "shadow": false,
+      "startSeconds": 0,
+      "endSeconds": 5
+    },
+    {
+      "id": "motionLabel",
+      "kind": "text",
+      "text": "SHARED ELEMENT · BEZIER EASING",
+      "x": 0.5,
+      "y": 0.64,
+      "w": 0.9,
+      "fontSize": 18,
+      "color": "#e2e8f0",
+      "align": "center",
+      "shadow": false,
+      "startSeconds": 0,
+      "endSeconds": 5
+    },
+    {
+      "id": "rail",
+      "kind": "shape",
+      "text": "",
+      "x": 0.5,
+      "y": 0.79,
+      "w": 0.82,
+      "h": 0.006,
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "fill": "#334155",
+        "radius": 22
+      }
+    },
+    {
+      "id": "cardA",
+      "kind": "shape",
+      "text": "MOVE",
+      "x": 0.18,
+      "y": 0.79,
+      "w": 0.16,
+      "h": 0.15,
+      "startSeconds": 0,
+      "endSeconds": 2,
+      "shape": {
+        "type": "rect",
+        "fill": {
+          "type": "linear",
+          "angle": 25,
+          "stops": [
+            {
+              "offset": 0,
+              "color": "#22d3ee"
+            },
+            {
+              "offset": 1,
+              "color": "#a78bfa"
+            }
+          ]
+        },
+        "radius": 22
+      },
+      "fontSize": 23,
+      "fontWeight": 700,
+      "color": "#0b1222",
+      "shared": {
+        "key": "demo"
+      }
+    },
+    {
+      "id": "cardB",
+      "kind": "shape",
+      "text": "MOVE",
+      "x": 0.8,
+      "y": 0.79,
+      "w": 0.23,
+      "h": 0.2,
+      "startSeconds": 2,
+      "endSeconds": 5,
+      "shape": {
+        "type": "rect",
+        "fill": {
+          "type": "linear",
+          "angle": 25,
+          "stops": [
+            {
+              "offset": 0,
+              "color": "#22d3ee"
+            },
+            {
+              "offset": 1,
+              "color": "#a78bfa"
+            }
+          ]
+        },
+        "radius": 22
+      },
+      "fontSize": 23,
+      "fontWeight": 700,
+      "color": "#0b1222",
+      "shared": {
+        "key": "demo",
+        "duration": 1.5,
+        "ease": [
+          0.4,
+          0,
+          0.2,
+          1
+        ]
+      },
+      "shadow": {
+        "color": "#22d3ee",
+        "blur": 25,
+        "opacity": 0.3,
+        "y": 5
+      }
+    },
+    {
+      "id": "footer",
+      "kind": "text",
+      "text": "Inner shadows · Gradient outlines · Frosted glass · Shared transitions",
+      "x": 0.5,
+      "y": 0.95,
+      "w": 0.96,
+      "fontSize": 15,
+      "color": "#e2e8f0",
+      "align": "center",
+      "shadow": false,
+      "startSeconds": 0,
+      "endSeconds": 5
+    }
+  ]
+}

@@ -8,6 +8,10 @@ const fx = (c) => [
   c.volume !== undefined && c.volume !== 1 ? '音量 ' + pct(c.volume) : '',
   c.muted ? '静音' : '',
   c.filter ? '滤镜 ' + Object.entries(c.filter).map(([k, v]) => k + '=' + v).join(',') : '',
+  c.transform3d ? '3D ' + Object.entries(c.transform3d).map(([k,v]) => k + '=' + v).join(',') : '',
+  c.trackMatte ? '轨道遮罩 ' + c.trackMatte.source + ' ' + (c.trackMatte.mode ?? 'alpha') + (c.trackMatte.invert ? ' 反向' : '') : '',
+  c.mask ? '遮罩 ' + c.mask.type + (c.mask.feather ? ' 羽化' + c.mask.feather + 'px' : '') + (c.mask.invert ? ' 反向' : '') : '',
+  c.motionPath ? '路径运动' + (c.motionPath.autoRotate ? ' 自动转向' : '') : '',
   c.effects?.length ? '预设 ' + c.effects.map((e) => e.preset).join('+') : '',
   c.animations ? '关键帧 ' + Object.keys(c.animations).join('/') : '',
   c.fadeIn ? '淡入 ' + s(c.fadeIn) : '', c.fadeOut ? '淡出 ' + s(c.fadeOut) : '',
@@ -16,18 +20,41 @@ const fx = (c) => [
 
 const KIND = { subtitle: '字幕', title: '标题', text: '文本', shape: '形状', image: '图片', icon: '图标', chart: '图表' };
 const short = (v, n = 24) => { const t = String(v ?? '').replace(/\n/g, '⏎'); return t.length > n ? t.slice(0, n) + '…' : t; };
-const fillText = (f) => (!f ? '' : typeof f === 'string' ? f : (f.type === 'radial' ? '径向渐变 ' : '渐变 ') + f.stops.map((x) => x.color).join('→'));
+const fillText = (f) => (!f ? '' : typeof f === 'string' ? f : (f.type === 'radial' ? '径向渐变 ' : '渐变 ') + f.stops.map((x) => x.color).join('→') + (f.keyframes?.length ? ' 动态' + f.keyframes.length + '帧' : ''));
 function elementLine(o, z) {
   const kind = o.kind ?? 'subtitle';
   const what = kind === 'shape' ? '形状·' + (o.shape?.type ?? 'rect') : kind === 'image' ? '图片·' + name(o.image?.src ?? '') : kind === 'icon' ? '图标·' + (o.icon?.name ?? '?') : kind === 'chart' ? '图表·' + (o.chart?.type ?? '') + ' ' + (o.chart?.data ?? []).map((d) => (d.label ? d.label + '=' : '') + d.value).join(',') : KIND[kind] ?? kind;
   const box = o.w !== undefined ? '(' + pct(o.x ?? 0.5) + ',' + pct(o.y ?? 0.5) + ') ' + pct(o.w) + '×' + (o.h !== undefined ? pct(o.h) : '自动') : o.x !== undefined || o.y !== undefined ? '位置 (' + pct(o.x ?? 0.5) + ',' + pct(o.y ?? 0.85) + ')' : { top: '顶部', center: '居中', bottom: '底部' }[o.position];
   const style = [
+    o.designLocks?.length ? '设计保护 '+o.designLocks.join('/') : '',
+    o.designRole ? '设计角色 '+o.designRole : '',
+    o.typography ? '中文排版' : '',
     o.text?.trim() ? '「' + short(o.text, 40) + '」' : '',
     box, o.rotate ? '旋转 ' + o.rotate + '°' : '', o.opacity !== undefined ? '不透明 ' + pct(o.opacity) : '',
     o.text?.trim() || kind === 'chart' ? o.fontSize + 'px' : '', o.color !== '#ffffff' ? o.color : '', o.fontFamily ?? '',
-    o.shape ? fillText(o.shape.fill) + (o.shape.stroke ? ' 描边' + o.shape.stroke.color : '') + (o.shape.radius ? ' 圆角' + o.shape.radius : '') : '',
+    o.shape ? fillText(o.shape.fill) + (o.shape.stroke ? ' 描边' + fillText(o.shape.stroke.color) : '') + (o.shape.radius ? ' 圆角' + o.shape.radius : '') : '',
     o.list ? '列表 ' + o.list : '', o.counter ? '数字 ' + o.counter.from + '→' + o.counter.to : '', o.textEffect ? '逐' + ({ char: '字', word: '词', line: '行' }[o.textEffect.by ?? 'char']) + ' ' + o.textEffect.type : '',
-    o.stroke ? '文字描边' : '', o.background ? '底框' : '', o.effects?.length ? '预设 ' + o.effects.map((e) => e.preset).join('+') : '', o.animations ? '关键帧 ' + Object.keys(o.animations).join('/') : '',
+    o.shadow ? '阴影 ' + (Array.isArray(o.shadow) ? o.shadow : [o.shadow]).map((s) => (s.inset ? '内阴影 ' : '') + s.color + ' 模糊' + s.blur + ' 偏移(' + (s.x ?? 0) + ',' + (s.y ?? (!o.kind || ['subtitle', 'title', 'text'].includes(o.kind) ? 2 : 4)) + ')' + (s.opacity !== undefined ? ' ' + pct(s.opacity) : '') + (s.spread ? ' 扩展' + s.spread : '')).join(' / ') : o.shadow === false ? '无阴影' : '',
+    o.filter ? '滤镜 ' + Object.entries(o.filter).map(([k, v]) => k + '=' + v).join(',') : '',
+    o.transform3d ? '3D ' + Object.entries(o.transform3d).map(([k,v]) => k + '=' + v).join(',') : '',
+    o.follow ? '跟随 ' + o.follow.target + (o.follow.rotation ? ' 旋转' : '') + (o.follow.scale ? ' 缩放' : '') : '',
+    o.connector ? '连接 ' + o.connector.from + '→' + o.connector.to : '',
+    o.trackMatte ? '轨道遮罩 ' + o.trackMatte.source + ' ' + (o.trackMatte.mode ?? 'alpha') + (o.trackMatte.invert ? ' 反向' : '') : '',
+    o.scene3d ? '3D场景 '+o.scene3d.objects.length+'对象' : '',
+    o.styleRole ? '主题角色 '+o.styleRole : '',
+    o.cues?.length ? '动画编排 '+o.cues.length+'段' : '',
+    o.sweep ? '扫光' : '',
+    o.particles ? '粒子 '+o.particles.preset+' / '+(o.particles.count??100) : '',
+    o.audioReactive ? '音频驱动 '+o.audioReactive.source+' → '+(o.audioReactive.channel??'scale') : '',
+    o.motionBlur ? '运动模糊 '+(o.motionBlur.shutterAngle??180)+'° / '+(o.motionBlur.samples??8)+'采样' : '',
+    o.autoSize ? '自动内容尺寸' : '',
+    o.layoutExclude ? '排除自动布局' : '',
+    o.mask ? '遮罩 ' + o.mask.type + ' 羽化' + (o.mask.feather ?? 0) + 'px' : '',
+    o.glass ? '毛玻璃 模糊' + (o.glass.blur ?? 16) : '',
+    o.shared ? '共享元素 ' + o.shared.key : '',
+    o.motionPath ? '路径运动' + (o.motionPath.autoRotate ? ' 自动转向' : '') : '',
+    o.blendMode ? '混合 ' + o.blendMode : '',
+    o.stroke ? '文字描边'  : '', o.background ? '底框' : '', o.effects?.length ? '预设 ' + o.effects.map((e) => e.preset).join('+') : '', o.animations ? '关键帧 ' + Object.keys(o.animations).join('/') : '',
   ].filter(Boolean).join(' ');
   return o.id + ' 层' + z + ' ' + s(o.startSeconds) + '–' + s(o.endSeconds) + ' ' + what + (o.name ? '「' + o.name + '」' : '') + ' ' + style;
 }
@@ -36,6 +63,8 @@ export function outline(timeline, { name: projectName, rev } = {}) {
   const t = timeline;
   const fps = t.meta.fps;
   const lines = [];
+  if(t.designScenes)lines.push('场景设计：'+JSON.stringify(t.designScenes));
+  if(t.design)lines.push('设计规范：'+JSON.stringify(t.design));
   let total = 0;
   const main = t.videoTracks[0];
   const starts = [];
@@ -77,10 +106,12 @@ export function outline(timeline, { name: projectName, rev } = {}) {
     for (const [g, els] of [...groups].sort((a, b) => Math.min(...a[1].map((o) => o.startSeconds)) - Math.min(...b[1].map((o) => o.startSeconds)))) {
       const a = Math.min(...els.map((o) => o.startSeconds)), b = Math.max(...els.map((o) => o.endSeconds));
       lines.push('  幻灯片/分组 ' + g + ' ' + s(a) + '–' + s(b) + '（' + els.length + ' 个元素）:');
+      if (t.groups?.[g]) lines.push('    整体动画 ' + JSON.stringify(t.groups[g]));
       for (const o of [...els].sort((x, y) => layer.get(x.id) - layer.get(y.id))) lines.push('    - ' + elementLine(o, layer.get(o.id)));
     }
     for (const o of [...loose].sort((a, b) => a.startSeconds - b.startSeconds)) lines.push('  - ' + elementLine(o, layer.get(o.id)));
   }
   if (t.markers?.length) lines.push('标记: ' + t.markers.map((m) => m.id + ' ' + s(m.t) + (m.label ? '「' + m.label + '」' : '')).join('；'));
+  if (t.animationLibrary && Object.keys(t.animationLibrary).length) lines.push('动画片段库: ' + Object.entries(t.animationLibrary).map(([name,a])=>name+'（'+s(a.duration)+'）').join('；'));
   return lines.join('\n');
 }

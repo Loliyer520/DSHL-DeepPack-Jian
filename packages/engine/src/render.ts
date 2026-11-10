@@ -1,3 +1,4 @@
+import type {FrameMeasurement} from './visualReview.js';
 // 渲染服务：预打包 bundle（按源码哈希缓存）+ 常驻浏览器 + 素材经 HTTP 读取。
 // 取帧从「每次打包 + 两次冷启动浏览器」降为一次页面渲染；导出用 Remotion 原生 scale。
 import { makeCancelSignal, openBrowser, renderMedia, renderStill, selectComposition } from "@remotion/renderer";
@@ -167,6 +168,7 @@ export interface FrameResult {
   height: number;
   frames: number[];
   sheet: boolean;
+  measurements?: FrameMeasurement[];
 }
 
 /**
@@ -179,6 +181,7 @@ export async function renderFrames(opts: AssetContext & {
   format?: "jpeg" | "png";
   maxSize?: number;
   quality?: number;
+  measure?: boolean;
   signal?: AbortSignal;
 }): Promise<FrameResult> {
   const timeline: Timeline = parseTimeline(opts.timeline);
@@ -189,19 +192,21 @@ export async function renderFrames(opts: AssetContext & {
   const format = opts.format ?? "jpeg";
   const maxSize = Math.max(64, opts.maxSize ?? 1280);
   const serveUrl = await getServeUrl();
-  const inputProps = { timeline, assetBase: opts.assetBase, fontsBase: opts.fontsBase, mathBase: opts.mathBase };
+  const inputProps = { timeline, assetBase: opts.assetBase, fontsBase: opts.fontsBase, mathBase: opts.mathBase, measure: opts.measure };
+  const measurements:FrameMeasurement[]=[];
   const cancelSignal = linkSignal(opts.signal);
   return withBrowser(async (puppeteerInstance) => {
     const composition = await selectComposition({ serveUrl, id: "TimelineVideo", inputProps, puppeteerInstance, chromiumOptions, timeoutInMilliseconds: 120_000 });
     const still = (frame: number, scale: number, imageFormat: "jpeg" | "png") => renderStill({
       composition, serveUrl, inputProps, puppeteerInstance, chromiumOptions, frame, scale, imageFormat,
       output: null, overwrite: true, timeoutInMilliseconds: 120_000, cancelSignal,
+      onArtifact:opts.measure?(asset)=>{if(asset.filename==='djian-measurements.json'){const data=JSON.parse(typeof asset.content==='string'?asset.content:new TextDecoder().decode(asset.content));if(data.error)throw new Error(data.error);measurements.push(data);}}:undefined,
       ...(imageFormat === "jpeg" ? { jpegQuality: opts.quality ?? 80 } : {}),
     }).then((r) => { if (!r.buffer) throw new Error("渲染没有返回图像数据"); return r.buffer; });
     if (frames.length === 1) {
       const scale = Math.min(1, maxSize / Math.max(composition.width, composition.height));
       const buffer = await still(frames[0], scale, format);
-      return { buffer, format, width: Math.round(composition.width * scale), height: Math.round(composition.height * scale), frames, sheet: false };
+      return { buffer, format, width: Math.round(composition.width * scale), height: Math.round(composition.height * scale), frames, sheet: false, ...(opts.measure?{measurements}:{} ) };
     }
     // 多个时间点：逐帧渲染（每帧独立 seek，保证画面准确），再在浏览器里拼成带时间标签的网格
     const cols = frames.length <= 2 ? frames.length : frames.length <= 4 ? 2 : 3;
@@ -217,7 +222,7 @@ export async function renderFrames(opts: AssetContext & {
       ...(format === "jpeg" ? { jpegQuality: opts.quality ?? 80 } : {}), cancelSignal,
     });
     if (!buffer) throw new Error("渲染没有返回图像数据");
-    return { buffer, format, width: grid.width, height: grid.height, frames, sheet: true };
+    return { buffer, format, width: grid.width, height: grid.height, frames, sheet: true, ...(opts.measure?{measurements}:{} ) };
   });
 }
 

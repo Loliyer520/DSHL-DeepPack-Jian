@@ -1,0 +1,31 @@
+import type {Timeline,Overlay} from './schema.js';
+import {mainTrackStarts,timelineDurationInFrames} from './timeline.js';
+import {protectDesignPatch} from './designLocks.js';
+export interface Rect{x:number;y:number;w:number;h:number}
+export interface MeasuredElement{id:string;rect:Rect;textRect?:Rect;lines:number;opacity:number;visibleFraction:number;clipped:boolean;transformed:boolean;fitFontSize?:number|null}
+export interface FrameMeasurement{time:number;width:number;height:number;elements:MeasuredElement[];truncated:boolean}
+export interface VisualFinding{key:string;kind:string;source:'browser'|'motion'|'timing';id:string;time:number;message:string;evidence:string;region:Rect;ops:Record<string,unknown>[]}
+const area=(r:Rect)=>Math.max(0,r.w)*Math.max(0,r.h);
+const overlap=(a:Rect,b:Rect)=>Math.max(0,Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x))*Math.max(0,Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y));
+const visible=(m:MeasuredElement)=>m.opacity>.15&&m.visibleFraction>.65;
+const safe=(o:Overlay)=>!o.group&&!o.rotate&&!o.transform3d&&!o.animations&&!o.effects?.length&&!o.motionPath&&!o.follow&&!o.textEffect&&!o.mask&&!o.trackMatte;
+const region=(r:Rect,f:FrameMeasurement):Rect=>{const x=Math.max(0,Math.min(.99,r.x/f.width)),y=Math.max(0,Math.min(.99,r.y/f.height));return {x,y,w:Math.max(.001,Math.min(1-x,r.w/f.width)),h:Math.max(.001,Math.min(1-y,r.h/f.height))};};
+export function inspectMeasurements(t:Timeline,frames:FrameMeasurement[],dynamic=false):VisualFinding[]{
+ const found:VisualFinding[]=[],seen=new Set<string>();
+ const add=(kind:string,o:Overlay,m:MeasuredElement,f:FrameMeasurement,message:string,evidence:string,patch?:Record<string,unknown>,source:VisualFinding['source']='browser')=>{const key=kind+':'+o.id;if(seen.has(key))return;seen.add(key);const protectedPatch=patch?protectDesignPatch(o,patch):{};found.push({key,kind,source,id:o.id,time:f.time,message,evidence,region:region(m.textRect??m.rect,f),ops:Object.keys(protectedPatch).length?[{op:'updateOverlay',id:o.id,patch:protectedPatch}]:[]});};
+ for(const f of frames){for(const m of f.elements){const o=t.overlays.find(o=>o.id===m.id);if(!o||!visible(m))continue;const r=m.textRect??m.rect,box=m.rect;
+  if(m.textRect&&!m.clipped){const excess=Math.max(0,box.x-r.x,box.y-r.y,r.x+r.w-box.x-box.w,r.y+r.h-box.y-box.h),tooMany=m.lines>(o.textFit?.maxLines??Infinity);if(excess>3||tooMany){const ratio=Math.min(1,box.w/Math.max(1,r.w),box.h/Math.max(1,r.h),(o.textFit?.maxLines??m.lines)/Math.max(1,m.lines)),size=m.fitFontSize??Math.max(o.textFit?.minFontSize??18,Math.floor(o.fontSize*ratio*.96*10)/10),patch=safe(o)&&m.fitFontSize!==null&&size<o.fontSize?{fontSize:size}:undefined;add('overflow',o,m,f,'浏览器实测文字超出文本框或行数限制',`实测 ${m.lines} 行；内容 ${r.w.toFixed(1)}×${r.h.toFixed(1)}px；文本框 ${box.w.toFixed(1)}×${box.h.toFixed(1)}px。`,patch);}}
+  const outside=Math.max(0,-r.x,-r.y,r.x+r.w-f.width,r.y+r.h-f.height);if(outside>3){const x=(o.x??.5)+(r.x<0?-r.x:r.x+r.w>f.width?f.width-r.x-r.w:0)/f.width,y=(o.y??.5)+(r.y<0?-r.y:r.y+r.h>f.height?f.height-r.y-r.h:0)/f.height;add(dynamic?'motion-outside':'outside',o,m,f,dynamic?'动态抽样发现可见内容移出画布':'浏览器实测内容超出画布',`在 ${f.time.toFixed(2)}s 超出 ${outside.toFixed(1)}px。${m.clipped?'存在遮罩，需结合画面确认。':''}`,safe(o)?{x,y}:undefined,dynamic?'motion':'browser');}
+ }
+ const texts=f.elements.filter(m=>m.textRect&&visible(m));for(let i=0;i<texts.length;i++)for(let j=i+1;j<texts.length;j++){const a=texts[i],b=texts[j],r=a.textRect!,q=b.textRect!,fraction=overlap(r,q)/Math.max(1,Math.min(area(r),area(q)));if(fraction>.15){const o=t.overlays.find(o=>o.id===a.id);if(o)add('overlap:'+b.id,o,a,f,'浏览器实测两段可见文字相交，需确认是否为有意叠放',`${a.id} 与 ${b.id} 在 ${f.time.toFixed(2)}s 相交约 ${(fraction*100).toFixed(0)}%。`,undefined,dynamic?'motion':'browser');}}
+ }
+ if(dynamic)for(const o of t.overlays){const samples=frames.filter(f=>f.time>=o.startSeconds&&f.time<o.endSeconds).sort((a,b)=>a.time-b.time);for(let i=1;i<samples.length-1;i++){const a=samples[i-1],b=samples[i],c=samples[i+1],get=(f:FrameMeasurement)=>f.elements.find(m=>m.id===o.id);if(c.time-a.time>1.5)continue;const am=get(a),bm=get(b),cm=get(c);if(am&&cm&&visible(am)&&visible(cm)&&(!bm||!visible(bm)))add('visibility-jump',o,bm??am,b,'动态抽样发现画面中段可见性跳变','前后采样可见，中间采样不可见；可能是闪烁或有意设计，请结合动画核对。',undefined,'motion');}}
+ if(dynamic)for(const o of t.overlays.filter(o=>['text','title','subtitle'].includes(o.kind??'text')&&o.text.trim())){const samples=frames.filter(f=>f.time>=o.startSeconds&&f.time<o.endSeconds).sort((a,b)=>a.time-b.time);if(samples.length<3)continue;let readable=0;for(let i=0;i<samples.length;i++){const f=samples[i],m=f.elements.find(m=>m.id===o.id),from=i===0?o.startSeconds:(samples[i-1].time+f.time)/2,to=i===samples.length-1?o.endSeconds:(f.time+samples[i+1].time)/2;if(m&&m.opacity>.65&&m.visibleFraction>.85)readable+=to-from;}const required=Math.min(8,Math.max(1,o.text.replace(/\s|\*|=/g,'').length/10));if(readable<required*.75){const f=samples.find(f=>f.elements.some(m=>m.id===o.id))??samples[0],m=f.elements.find(m=>m.id===o.id);if(m)add('reading-time',o,m,f,'抽样估算的完整可读时间偏短',`估计可读 ${readable.toFixed(2)}s，按内容长度建议约 ${required.toFixed(2)}s；这是离散抽样估计，不修改片段时长。`,undefined,'timing');}}
+ return found.slice(0,30);
+}
+export function motionSampleTimes(t:Timeline,ids?:string[],limit=24){
+ const fps=t.meta.fps,total=timelineDurationInFrames(t),times=new Set<number>(),add=(s:number)=>times.add(Math.max(0,Math.min(total-1,Math.round(s*fps)))/fps),overlays=ids?.length?t.overlays.filter(o=>ids.includes(o.id)):t.overlays;
+ for(const o of overlays){const d=o.endSeconds-o.startSeconds;for(const fraction of [.02,.15,.35,.5,.75,.9,.98])add(o.startSeconds+d*fraction);for(const channel of Object.values(o.animations??{}))for(const k of channel??[])add(o.startSeconds+k.t);}
+ const starts=mainTrackStarts(t);for(const c of t.videoTracks[0]?.clips??[]){const start=starts.get(c.id)??0;if(c.transition!=='none'){const duration=typeof c.transition==='object'?c.transition.duration:.5;for(const p of [.1,.5,.9])add(start+(duration??.5)*(typeof c.transition==='object'?p-.5:p));}}
+ const all=[...times].sort((a,b)=>a-b);const sampled=all.length<=limit?all:Array.from({length:limit},(_,i)=>all[Math.round(i*(all.length-1)/(limit-1))]);return {times:sampled,truncated:all.length>limit,candidates:all.length};
+}

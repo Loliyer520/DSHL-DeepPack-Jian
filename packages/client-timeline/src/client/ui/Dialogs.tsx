@@ -1,7 +1,7 @@
 // 对话框：导出、历史版本、快捷键
 import React, { useEffect, useState } from 'react';
 import { useEditor, useStore } from '../context';
-import { api, exportDownloadUrl, type ExportStatus, type Snapshot } from '../engine';
+import { api, request, exportDownloadUrl, type ExportStatus, type Snapshot } from '../engine';
 import { timecode } from '../geometry';
 import { timelineDurationInFrames } from '../../../../engine/src/timeline';
 import { Dialog } from './common';
@@ -15,6 +15,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const project = useStore((s) => s.project);
   const timeline = useStore((s) => s.timeline);
   const pending = useStore((s) => s.pending);
+  const rev = useStore(s=>s.rev);
+  const [preflight,setPreflight]=useState<{rev:number;canExport:boolean;issues:{message:string;severity:string}[]}|null>(null);
+  const [checking,setChecking]=useState(false);
   const [scale, setScale] = useState(1);
   const [quality, setQuality] = useState<'draft' | 'standard' | 'high'>('standard');
   const [jobId, setJobId] = useState<string | null>(() => (project ? activeJobs.get(project.id) ?? null : null));
@@ -28,7 +31,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         const s = await api.exportStatus(jobId);
         if (stop) return;
         setStatus(s);
-        if (s.status === 'rendering') setTimeout(() => void tick(), 1000);
+        if (s.status === 'rendering'||s.status === 'queued') setTimeout(() => void tick(), 1000);
         else if (project) activeJobs.delete(project.id);
       } catch (e) {
         if (!stop) { setError(e instanceof Error ? e.message : String(e)); if (project) activeJobs.delete(project.id); }
@@ -40,22 +43,24 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   if (!project || !timeline) return null;
   const { width, height, fps } = timeline.meta;
   const dur = timelineDurationInFrames(timeline) / fps;
-  const start = async () => {
-    setError(null); setStatus(null);
+  const inspect = async()=>{const r=await request<{rev:number;canExport:boolean;issues:{message:string;severity:string}[]}>('GET','/api/p/'+encodeURIComponent(project.id)+'/delivery/preflight');setPreflight(r);return r;};
+  const start = async (sample=false) => {
+    setError(null); setStatus(null);setChecking(true);
     try {
-      const r = await api.startExport(project.id, { scale, quality });
+      const checked=await inspect();if(!checked.canExport)throw Error('请先修复预检中的错误');
+      const r = await api.startExport(project.id, { scale:sample?.5:scale, quality:sample?'draft':quality,baseRev:checked.rev });
       activeJobs.set(project.id, r.jobId);
       setJobId(r.jobId);
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }finally{setChecking(false);}
   };
-  const rendering = status?.status === 'rendering' || (jobId && !status && !error);
+  const rendering = status?.status === 'rendering'||status?.status==='queued' || (jobId && !status && !error);
   return (
     <Dialog title="导出视频" onClose={onClose} footer={
       rendering ? <><button className="dj-btn" onClick={onClose}>后台继续</button><button className="dj-btn dj-danger" onClick={() => jobId && void api.cancelExport(jobId)}>取消导出</button></>
         : status?.status === 'done' ? <><button className="dj-btn" onClick={() => { setJobId(null); setStatus(null); }}>再导出一份</button><a className="dj-btn dj-primary" href={exportDownloadUrl(jobId!)} download={status.result?.fileName}><Icon name="export" />下载 MP4</a></>
-          : <><button className="dj-btn" onClick={onClose}>取消</button><button className="dj-btn dj-primary" disabled={pending > 0} onClick={() => void start()}>{pending > 0 ? '等待保存…' : '开始导出'}</button></>
+          : <><button className="dj-btn" onClick={onClose}>取消</button><button className="dj-btn dj-primary" disabled={pending > 0||checking} onClick={() => void start()}>{checking?'正在预检…':pending > 0 ? '等待保存…' : '开始导出'}</button></>
     }>
-      {!jobId || (status && status.status !== 'rendering' && status.status !== 'done') ? (
+      {!jobId || (status && status.status !== 'rendering' && status.status !== 'queued' && status.status !== 'done') ? (
         <>
           <div className="dj-field" style={{ marginBottom: 10 }}><span>分辨率</span>
             <div className="dj-seg dj-seg-full" role="radiogroup" aria-label="分辨率">
@@ -67,9 +72,11 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               {([['draft', '草稿（快）'], ['standard', '标准'], ['high', '高画质']] as const).map(([k, l]) => <button key={k} role="radio" aria-checked={quality === k} onClick={() => setQuality(k)}>{l}</button>)}
             </div>
           </div>
+          <div className="dj-chips"><button className="dj-chip" disabled={checking||pending>0} onClick={()=>{setChecking(true);void inspect().catch(e=>setError(String(e))).finally(()=>setChecking(false));}}>导出前预检</button><button className="dj-chip" disabled={checking||pending>0} onClick={()=>void start(true)}>先导出低清样片</button></div>{preflight&&<div><p>{preflight.rev!==rev?'项目已变化，导出时将重新预检。':preflight.canExport?'预检通过，可导出。':'预检发现需要修复的错误。'}</p>{preflight.issues.map((i,n)=><p key={n}>{i.severity==='error'?'错误':'提示'}：{i.message}</p>)}</div>}
           <p className="dj-hint">时长 {timecode(dur, fps, false)} · {fps}fps · H.264 + AAC。导出在本机进行，可关闭此窗口继续编辑。</p>
+          {status?.status === 'error'&&<button className="dj-chip" disabled={checking} onClick={()=>{setChecking(true);void request<{jobId:string}>('POST','/api/export/'+jobId+'/retry').then(r=>{setStatus(null);setJobId(r.jobId);activeJobs.set(project.id,r.jobId);}).catch(e=>setError(String(e))).finally(()=>setChecking(false));}}>按原快照重试</button>}
           {status?.status === 'cancelled' && <p className="dj-hint">已取消。</p>}
-          {status?.status === 'error' && <p className="dj-hint" style={{ color: 'var(--dj-danger)' }}>导出失败：{status.error}</p>}
+          {status?.status === 'error' && <p className="dj-hint" style={{ color: 'var(--dj-danger)' }}>导出失败：{status.error} {status.diagnostic?.hint}</p>}
         </>
       ) : status?.status === 'done' ? (
         <p>导出完成：{status.result?.fileName}（{((status.result?.sizeBytes ?? 0) / 1048576).toFixed(1)} MB）</p>

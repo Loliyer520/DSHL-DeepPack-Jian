@@ -1,0 +1,44 @@
+{
+  "meta": {
+    "fps": 30,
+    "width": 480,
+    "height": 270
+  },
+  "version": 20,
+  "videoTracks": [
+    {
+      "id": "v1",
+      "name": "主轨道",
+      "clips": []
+    }
+  ],
+  "audioTracks": [],
+  "overlays": [
+    {
+      "id": "nested",
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 1,
+      "position": "bottom",
+      "fontSize": 48,
+      "color": "#ffffff",
+      "composition": {
+        "name": "card",
+        "timeline": "{\"meta\":{\"fps\":30,\"width\":320,\"height\":180,\"background\":\"#09111f\"},\"version\":20,\"videoTracks\":[{\"id\":\"v1\",\"name\":\"主轨道\",\"clips\":[]}],\"audioTracks\":[{\"id\":\"audio\",\"volume\":0.6,\"muted\":false,\"clips\":[{\"id\":\"sound\",\"src\":\"ambient-pulse.wav\",\"inPoint\":0,\"duration\":2,\"volume\":1,\"atSeconds\":0,\"speed\":1}]}],\"overlays\":[{\"id\":\"card\",\"text\":\"\",\"startSeconds\":0,\"endSeconds\":2,\"position\":\"bottom\",\"fontSize\":64,\"color\":\"#ffffff\",\"animations\":{\"rotation\":[{\"t\":0,\"v\":-10},{\"t\":2,\"v\":10}]},\"x\":0.5,\"y\":0.5,\"kind\":\"shape\",\"w\":0.8,\"h\":0.8,\"shape\":{\"type\":\"rect\",\"fill\":\"#2563eb\",\"radius\":10}},{\"id\":\"title\",\"text\":\"{{title}}\",\"startSeconds\":0,\"endSeconds\":2,\"position\":\"bottom\",\"fontSize\":30,\"color\":\"#ffffff\",\"x\":0.5,\"y\":0.5,\"kind\":\"text\"}],\"markers\":[]}",
+        "inPoint": 0.25,
+        "speed": 1.5,
+        "volume": 0.8
+      },
+      "x": 0.5,
+      "y": 0.5,
+      "w": 0.9,
+      "h": 0.8,
+      "kind": "shape",
+      "shape": {
+        "type": "rect",
+        "fill": "#3b82f6"
+      }
+    }
+  ],
+  "markers": []
+}

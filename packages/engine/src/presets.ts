@@ -14,6 +14,18 @@ export interface AnimationPreset {
 const kf = (t: number, v: number, e?: Keyframe["e"]): Keyframe => ({ t, v, ...(e ? { e } : {}) });
 
 export const ANIMATION_PRESETS: Record<string, AnimationPreset> = {
+  // ---- 2.5D: native perspective planes, no external model required ----
+  flipInX: { label: "3D 上翻入场", group: "入场", expand: (d) => ({ rotationX: [kf(0, -85, "out"), kf(Math.min(0.9, d * 0.4), 0)], opacity: [kf(0, 0), kf(Math.min(0.3, d * 0.15), 1)] }) },
+  flipInY: { label: "3D 侧翻入场", group: "入场", expand: (d) => ({ rotationY: [kf(0, 85, "out"), kf(Math.min(0.9, d * 0.4), 0)], opacity: [kf(0, 0), kf(Math.min(0.3, d * 0.15), 1)] }) },
+  depthIn: { label: "3D 纵深入场", group: "入场", expand: (d) => ({ z: [kf(0, -800, "out"), kf(Math.min(1, d * 0.4), 0)], opacity: [kf(0, 0), kf(Math.min(0.6, d * 0.25), 1)] }) },
+  flipOutX: { label: "3D 下翻出场", group: "出场", expand: (d) => ({ rotationX: [kf(Math.max(0, d - Math.min(0.9, d * 0.4)), 0, "in"), kf(d, 85)], opacity: [kf(Math.max(0, d - Math.min(0.3, d * 0.15)), 1), kf(d, 0)] }) },
+  flipOutY: { label: "3D 侧翻出场", group: "出场", expand: (d) => ({ rotationY: [kf(Math.max(0, d - Math.min(0.9, d * 0.4)), 0, "in"), kf(d, -85)], opacity: [kf(Math.max(0, d - Math.min(0.3, d * 0.15)), 1), kf(d, 0)] }) },
+  depthOut: { label: "3D 纵深退场", group: "出场", expand: (d) => ({ z: [kf(Math.max(0, d - Math.min(1, d * 0.4)), 0, "in"), kf(d, -800)], opacity: [kf(Math.max(0, d - Math.min(0.6, d * 0.25)), 1), kf(d, 0)] }) },
+  tilt3d: { label: "3D 摇摆", group: "组合", expand: (d) => ({ rotationY: [kf(0, -18, "inOut"), kf(d / 2, 18, "inOut"), kf(d, -18)], rotationX: [kf(0, 8, "inOut"), kf(d / 2, -8, "inOut"), kf(d, 8)] }) },
+  spin3d: { label: "3D 自转", group: "循环", expand: (d) => ({ rotationY: [kf(0, 0, "linear"), kf(d, 360 * Math.max(1, Math.round(d / 4)))] }) },
+  springIn: { label: "弹簧缩放入场", group: "入场", expand: d => ({ scale: [kf(0, .35, { type: 'spring', stiffness: 180, damping: 14 }), kf(Math.min(1.2,d*.7),1)], opacity: [kf(0,0),kf(Math.min(.2,d*.15),1)] }) },
+  springRise: { label: "弹簧上浮", group: "入场", expand: d => ({ y: [kf(0,.12,{type:'spring',stiffness:150,damping:12}),kf(Math.min(1.2,d*.7),0)], opacity:[kf(0,0),kf(Math.min(.2,d*.15),1)] }) },
+  springTurn: { label: "弹簧回正", group: "入场", expand: d => ({ rotation:[kf(0,-35,{type:'spring',stiffness:120,damping:10}),kf(Math.min(1.5,d*.8),0)] }) },
   // ---- 入场 ----
   fadeIn: { label: "淡入", group: "入场", expand: (d) => ({ opacity: [kf(0, 0, "out"), kf(Math.min(0.8, d * 0.3), 1)] }) },
   slideInLeft: { label: "左滑入", group: "入场", expand: (d) => ({ x: [kf(0, -0.5, "out"), kf(Math.min(0.7, d * 0.25), 0)], opacity: [kf(0, 0), kf(Math.min(0.4, d * 0.15), 1)] }) },

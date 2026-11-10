@@ -13,6 +13,7 @@ import { renderPiece, useMath } from "./math";
 import { isMathError, mathSize, writeOrder, type MathData, type MathPiece, type MathResult } from "./mathData";
 import { samplePath, signedArea, type Pt } from "./paths";
 import { PlotSvg, itemReveal, plotParams, stripLhs } from "./plot";
+import { useElementAppearance, shadowLayers } from "./appearance";
 import { overlayFontFamily } from "./fonts";
 
 type Mat = [number, number, number, number, number, number];
@@ -60,6 +61,25 @@ function placement(ov: Overlay, m: Motion, w: number, h: number, W: number, H: n
   M = mul(M, [c, s, -s, c, 0, 0]);
   M = mul(M, [m.scale * m.sx, 0, 0, m.scale * m.sy, 0, 0]);
   return mul(M, [1, 0, 0, 1, -w / 2, -h / 2]);
+}
+
+// Keep appearance effects during specialized geometry morphs as well as normal rendering.
+function useMorphAppearance(A: Overlay, B: Overlay, e: number, w: number, h: number) {
+  const a = shadowLayers(A.shadow), b = shadowLayers(B.shadow);
+  const defaultY = (o: Overlay) => !o.kind || ["subtitle", "title", "text"].includes(o.kind) ? 2 : 4;
+  const layers = Array.from({ length: Math.max(a.length, b.length) }, (_, i) => {
+    const sa = a[i] ?? b[i], sb = b[i] ?? a[i];
+    return {
+      inset: (e < .5 ? sa : sb).inset,
+      color: mixColor(sa.color, sb.color, e) ?? sb.color,
+      blur: lerp(sa.blur, sb.blur, e),
+      x: lerp(sa.x ?? 0, sb.x ?? 0, e),
+      y: lerp(sa.y ?? defaultY(A), sb.y ?? defaultY(B), e),
+      spread: lerp(sa.spread ?? 0, sb.spread ?? 0, e),
+      opacity: lerp(a[i] ? sa.opacity ?? 1 : 0, b[i] ? sb.opacity ?? 1 : 0, e),
+    };
+  });
+  return useElementAppearance({ ...B, shadow: layers.length ? layers : false, blendMode: e < 0.5 ? A.blendMode : B.blendMode }, w, h);
 }
 
 // ---------- 公式 → 公式 ----------
@@ -121,6 +141,7 @@ export function matchPieces(a: MathData, b: MathData) {
 }
 
 const MathMorph: React.FC<{ A: Overlay; B: Overlay; dA: MathData; dB: MathData; mA: Motion; mB: Motion; e: number; W: number; H: number }> = ({ A, B, dA, dB, mA, mB, e, W, H }) => {
+  const appearance = useMorphAppearance(A, B, e, W, H);
   const match = React.useMemo(() => matchPieces(dA, dB), [dA, dB]);
   const kA = A.fontSize / 1000, kB = B.fontSize / 1000;
   const sA = mathSize(dA, A.fontSize), sB = mathSize(dB, B.fontSize);
@@ -146,7 +167,8 @@ const MathMorph: React.FC<{ A: Overlay; B: Overlay; dA: MathData; dB: MathData; 
   for (const i of match.outA) nodes.push(renderPiece(dA.pieces[i], "a" + i, A.color, 1, kA, font, mul(PA, dA.pieces[i].m), clamp01(1 - e * 2)));
   for (const j of match.inB) nodes.push(renderPiece(dB.pieces[j], "b" + j, B.color, 1, kB, font, mul(PB, dB.pieces[j].m), clamp01(e * 2 - 1)));
   return (
-    <svg width={W} height={H} viewBox={"0 0 " + W + " " + H} style={{ position: "absolute", inset: 0, overflow: "visible", opacity: lerp(mA.opacity, mB.opacity, e) }}>
+    <svg width={W} height={H} viewBox={"0 0 " + W + " " + H} style={{ position: "absolute", inset: 0, overflow: "visible", opacity: lerp(mA.opacity, mB.opacity, e), filter: [e < 0.5 ? mA.filter : mB.filter, appearance.filter].filter(Boolean).join(" ") || undefined, mixBlendMode: appearance.mixBlendMode }}>
+      {appearance.defs}
       {nodes}
     </svg>
   );
@@ -181,6 +203,7 @@ export function alignPoints(a: Pt[], b: Pt[], closed: boolean): Pt[] {
 }
 
 const ShapeMorph: React.FC<{ A: Overlay; B: Overlay; a: { pts: Pt[]; closed: boolean }; b: { pts: Pt[]; closed: boolean }; mA: Motion; mB: Motion; e: number; W: number; H: number }> = ({ A, B, a, b, mA, mB, e, W, H }) => {
+  const appearance = useMorphAppearance(A, B, e, W, H);
   const bp = alignPoints(a.pts, b.pts, a.closed);
   const pts = a.pts.map((p, i): Pt => [lerp(p[0], bp[i][0], e), lerp(p[1], bp[i][1], e)]);
   const d = "M" + pts.map((p) => f2(p[0]) + "," + f2(p[1])).join("L") + (a.closed ? "Z" : "");
@@ -189,9 +212,10 @@ const ShapeMorph: React.FC<{ A: Overlay; B: Overlay; a: { pts: Pt[]; closed: boo
   const lineA = !a.closed ? sa.stroke ?? { color: solidOf(sa.fill) ?? "#ffffff", width: 6 } : sa.stroke;
   const lineB = !b.closed ? sb.stroke ?? { color: solidOf(sb.fill) ?? "#ffffff", width: 6 } : sb.stroke;
   const sw = lerp(lineA?.width ?? 0, lineB?.width ?? 0, e);
-  const stroke = mixColor(lineA?.color ?? solidOf(sa.fill), lineB?.color ?? solidOf(sb.fill), e);
+  const stroke = mixColor(solidOf(lineA?.color) ?? solidOf(sa.fill), solidOf(lineB?.color) ?? solidOf(sb.fill), e);
   return (
-    <svg width={W} height={H} viewBox={"0 0 " + W + " " + H} style={{ position: "absolute", inset: 0, overflow: "visible", opacity: lerp(mA.opacity, mB.opacity, e) }}>
+    <svg width={W} height={H} viewBox={"0 0 " + W + " " + H} style={{ position: "absolute", inset: 0, overflow: "visible", opacity: lerp(mA.opacity, mB.opacity, e), filter: [e < 0.5 ? mA.filter : mB.filter, appearance.filter].filter(Boolean).join(" ") || undefined, mixBlendMode: appearance.mixBlendMode }}>
+      {appearance.defs}
       <path d={d} fill={fill ?? "none"} fillOpacity={sa.fill === undefined ? e : sb.fill === undefined ? 1 - e : undefined} stroke={sw > 0.2 ? stroke : "none"} strokeWidth={sw} strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
@@ -248,8 +272,10 @@ const PlotMorph: React.FC<{ A: Overlay; B: Overlay; spec: PlotSpec; mA: Motion; 
   const mid: Overlay = { ...B, x: lerp(A.x ?? 0.5, B.x ?? 0.5, e), y: lerp(A.y ?? 0.5, B.y ?? 0.5, e), fontSize: lerp(A.fontSize, B.fontSize, e), color: mixColor(A.color, B.color, e) ?? B.color };
   const m: Motion = { ...mB, dx: lerp(mA.dx, mB.dx, e), dy: lerp(mA.dy, mB.dy, e), scale: lerp(mA.scale, mB.scale, e), sx: lerp(mA.sx, mB.sx, e), sy: lerp(mA.sy, mB.sy, e), rot: lerp(mA.rot, mB.rot, e), opacity: lerp(mA.opacity, mB.opacity, e), filter: undefined, clipPath: undefined };
   const P = placement(mid, m, w, h, W, H);
+  const appearance = useMorphAppearance(A, B, e, w, h);
   return (
-    <div style={{ position: "absolute", left: 0, top: 0, width: w, height: h, transformOrigin: "0 0", transform: "matrix(" + P.join(",") + ")", opacity: m.opacity }}>
+    <div style={{ position: "absolute", left: 0, top: 0, width: w, height: h, transformOrigin: "0 0", transform: "matrix(" + P.join(",") + ")", opacity: m.opacity, filter: [e < 0.5 ? mA.filter : mB.filter, appearance.filter].filter(Boolean).join(" ") || undefined, mixBlendMode: appearance.mixBlendMode }}>
+      {appearance.defs}
       <PlotSvg ov={mid} spec={spec} w={w} h={h} progress={1} sec={0} unit={Math.min(W, H) / 1080} reveal={reveal} />
     </div>
   );
@@ -289,22 +315,23 @@ export const MorphView: React.FC<{ A: Overlay; B: Overlay }> = ({ A, B }) => {
   const durFrames = Math.max(1, Math.round((spec.duration ?? 1) * fps));
   const dA = useMath(A.kind === "math" ? A.text : undefined), dB = useMath(B.kind === "math" ? B.text : undefined);
   if (frame >= durFrames) return <ElementView ov={B} />;
-  const e = clamp01(easingFn(spec.ease ?? "inOut")(frame / durFrames));
+  const e = clamp01(easingFn(spec.ease ?? "inOut", durFrames / fps)(frame / durFrames));
   const aFrame = Math.max(0, Math.round((A.endSeconds - A.startSeconds) * fps) - 1);
   const aSec = aFrame / fps, bSec = durFrames / fps;
   const mA = elementMotion(A, resolveAnimations(A, A.endSeconds - A.startSeconds), aSec, W, H);
   const mB = elementMotion(B, resolveAnimations(B, B.endSeconds - B.startSeconds), bSec, W, H);
   const box = elementBoxPx(B, W, H);
   const anchor = (w: number, h: number) => <Anchor B={B} w={w} h={h} W={W} H={H} />;
-  if (A.kind === "math" && B.kind === "math" && ok(dA) && ok(dB)) {
+  const spatial = Boolean(mA.spatial || mB.spatial || A.mask || B.mask || A.motionPath || B.motionPath || A.glass || B.glass || A.sweep || B.sweep || (typeof A.shape?.fill === "object" && A.shape.fill.keyframes?.length) || (typeof B.shape?.fill === "object" && B.shape.fill.keyframes?.length) || (typeof A.shape?.stroke?.color === "object") || (typeof B.shape?.stroke?.color === "object"));
+  if (!spatial && A.kind === "math" && B.kind === "math" && ok(dA) && ok(dB)) {
     const s = mathSize(dB, B.fontSize);
     return <><MathMorph A={A} B={B} dA={dA} dB={dB} mA={mA} mB={mB} e={e} W={W} H={H} />{anchor(s.w, s.h)}</>;
   }
-  if (A.kind === "shape" && B.kind === "shape") {
+  if (!spatial && A.kind === "shape" && B.kind === "shape") {
     const a = shapePoints(A, mA, W, H), b = shapePoints(B, mB, W, H);
     if (a && b && a.closed === b.closed) return <><ShapeMorph A={A} B={B} a={a} b={b} mA={mA} mB={mB} e={e} W={W} H={H} />{anchor(box.w, box.h ?? box.w)}</>;
   }
-  if (A.kind === "plot" && B.kind === "plot" && A.plot && B.plot) {
+  if (!spatial && A.kind === "plot" && B.kind === "plot" && A.plot && B.plot) {
     const spec2 = blendPlot(A.plot, B.plot, plotParams(A.plot, aSec), plotParams(B.plot, bSec), e);
     if (spec2) return <><PlotMorph A={A} B={B} spec={spec2} mA={mA} mB={mB} aSec={aSec} bSec={bSec} e={e} W={W} H={H} />{anchor(box.w, box.h ?? box.w)}</>;
   }

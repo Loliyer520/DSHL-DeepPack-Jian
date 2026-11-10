@@ -6,10 +6,10 @@ import { useEditor } from '../../context';
 import type { Op } from '../../engine';
 import { Field, KeyframeButton, ScrubNumber } from '../common';
 
-export const CHANNEL_DEFAULT: Record<string, number> = { x: 0, y: 0, scale: 1, scaleX: 1, scaleY: 1, opacity: 1, rotation: 0, volume: 1, brightness: 1, contrast: 1, saturate: 1, blur: 0 };
+export const CHANNEL_DEFAULT: Record<string, number> = { x: 0, y: 0, scale: 1, scaleX: 1, scaleY: 1, opacity: 1, rotation: 0, volume: 1, brightness: 1, contrast: 1, saturate: 1, blur: 0, rotationX: 0, rotationY: 0, z: 0, perspective: 1200 };
 
 /** 被编辑对象：id + 在时间线上的起点/时长（把播放头换算成对象内相对秒） */
-export interface Target { id: string; start: number; duration: number; animations?: Animations }
+export interface Target { id: string; group?: string; start: number; duration: number; animations?: Animations }
 
 /** 属性面板用的播放头：播放中不跟（避免每帧重渲染整个面板），暂停/定位时更新 */
 export function useInspectTime(): number {
@@ -47,23 +47,24 @@ export function AnimNumber({ target, channel, label, value: staticValue, staticO
   step?: number; min?: number; max?: number; digits?: number; suffix?: string; scale?: number; fps: number; now: number; disabled?: boolean;
 }) {
   const { preview, commit } = useEdit();
+  const address = target.group ? { group: target.group } : { id: target.id };
   const { state, rel, kfs } = channelState(target, channel, now, fps);
   const inside = rel >= -0.5 / fps && rel <= target.duration + 0.5 / fps;
   const animated = state !== 'off';
   const current = animated ? evalKeyframes(kfs, rel) ?? CHANNEL_DEFAULT[channel] : isStatic(kfs) ? kfs![0].v : staticValue ?? CHANNEL_DEFAULT[channel] ?? 0;
   const opsFor = (v: number): Op[] => {
-    if (animated) return [{ op: 'setKeyframe', id: target.id, channel, t: Math.max(0, rel), v }];
+    if (animated) return [{ op: 'setKeyframe', ...address, channel, t: Math.max(0, rel), v }];
     if (staticOps) return staticOps(v);
-    return [{ op: 'clearKeyframes', id: target.id, channel }, { op: 'setKeyframe', id: target.id, channel, t: 0, v, e: 'hold' }];
+    return [{ op: 'clearKeyframes', ...address, channel }, { op: 'setKeyframe', ...address, channel, t: 0, v, e: 'hold' }];
   };
   const toggleKf = () => {
     if (!inside) return;
-    if (state === 'on') { commit([{ op: 'removeKeyframe', id: target.id, channel, t: rel }], '删除关键帧'); return; }
+    if (state === 'on') { commit([{ op: 'removeKeyframe', ...address, channel, t: rel }], '删除关键帧'); return; }
     const ops: Op[] = [];
     // 从“静态值”转为动画：把静态帧改成普通帧，再在播放头处打一帧
     const at = Math.max(0, rel);
-    if (isStatic(kfs) && Math.abs(kfs![0].t - at) >= 0.5 / fps) ops.push({ op: 'setKeyframe', id: target.id, channel, t: kfs![0].t, v: kfs![0].v, e: 'linear' });
-    ops.push({ op: 'setKeyframe', id: target.id, channel, t: at, v: current, e: 'linear' });
+    if (isStatic(kfs) && Math.abs(kfs![0].t - at) >= 0.5 / fps) ops.push({ op: 'setKeyframe', ...address, channel, t: kfs![0].t, v: kfs![0].v, e: 'linear' });
+    ops.push({ op: 'setKeyframe', ...address, channel, t: at, v: current, e: 'linear' });
     commit(ops, '添加关键帧');
   };
   return (

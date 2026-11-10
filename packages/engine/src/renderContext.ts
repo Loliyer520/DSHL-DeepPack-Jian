@@ -7,3 +7,5 @@ export const AssetResolver = React.createContext<Resolver>(staticFile);
 export const MediaErrorHandler = React.createContext<((src: string) => void) | undefined>(undefined);
 /** 公式排版接口（引擎 /api/math）；缺省时公式显示为占位 */
 export const MathBase = React.createContext<string | undefined>(undefined);
+
+export const CompositionRenderer = React.createContext<React.ComponentType<{document:string;seconds:number;width:number;height:number}> | null>(null);

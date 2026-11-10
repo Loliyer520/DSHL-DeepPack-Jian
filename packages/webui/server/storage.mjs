@@ -38,3 +38,17 @@ export function atomicWriteJson(file, value) {
 export function readJsonFile(file, fallback = null) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
 }
+
+/** Async durable replacement; retry waits yield to HTTP/SSE and never spin the event loop. */
+export async function atomicWriteFileAsync(file,content){
+ const temporary=path.join(path.dirname(file),`.${path.basename(file)}.${randomUUID()}.tmp`),io=fs.promises;
+ await io.mkdir(path.dirname(file),{recursive:true});let handle;
+ try{handle=await io.open(temporary,'wx');await handle.writeFile(content);await handle.sync();await handle.close();handle=null;
+  for(let attempt=0;;attempt++){try{await io.rename(temporary,file);break;}catch(e){if(!['EPERM','EBUSY','EACCES'].includes(e.code)||attempt>=6)throw e;await new Promise(resolve=>setTimeout(resolve,25*(attempt+1)));}}
+  // POSIX directory fsync makes the rename durable; Windows does not allow opening directories.
+  if(process.platform!=='win32'){const dir=await io.open(path.dirname(file),'r');try{await dir.sync();}finally{await dir.close();}}
+ }finally{if(handle)await handle.close();await io.rm(temporary,{force:true});}
+}
+export async function appendDurable(file,value){const f=await fs.promises.open(file,'a');try{await f.writeFile('\n'+JSON.stringify(value)+'\n');await f.sync();}finally{await f.close();}}
+
+export const atomicWriteJsonAsync=(file,value)=>atomicWriteFileAsync(file,JSON.stringify(value));

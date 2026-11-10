@@ -94,7 +94,7 @@ export interface EngineEvent { rev: number; at: string; actor: 'user' | 'ai' | '
 export interface AssetInfo { name: string; type: 'video' | 'image' | 'audio'; size: number; duration: number | null; width: number | null; height: number | null; hasAudio: boolean; usage: number; error: string | null; thumb: string | null; media: string }
 export interface Presence { clientId: string; actor: 'user' | 'ai'; status?: string | null; label?: string | null; at: number }
 export interface Snapshot { id: string; at: string; label: string; rev: number | null; actor: string }
-export interface ExportStatus { jobId: string; status: 'rendering' | 'done' | 'error' | 'cancelled'; progress: { percent: number; stage: string }; result?: { fileName: string; sizeBytes: number }; error?: string }
+export interface ExportStatus { jobId: string; status: 'queued' | 'rendering' | 'done' | 'error' | 'cancelled'; progress: { percent: number; stage: string }; result?: { fileName: string; sizeBytes: number }; diagnostic?: {code:string;stage:string;hint:string;detail:string}; error?: string }
 export interface ImageSettingsView { configured: boolean; apiKeyHint: string | null; baseUrl: string; model: string; timeoutMs: number }
 
 const P = (pid: string) => '/api/p/' + encodeURIComponent(pid);
@@ -116,7 +116,7 @@ export const api = {
   imageSettings: () => request<ImageSettingsView>('GET', '/api/settings/image'),
   saveImageSettings: (body: { apiKey?: string; baseUrl?: string | null; model?: string | null; timeoutMs?: number | null }) =>
     request<ImageSettingsView>('PUT', '/api/settings/image', { body }),
-  startExport: (pid: string, body: { scale: number; quality: string }) => request<{ jobId: string }>('POST', P(pid) + '/export', { body }),
+  startExport: (pid: string, body: { scale: number; quality: string; baseRev?:number }) => request<{ jobId: string }>('POST', P(pid) + '/export', { body }),
   exportStatus: (jobId: string) => request<ExportStatus>('GET', '/api/export/' + encodeURIComponent(jobId)),
   cancelExport: (jobId: string) => request('POST', '/api/export/' + encodeURIComponent(jobId) + '/cancel', { body: {} }),
   rename: (pid: string, name: string) => request('PATCH', '/api/projects/' + encodeURIComponent(pid), { body: { name } }),

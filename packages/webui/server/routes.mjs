@@ -1,10 +1,19 @@
+import {registerAiTools} from './ai-tools.mjs';
+import {registerDeliveryTools} from './delivery-tools.mjs';
+import {registerDesignTools} from './design-tools.mjs';
+import {modelIndex} from '../../engine/dist/modelIndex.js';
+import {OP_REGISTRY,OPS_PARAMETERS} from '../../engine/dist/operationRegistry.js';
+import {referencedAssets} from '../../engine/dist/compositions.js';
+import {registerProjectTools} from './project-tools.mjs';
 // 路由表：所有业务接口。项目一律显式寻址（/api/p/:pid/...），没有“全局当前项目”。
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { FONTS } from '../../engine/dist/fonts.js';
+import { listTransitions } from '../../engine/dist/transitions.js';
 import { listAnimationPresets } from '../../engine/dist/presets.js';
+import { checkTimeline, checkAudioEnvelopes } from '../../engine/dist/preflight.js';
 import { OP_NAMES } from '../../engine/dist/ops.js';
 import { ICONS } from '../../engine/dist/icons.js';
 import { SLIDE_TEMPLATES, SLIDE_THEMES } from '../../engine/dist/templates.js';
@@ -33,7 +42,7 @@ export function buildRouter({ store, render, settings = new Settings() }) {
   r.add('GET', '/api/health', (req, res) => sendJson(res, 200, { ok: true, service: 'djian-engine', version: VERSION, protocol: 2, port: PORT, pid: process.pid, dataDir: DJIAN_HOME }));
   r.add('GET', '/api/fonts', (req, res) => sendJson(res, 200, { fonts: FONTS.map(({ id, label, weights }) => ({ id, label, variable: weights.includes(' ') })) }));
   r.add('GET', '/api/animation-presets', (req, res) => sendJson(res, 200, { presets: listAnimationPresets() }));
-  r.add('GET', '/api/ops', (req, res) => sendJson(res, 200, { ops: OP_NAMES }));
+  r.add('GET', '/api/ops', (req, res) => sendJson(res, 200, { ops: OP_NAMES, registry: OP_REGISTRY, parameters: OPS_PARAMETERS }));
   // 元素目录：图标/形状/图表/幻灯片模板与主题/动画预设（面板与 AI 工具共用）
   r.add('GET', '/api/catalog', (req, res) => sendJson(res, 200, {
     icons: ICONS.map(({ name, label, group }) => ({ name, label, group })),
@@ -44,6 +53,7 @@ export function buildRouter({ store, render, settings = new Settings() }) {
     templates: Object.entries(SLIDE_TEMPLATES).map(([key, t]) => ({ key, ...t })),
     themes: Object.entries(SLIDE_THEMES).map(([key, t]) => ({ key, label: t.label, dark: t.dark, accent: t.accent, text: t.text, bg: t.bg })),
     presets: listAnimationPresets(),
+    transitions: listTransitions(),
     textEffects: TEXT_EFFECTS,
     fonts: FONTS.map(({ id, label }) => ({ id, label })),
   }));
@@ -75,8 +85,8 @@ export function buildRouter({ store, render, settings = new Settings() }) {
     if (typeof body?.name === 'string' && body.name.trim()) store.rename(pid, body.name);
     sendJson(res, 200, { ok: true });
   });
-  r.add('DELETE', '/api/projects/:pid', (req, res, { params }) => {
-    store.remove(project(params));
+  r.add('DELETE', '/api/projects/:pid', async (req, res, { params }) => {
+    const pid=project(params);await store.serialize(pid,()=>store.remove(pid));
     sendJson(res, 200, { ok: true, trashed: true });
   });
   r.add('POST', '/api/session-project', async (req, res) => {
@@ -99,11 +109,28 @@ export function buildRouter({ store, render, settings = new Settings() }) {
   registerTimelineRoutes(r, { store, project });
   registerAssetRoutes(r, { store, project });
   registerRenderRoutes(r, { store, render, project });
+  registerProjectTools(r, { store, render, project });
+  registerDesignTools(r, { store, render, project });
+  registerDeliveryTools(r, { store, project });
+  registerAiTools(r, { store, render, project });
   return r;
 }
 
 // ---------- 时间线与协同 ----------
 function registerTimelineRoutes(r, { store, project }) {
+  r.add('GET', '/api/p/:pid/check', async (req,res,{params})=>{
+    const pid=project(params),{timeline,rev}=store.load(pid);let names=[];
+    try{names=fs.readdirSync(store.assetsDir(pid)).filter(n=>!n.startsWith('.')&&assetKind(n));}catch{}
+    const assets=await Promise.all(names.map(async name=>({name,...await assetMeta(store,pid,name).catch(()=>({}))})));
+    const used=new Set(referencedAssets(timeline)),envelopes={},audioWarnings=[];
+    for(const asset of assets)if(used.has(asset.name)&&asset.hasAudio!==false&&asset.kind!=='image'){
+      try{const out=path.join(store.thumbsDir(pid),asset.name+'.peaks.bin');let info=asset.peaks;
+        if(!info||!fs.existsSync(out)){info=await once('peaks|'+out,()=>peaks(path.join(store.assetsDir(pid),asset.name),out));store.writeAssetMeta(pid,asset.name,{...asset,peaks:info});}
+        envelopes[asset.name]={rate:info.rate,values:Array.from(fs.readFileSync(out),v=>v/255)};
+      }catch{audioWarnings.push({code:'audio-unchecked',severity:'info',time:0,message:'未能读取音频包络：'+asset.name});}
+    }
+    sendJson(res,200,{rev,issues:[...checkTimeline(timeline,assets),...checkAudioEnvelopes(timeline,envelopes),...audioWarnings]});
+  });
   r.add('GET', '/api/p/:pid/timeline', (req, res, { params }) => {
     const p = store.load(project(params));
     sendJson(res, 200, { rev: p.rev, timeline: p.timeline, ...(p.readOnly ? { readOnly: p.readOnly } : {}) }, { 'X-Djian-Rev': String(p.rev) });
@@ -112,12 +139,13 @@ function registerTimelineRoutes(r, { store, project }) {
     const pid = project(params);
     const body = await readJson(req);
     const actor = ACTORS.has(body?.actor) ? body.actor : 'user';
-    const result = store.apply(pid, {
+    const result = await store.apply(pid, {
       ops: body?.ops, baseRev: Number.isInteger(body?.baseRev) ? body.baseRev : undefined, actor,
       clientId: typeof body?.clientId === 'string' ? body.clientId.slice(0, 80) : null,
       label: typeof body?.label === 'string' ? body.label.slice(0, 80) : null,
       // 撤销/重做由面板以实体级系统操作提交（可写回整实体、绕过锁定）
       system: body?.undo === true && actor === 'user',
+      conflictPolicy: body?.conflictPolicy==='reject'?'reject':'warn',
       batchId: typeof body?.batchId === 'string' ? body.batchId.slice(0, 80) : null,
     });
     sendJson(res, 200, result, { 'X-Djian-Rev': String(result.rev) });
@@ -126,7 +154,7 @@ function registerTimelineRoutes(r, { store, project }) {
     const pid = project(params);
     const body = await readJson(req);
     const label = typeof body?.label === 'string' ? body.label.slice(0, 80) : '整体替换时间线';
-    sendJson(res, 200, store.replace(pid, body?.timeline, { actor: ACTORS.has(body?.actor) ? body.actor : 'user', clientId: body?.clientId ?? null, label }));
+    sendJson(res, 200, await store.replace(pid, body?.timeline, { actor: ACTORS.has(body?.actor) ? body.actor : 'user', clientId: body?.clientId ?? null, label }));
   });
   r.add('GET', '/api/p/:pid/changes', (req, res, { params, url }) => {
     const pid = project(params);
@@ -166,12 +194,12 @@ function registerTimelineRoutes(r, { store, project }) {
     const pid = project(params);
     const body = await readJson(req);
     const label = typeof body?.label === 'string' && body.label.trim() ? body.label.trim().slice(0, 80) : '手动保存的版本';
-    sendJson(res, 200, { ok: true, id: store.snapshot(pid, label, { actor: ACTORS.has(body?.actor) ? body.actor : 'user' }) });
+    sendJson(res, 200, { ok: true, id: await store.serialize(pid,()=>store.snapshotAsync(pid, label, { actor: ACTORS.has(body?.actor) ? body.actor : 'user' })) });
   });
   r.add('POST', '/api/p/:pid/history/:snap/restore', async (req, res, { params }) => {
     const pid = project(params);
     const body = await readJson(req).catch(() => ({}));
-    sendJson(res, 200, store.restoreSnapshot(pid, params.snap, { actor: ACTORS.has(body?.actor) ? body.actor : 'user', clientId: body?.clientId ?? null }));
+    sendJson(res, 200, await store.restoreSnapshot(pid, params.snap, { actor: ACTORS.has(body?.actor) ? body.actor : 'user', clientId: body?.clientId ?? null }));
   });
 }
 
@@ -248,10 +276,9 @@ async function admitAsset(store, pid, temp, wantedName) {
 }
 
 function usageMap(timeline) {
-  const m = new Map();
-  for (const tr of [...timeline.videoTracks, ...timeline.audioTracks]) for (const c of tr.clips) m.set(c.src, (m.get(c.src) ?? 0) + 1);
-  // 图片元素也算引用：正在用的素材不能删
-  for (const o of timeline.overlays) if (o.image?.src) m.set(o.image.src, (m.get(o.image.src) ?? 0) + 1);
+  const m = new Map([...modelIndex(timeline).assets].map(([src,ids])=>[src,ids.size]));
+  for(const def of Object.values(timeline.components??{}))for(const o of def.overlays)if(o.image?.src)m.set(o.image.src,(m.get(o.image.src)??0)+1);
+  for(const src of referencedAssets(timeline))if(!m.has(src))m.set(src,1);
   return m;
 }
 
@@ -428,7 +455,7 @@ function registerRenderRoutes(r, { store, render, project }) {
     if (!cues.length) throw new HttpError(400, '没有解析到字幕（支持 SRT / VTT）');
     const { ops, track, truncated } = cuesToOps(store.load(pid).timeline, cues);
     const actor = body?.actor === 'ai' ? 'ai' : 'user';
-    const result = store.apply(pid, { ops, actor, clientId: typeof body?.clientId === 'string' ? body.clientId : null, label: '导入字幕 ' + ops.length + ' 条', batchId: typeof body?.batchId === 'string' ? body.batchId : null });
+    const result = await store.apply(pid, { ops, actor, clientId: typeof body?.clientId === 'string' ? body.clientId : null, label: '导入字幕 ' + ops.length + ' 条', batchId: typeof body?.batchId === 'string' ? body.batchId : null });
     sendJson(res, 200, { ...result, imported: ops.length, track, truncated });
   });
 
@@ -480,7 +507,7 @@ function registerRenderRoutes(r, { store, render, project }) {
   r.add('POST', '/api/p/:pid/export', async (req, res, { params }) => {
     const pid = project(params);
     const body = await readJson(req);
-    sendJson(res, 202, { started: true, jobId: render.startExport(pid, { scale: body?.scale, quality: body?.quality }) });
+    sendJson(res, 202, { started: true, jobId: render.startExport(pid, { scale: body?.scale, quality: body?.quality, baseRev:body?.baseRev }) });
   });
   r.add('GET', '/api/export/:job', (req, res, { params }) => sendJson(res, 200, render.status(params.job)));
   r.add('POST', '/api/export/:job/cancel', (req, res, { params }) => { render.cancelExport(params.job); sendJson(res, 200, { ok: true }); });

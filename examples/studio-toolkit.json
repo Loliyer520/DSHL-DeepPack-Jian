@@ -1,0 +1,545 @@
+{
+  "meta": {
+    "fps": 30,
+    "width": 960,
+    "height": 640,
+    "background": "#09111f"
+  },
+  "version": 17,
+  "videoTracks": [
+    {
+      "id": "v1",
+      "name": "主轨道",
+      "clips": []
+    }
+  ],
+  "audioTracks": [],
+  "overlays": [
+    {
+      "id": "title",
+      "text": "D剪 STUDIO",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 34,
+      "color": "#cbd5e1",
+      "fontWeight": 800,
+      "x": 0.5,
+      "y": 0.075,
+      "align": "center",
+      "shadow": false,
+      "w": 0.9,
+      "h": 0.06,
+      "kind": "text"
+    },
+    {
+      "id": "subtitle",
+      "text": "COMPONENTS  /  THEME  /  CHOREOGRAPHY  /  3D",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 14,
+      "color": "#64748b",
+      "x": 0.5,
+      "y": 0.135,
+      "align": "center",
+      "shadow": false,
+      "w": 0.9,
+      "h": 0.06,
+      "kind": "text"
+    },
+    {
+      "id": "sceneBackground",
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 48,
+      "color": "#ffffff",
+      "x": 0.27,
+      "y": 0.5,
+      "w": 0.46,
+      "h": 0.62,
+      "shape": {
+        "type": "rect",
+        "fill": "#172338",
+        "radius": 16
+      },
+      "kind": "shape"
+    },
+    {
+      "id": "scene",
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 48,
+      "color": "#ffffff",
+      "scene3d": {
+        "camera": {
+          "yaw": 32,
+          "pitch": 22,
+          "distance": 5.5,
+          "orbit": 14,
+          "target": [
+            0.35,
+            0,
+            0
+          ]
+        },
+        "light": {
+          "direction": [
+            -2,
+            4,
+            3
+          ],
+          "intensity": 0.8,
+          "ambient": 0.3
+        },
+        "objects": [
+          {
+            "id": "cube",
+            "geometry": "cube",
+            "position": [
+              -0.5,
+              0,
+              0
+            ],
+            "scale": 1.2,
+            "spin": [
+              12,
+              32,
+              0
+            ],
+            "color": "#38bdf8"
+          },
+          {
+            "id": "sphere",
+            "geometry": "sphere",
+            "position": [
+              1,
+              0.1,
+              0.1
+            ],
+            "scale": 1.4,
+            "color": "#fb7185"
+          },
+          {
+            "id": "floor",
+            "geometry": "plane",
+            "position": [
+              0,
+              -0.8,
+              0
+            ],
+            "color": "#253751"
+          }
+        ]
+      },
+      "x": 0.27,
+      "y": 0.5,
+      "w": 0.46,
+      "h": 0.62,
+      "shape": {
+        "type": "rect",
+        "fill": "#172338",
+        "radius": 16
+      },
+      "kind": "shape"
+    },
+    {
+      "id": "sceneLabel",
+      "text": "REAL GEOMETRY · CAMERA · LIGHT",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 13,
+      "color": "#64748b",
+      "x": 0.27,
+      "y": 0.83,
+      "align": "center",
+      "shadow": false,
+      "w": 0.47,
+      "h": 0.06,
+      "kind": "text"
+    },
+    {
+      "id": "cardBg",
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 48,
+      "color": "#ffffff",
+      "x": 0.745,
+      "y": 0.32,
+      "styleRole": "card",
+      "group": "card",
+      "w": 0.43,
+      "h": 0.16,
+      "shape": {
+        "type": "rect",
+        "fill": "#172338",
+        "radius": 16
+      },
+      "kind": "shape",
+      "shadow": {
+        "color": "#000000",
+        "blur": 18,
+        "y": 5,
+        "opacity": 0.25
+      }
+    },
+    {
+      "id": "cardTitle",
+      "text": "01   REUSABLE COMPONENT",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 18,
+      "color": "#e2e8f0",
+      "x": 0.745,
+      "y": 0.29,
+      "align": "center",
+      "shadow": false,
+      "styleRole": "heading",
+      "group": "card",
+      "w": 0.38,
+      "h": 0.06,
+      "kind": "text"
+    },
+    {
+      "id": "cardBody",
+      "text": "One definition, independent parameters",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 13,
+      "color": "#94a3b8",
+      "x": 0.745,
+      "y": 0.35,
+      "align": "center",
+      "shadow": false,
+      "styleRole": "body",
+      "group": "card",
+      "w": 0.38,
+      "h": 0.06,
+      "kind": "text"
+    },
+    {
+      "id": "card2_1dcc280",
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 48,
+      "color": "#ffffff",
+      "x": 0.745,
+      "y": 0.32,
+      "styleRole": "card",
+      "componentSlot": "cardBg",
+      "group": "card2",
+      "w": 0.43,
+      "h": 0.16,
+      "shape": {
+        "type": "rect",
+        "fill": "#172338",
+        "radius": 16
+      },
+      "kind": "shape",
+      "shadow": {
+        "color": "#000000",
+        "blur": 18,
+        "y": 5,
+        "opacity": 0.25
+      }
+    },
+    {
+      "id": "card2_1ad8w53",
+      "text": "02   LINKED ANIMATION",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 18,
+      "color": "#e2e8f0",
+      "x": 0.745,
+      "y": 0.29,
+      "align": "center",
+      "shadow": false,
+      "styleRole": "heading",
+      "componentSlot": "cardTitle",
+      "group": "card2",
+      "w": 0.38,
+      "h": 0.06,
+      "kind": "text"
+    },
+    {
+      "id": "card2_1ac1l2v",
+      "text": "Start after the previous card",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 13,
+      "color": "#94a3b8",
+      "x": 0.745,
+      "y": 0.35,
+      "align": "center",
+      "shadow": false,
+      "styleRole": "body",
+      "componentSlot": "cardBody",
+      "group": "card2",
+      "w": 0.38,
+      "h": 0.06,
+      "kind": "text"
+    },
+    {
+      "id": "card3_1dcc280",
+      "text": "",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 48,
+      "color": "#ffffff",
+      "x": 0.745,
+      "y": 0.32,
+      "styleRole": "card",
+      "componentSlot": "cardBg",
+      "group": "card3",
+      "w": 0.43,
+      "h": 0.16,
+      "shape": {
+        "type": "rect",
+        "fill": "#172338",
+        "radius": 16
+      },
+      "kind": "shape",
+      "shadow": {
+        "color": "#000000",
+        "blur": 18,
+        "y": 5,
+        "opacity": 0.25
+      }
+    },
+    {
+      "id": "card3_1ad8w53",
+      "text": "03   SHARED THEME",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 18,
+      "color": "#e2e8f0",
+      "x": 0.745,
+      "y": 0.29,
+      "align": "center",
+      "shadow": false,
+      "styleRole": "heading",
+      "componentSlot": "cardTitle",
+      "group": "card3",
+      "w": 0.38,
+      "h": 0.06,
+      "kind": "text"
+    },
+    {
+      "id": "card3_1ac1l2v",
+      "text": "Change typography and color together",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 13,
+      "color": "#94a3b8",
+      "x": 0.745,
+      "y": 0.35,
+      "align": "center",
+      "shadow": false,
+      "styleRole": "body",
+      "componentSlot": "cardBody",
+      "group": "card3",
+      "w": 0.38,
+      "h": 0.06,
+      "kind": "text"
+    },
+    {
+      "id": "footer",
+      "text": "ASSET REPLACEMENT  ·  RESPONSIVE REFLOW  ·  PREFLIGHT CHECKS",
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "position": "bottom",
+      "fontSize": 13,
+      "color": "#64748b",
+      "x": 0.5,
+      "y": 0.94,
+      "align": "center",
+      "shadow": false,
+      "w": 0.95,
+      "h": 0.06,
+      "kind": "text"
+    }
+  ],
+  "markers": [],
+  "components": {
+    "Feature card": {
+      "duration": 6,
+      "overlays": [
+        {
+          "styleRole": "card",
+          "componentSlot": "cardBg",
+          "id": "cardBg",
+          "text": "",
+          "startSeconds": 0,
+          "endSeconds": 6,
+          "position": "bottom",
+          "fontSize": 48,
+          "color": "#ffffff",
+          "x": 0.745,
+          "y": 0.32,
+          "kind": "shape",
+          "w": 0.43,
+          "h": 0.16,
+          "shape": {
+            "type": "rect",
+            "fill": "#172338",
+            "radius": 16
+          }
+        },
+        {
+          "styleRole": "heading",
+          "componentSlot": "cardTitle",
+          "id": "cardTitle",
+          "text": "01   REUSABLE COMPONENT",
+          "startSeconds": 0,
+          "endSeconds": 6,
+          "position": "bottom",
+          "fontSize": 18,
+          "color": "#cbd5e1",
+          "x": 0.745,
+          "y": 0.29,
+          "align": "center",
+          "shadow": false,
+          "kind": "text",
+          "w": 0.38,
+          "h": 0.06
+        },
+        {
+          "styleRole": "body",
+          "componentSlot": "cardBody",
+          "id": "cardBody",
+          "text": "One definition, independent parameters",
+          "startSeconds": 0,
+          "endSeconds": 6,
+          "position": "bottom",
+          "fontSize": 13,
+          "color": "#cbd5e1",
+          "x": 0.745,
+          "y": 0.35,
+          "align": "center",
+          "shadow": false,
+          "kind": "text",
+          "w": 0.38,
+          "h": 0.06
+        }
+      ],
+      "state": {}
+    }
+  },
+  "groups": {
+    "card2": {
+      "component": {
+        "name": "Feature card",
+        "values": {
+          "cardTitle": {
+            "text": "02   LINKED ANIMATION"
+          },
+          "cardBody": {
+            "text": "Start after the previous card"
+          }
+        }
+      },
+      "cues": [
+        {
+          "id": "second",
+          "preset": "fadeIn",
+          "start": 0,
+          "duration": 0.7,
+          "after": "first",
+          "offset": 0.15
+        }
+      ],
+      "animations": {
+        "y": [
+          {
+            "t": 0,
+            "v": 0.21,
+            "e": "hold"
+          }
+        ]
+      }
+    },
+    "card3": {
+      "component": {
+        "name": "Feature card",
+        "values": {
+          "cardTitle": {
+            "text": "03   SHARED THEME"
+          },
+          "cardBody": {
+            "text": "Change typography and color together"
+          }
+        }
+      },
+      "cues": [
+        {
+          "id": "third",
+          "preset": "fadeIn",
+          "start": 0,
+          "duration": 0.7,
+          "after": "second",
+          "offset": 0.15
+        }
+      ],
+      "animations": {
+        "y": [
+          {
+            "t": 0,
+            "v": 0.42,
+            "e": "hold"
+          }
+        ]
+      }
+    },
+    "card": {
+      "cues": [
+        {
+          "id": "first",
+          "preset": "fadeIn",
+          "start": 0.3,
+          "duration": 0.7
+        }
+      ]
+    }
+  },
+  "theme": {
+    "name": "Studio Demo",
+    "background": "#09111f",
+    "gap": 16,
+    "roles": {
+      "heading": {
+        "color": "#e2e8f0",
+        "fontSize": 18
+      },
+      "body": {
+        "color": "#94a3b8",
+        "fontSize": 13
+      },
+      "card": {
+        "fill": "#172338",
+        "radius": 16,
+        "shadow": {
+          "color": "#000000",
+          "blur": 18,
+          "y": 5,
+          "opacity": 0.25
+        }
+      }
+    }
+  }
+}

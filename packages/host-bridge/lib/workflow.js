@@ -11,6 +11,7 @@ const STYLE_TOOL = {
     type: 'object',
     properties: {
       action: { type: 'string', enum: ['show', 'set', 'clear'] },
+      audience:{type:'string',maxLength:240,description:'目标受众'},platform:{type:'string',maxLength:240,description:'发布平台与屏幕'},mood:{type:'string',maxLength:240,description:'情绪与表达气质'},density:{type:'string',enum:['sparse','balanced','dense']},focalPoint:{type:'string',maxLength:240,description:'每个场景优先突出什么'},typeHierarchy:{type:'string',maxLength:240,description:'标题、正文、注释的层级规则'},motionRules:{type:'string',maxLength:240,description:'动效主次、时长和停留规则'},
       designStyle: { type: 'string', description: '从 djian-style 技能选定的 MG 风格名称或 id' },
       brief: { type: 'string', description: '一句话风格定位，最多 240 字' },
       background: { type: 'string', description: '背景色，如 #0B0D12' },

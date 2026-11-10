@@ -1,0 +1,119 @@
+{
+  "meta": {
+    "fps": 30,
+    "width": 960,
+    "height": 540,
+    "background": "#f3efe7"
+  },
+  "version": 19,
+  "videoTracks": [
+    {
+      "id": "v1",
+      "name": "主轨道",
+      "clips": []
+    }
+  ],
+  "audioTracks": [],
+  "overlays": [
+    {
+      "id": "one",
+      "text": "第一幕：暖色叙事",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "position": "bottom",
+      "fontSize": 58,
+      "color": "#202522",
+      "x": 0.5,
+      "y": 0.5,
+      "w": 0.84,
+      "kind": "text",
+      "fontFamily": "serif",
+      "fontWeight": 700,
+      "lineHeight": 1.2,
+      "typography": {
+        "cjkSpacing": true,
+        "keepNumbers": true,
+        "balance": true
+      },
+      "designRole": "heading",
+      "align": "center",
+      "textFit": {
+        "minFontSize": 18,
+        "maxLines": 5,
+        "autoShrink": true,
+        "preferredFontSize": 58
+      },
+      "h": 0.1437,
+      "valign": "top",
+      "padding": 0
+    },
+    {
+      "id": "two",
+      "text": "第二幕：品牌表达",
+      "startSeconds": 5,
+      "endSeconds": 10,
+      "position": "bottom",
+      "fontSize": 64,
+      "color": "#f5f7fc",
+      "x": 0.5,
+      "y": 0.5,
+      "w": 0.84,
+      "kind": "text",
+      "fontFamily": "sans",
+      "fontWeight": 700,
+      "lineHeight": 1.2,
+      "typography": {
+        "cjkSpacing": true,
+        "keepNumbers": true,
+        "balance": true
+      },
+      "designRole": "heading",
+      "align": "center",
+      "textFit": {
+        "minFontSize": 18,
+        "maxLines": 5,
+        "autoShrink": true,
+        "preferredFontSize": 64
+      },
+      "h": 0.157,
+      "valign": "top",
+      "padding": 0
+    }
+  ],
+  "markers": [],
+  "design": {
+    "name": "编辑叙事",
+    "background": "#f3efe7",
+    "text": "#202522",
+    "muted": "#636960",
+    "accent": "#b64732",
+    "headingFont": "serif",
+    "bodyFont": "sans",
+    "baseSize": 32,
+    "scale": 1.8,
+    "margin": 0.08,
+    "columns": 12,
+    "baseline": 8
+  },
+  "designScenes": {
+    "second": {
+      "name": "second",
+      "start": 5,
+      "end": 10,
+      "design": {
+        "name": "品牌简洁",
+        "background": "#101827",
+        "text": "#f5f7fc",
+        "muted": "#a5b1c4",
+        "accent": "#55d9ca",
+        "headingFont": "sans",
+        "bodyFont": "sans",
+        "baseSize": 32,
+        "scale": 2,
+        "margin": 0.08,
+        "columns": 12,
+        "baseline": 8
+      }
+    }
+  }
+}

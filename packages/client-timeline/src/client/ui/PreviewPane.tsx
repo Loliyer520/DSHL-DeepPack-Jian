@@ -4,7 +4,7 @@ import { Player, type PlayerRef } from '@remotion/player';
 import { TimelineVideo } from '../../../../engine/src/TimelineVideo';
 import { timelineDurationInFrames, timelineHasContent } from '../../../../engine/src/timeline';
 import { labelTex, prefetchMath } from '../../../../engine/src/math';
-import { assetBaseUrl, engineBase, fontsBaseUrl, mediaUrl } from '../engine';
+import { request, assetBaseUrl, engineBase, fontsBaseUrl, mediaUrl } from '../engine';
 import { useEditor, useStore } from '../context';
 import { useSelection } from '../selection';
 import type { Actions } from '../actions';
@@ -17,11 +17,13 @@ function ErrorCatcher({ error, onError }: { error: Error; onError: (e: Error) =>
 
 export function PreviewPane({ actions }: { actions: Actions }) {
   const ed = useEditor();
+  const [proxies,setProxies]=useState<Record<string,string>>({});
   const timeline = useStore((s) => s.timeline);
   const project = useStore((s) => s.project);
   const playerRef = useRef<PlayerRef | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
+  const [quality,setQuality]=useState<'draft'|'standard'|'full'>('full');
   const [failure, setFailure] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -55,7 +57,8 @@ export function PreviewPane({ actions }: { actions: Actions }) {
     ]);
     if (texts.length) prefetchMath(mathBase, texts);
   }, [timeline, mathBase]);
-  const inputProps = useMemo(() => (timeline && project ? { timeline, assetBase: assetBaseUrl(project.id), fontsBase: fontsBaseUrl(), mathBase, cameraOff, onMediaError } : null), [timeline, project, onMediaError, mathBase, cameraOff]);
+  useEffect(()=>{let active=true;const refresh=()=>{if(!project||localStorage.getItem('djian.proxies')!=='1'){setProxies({});return;}void request<{items:{name:string;url:string|null}[]}>('GET','/api/p/'+encodeURIComponent(project.id)+'/proxies').then(r=>{if(active)setProxies(old=>{const next=Object.fromEntries(r.items.filter(p=>p.url).map(p=>[p.name,engineBase()+p.url]));return JSON.stringify(old)===JSON.stringify(next)?old:next;});}).catch(()=>{});};refresh();window.addEventListener('djian-proxies',refresh);const timer=setInterval(refresh,5000);return()=>{active=false;clearInterval(timer);window.removeEventListener('djian-proxies',refresh);};},[project?.id]);
+  const inputProps = useMemo(() => (timeline && project ? { timeline, quality, proxies, assetBase: assetBaseUrl(project.id), fontsBase: fontsBaseUrl(), mathBase, cameraOff, onMediaError } : null), [timeline, project, onMediaError, mathBase, cameraOff, quality, proxies]);
   if (!timeline || !inputProps) return <div className="dj-stage-empty">正在连接剪辑引擎…</div>;
   ed.clock.fps = timeline.meta.fps;
   const duration = Math.max(1, timelineDurationInFrames(timeline));
@@ -84,6 +87,7 @@ export function PreviewPane({ actions }: { actions: Actions }) {
       />
       {!timelineHasContent(timeline) && <div className="dj-stage-empty"><b>从素材库拖入视频、图片或音频开始剪辑</b><span>也可以直接在对话里让 AI 帮你剪</span></div>}
       {rect.width > 0 && <StageCanvas rect={rect} timeline={timeline} stage={wrap} actions={actions} cameraOff={cameraOff} />}
+      <select aria-label="预览质量" title="仅影响预览粒子数量和运动模糊采样；导出保持完整质量" value={quality} onChange={e=>setQuality(e.target.value as typeof quality)} style={{position:'absolute',right:12,top:12,zIndex:20}}><option value="full">预览：完整</option><option value="standard">预览：标准</option><option value="draft">预览：流畅</option></select>
       {failure && (
         <div className="dj-stage-error" role="alert">
           <b>预览暂时不可用</b><span>{failure}</span>

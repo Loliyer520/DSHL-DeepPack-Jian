@@ -1,0 +1,28 @@
+{
+  "scope": "applyOps only; 2,000 text overlays; 100 x-position updates; median of three warmed runs",
+  "node": "v24.20.0",
+  "cpu": "AMD EPYC 7K62 48-Core Processor",
+  "before": {
+    "elements": 2000,
+    "edits": 100,
+    "medianMs": 1026.727982,
+    "runsMs": [
+      846.6900410000001,
+      1026.727982,
+      1040.53838
+    ],
+    "rssMB": 96
+  },
+  "after": {
+    "elements": 2000,
+    "edits": 100,
+    "medianMs": 13.310711999999995,
+    "runsMs": [
+      10.856470999999999,
+      13.310711999999995,
+      13.378229000000005
+    ],
+    "rssMB": 80
+  },
+  "speedup": 77.13546668277404
+}

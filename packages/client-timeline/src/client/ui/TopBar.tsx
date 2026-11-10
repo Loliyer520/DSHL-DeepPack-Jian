@@ -5,6 +5,7 @@ import { absolute } from '../engine';
 import type { Actions } from '../actions';
 import { useEditor, useStore } from '../context';
 import { Icon } from '../Icon';
+import {StudioDialog} from './StudioDialog';
 import { ContextMenu, type MenuItem } from './common';
 
 const STATUS: Record<string, string> = { connecting: '连接中', live: '已同步', saving: '保存中', offline: '离线·重试中', error: '连接失败', readonly: '只读' };
@@ -40,6 +41,7 @@ export function TopBar({ actions, onDialog, narrowTabs, sheet, onSheet }: {
   // AI 进程异常退出时不会发 idle：超过 2 分钟没有新状态就不再显示
   const ai = aiState && Date.now() - aiState.at < 120_000 ? aiState : null;
   const [name, setName] = useState(project?.name ?? '');
+  const [studio,setStudio]=useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const subInput = useRef<HTMLInputElement>(null);
   const importSubs = async (file: File | undefined) => {
@@ -64,6 +66,8 @@ export function TopBar({ actions, onDialog, narrowTabs, sheet, onSheet }: {
   ];
   return (
     <div className="dj-top">
+      {studio&&<StudioDialog onClose={()=>setStudio(false)}/>}
+      <button className="dj-btn" onClick={()=>setStudio(true)}>制作工具</button>
       <div className="dj-title">
         <Icon name="film" />
         <input aria-label="项目名称" value={name} maxLength={60} onChange={(e) => setName(e.target.value)}

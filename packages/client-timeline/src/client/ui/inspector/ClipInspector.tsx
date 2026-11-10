@@ -2,6 +2,12 @@
 import React from 'react';
 import type { Animations, Clip, Easing, Timeline } from '../../../../../engine/src/schema';
 import { BLEND_MODES, DIRECTIONS, EASING_NAMES, TRANSITION_TYPES, clipBox } from '../../../../../engine/src/timeline';
+import { AnimationLibrarySection } from './AnimationLibrarySection';
+import { TrackMatteSection } from './TrackMatteSection';
+import { CurveEditor } from './CurveEditor';
+import { EasingField } from './EasingField';
+import { SpatialSection } from './SpatialSection';
+import { ADVANCED_TRANSITIONS, TRANSITION_LABEL, directionalTransition } from '../../../../../engine/src/transitions';
 import { listAnimationPresets } from '../../../../../engine/src/presets';
 import { useEditor } from '../../context';
 import type { Op } from '../../engine';
@@ -17,11 +23,11 @@ export function clipTabs(c: ClipCtx): [ClipTab, string][] {
   return tabs;
 }
 
-const BLEND_LABEL: Record<string, string> = { normal: '正常', multiply: '正片叠底', screen: '滤色', overlay: '叠加', darken: '变暗', lighten: '变亮', 'color-dodge': '颜色减淡', 'color-burn': '颜色加深', 'hard-light': '强光', 'soft-light': '柔光', difference: '差值', exclusion: '排除' };
-export const TRANSITION_NAMES: Record<string, string> = { dissolve: '叠化', fadeBlack: '闪黑', fadeWhite: '闪白', slide: '滑动', wipe: '擦除', push: '推入', zoom: '缩放', blur: '模糊' };
+export const BLEND_LABEL: Record<string, string> = { normal: '正常', multiply: '正片叠底', screen: '滤色', overlay: '叠加', darken: '变暗', lighten: '变亮', 'color-dodge': '颜色减淡', 'color-burn': '颜色加深', 'hard-light': '强光', 'soft-light': '柔光', difference: '差值', exclusion: '排除' };
+export const TRANSITION_NAMES = TRANSITION_LABEL;
 const DIR_LABEL: Record<string, string> = { left: '向左', right: '向右', up: '向上', down: '向下' };
 const EASE_LABEL: Record<string, string> = { linear: '匀速', in: '缓入', out: '缓出', inOut: '缓入缓出', bounce: '弹跳', elastic: '弹性', hold: '定格' };
-export const CHANNEL_LABEL: Record<string, string> = { x: '位移 X', y: '位移 Y', scale: '缩放', scaleX: '横向缩放', scaleY: '纵向缩放', opacity: '不透明度', rotation: '旋转', volume: '音量', brightness: '亮度', contrast: '对比度', saturate: '饱和度', blur: '模糊', clipL: '左侧擦除', clipR: '右侧擦除', clipT: '顶部擦除', clipB: '底部擦除', progress: '进度' };
+export const CHANNEL_LABEL: Record<string, string> = { x: '位移 X', y: '位移 Y', scale: '缩放', scaleX: '横向缩放', scaleY: '纵向缩放', opacity: '不透明度', rotation: '旋转', volume: '音量', brightness: '亮度', contrast: '对比度', saturate: '饱和度', blur: '模糊', clipL: '左侧擦除', clipR: '右侧擦除', clipT: '顶部擦除', clipB: '底部擦除', progress: '进度', rotationX: '3D 旋转 X', rotationY: '3D 旋转 Y', z: '纵深 Z', perspective: '透视距离', pathProgress: '路径进度', maskX: '遮罩 X', maskY: '遮罩 Y', maskW: '遮罩宽度', maskH: '遮罩高度', maskFeather: '遮罩羽化' };
 
 const GROUP_HINT: Record<string, string> = { 进度: '可与入场动画叠加：文字逐字打出、形状/图标描边绘制、数字滚动、图表生长' };
 
@@ -67,15 +73,10 @@ export function AnimationTab({ target, kind, effects, fps, now }: { target: Targ
           ))}
         </div>
         {atHead.length > 0 && (
-          <Field label="播放头处关键帧的缓动">
-            <select className="dj-select" value={typeof headEase === 'string' ? headEase : Array.isArray(headEase) ? 'custom' : 'linear'}
-              onChange={(e) => commit(atHead.map(([ch, kfs]) => { const k = kfs.find((x) => Math.abs(x.t - rel) < 0.5 / fps)!; return { op: 'setKeyframe', id: target.id, channel: ch, t: k.t, v: k.v, e: e.target.value as Easing }; }), '设置缓动')}>
-              {EASING_NAMES.map((n) => <option key={n} value={n}>{EASE_LABEL[n] ?? n}</option>)}
-              {Array.isArray(headEase) && <option value="custom" disabled>自定义曲线</option>}
-            </select>
-          </Field>
+          <EasingField label="播放头处关键帧的缓动" value={headEase} ops={e=>atHead.map(([ch,kfs])=>{const k=kfs.find(x=>Math.abs(x.t-rel)<.5/fps)!;return {op:'setKeyframe',id:target.id,channel:ch,t:k.t,v:k.v,e};})} />
         )}
       </Section>
+      <CurveEditor target={target} fps={fps} now={now} labels={CHANNEL_LABEL}/><AnimationLibrarySection target={target}/>
     </>
   );
 }
@@ -145,18 +146,20 @@ export function ClipInspector({ c, tab, timeline, now }: { c: ClipCtx; tab: Clip
       const main = timeline.videoTracks[0].clips;
       commit(main.slice(1).map((k) => ({ op: 'updateClip', id: k.id, patch: { transition: cur ?? 'none' } })), '转场应用到全部');
     };
-    const directional = (t: string) => t === 'slide' || t === 'wipe' || t === 'push';
+    const directional = directionalTransition;
     return (
       <Section title="与上一段之间的转场" extra={<button className="dj-btn" onClick={applyAll}>应用到全部</button>}>
         <div className="dj-chips" style={{ marginBottom: 10 }}>
           <button type="button" className="dj-chip" aria-pressed={!cur} onClick={() => set({ transition: 'none' }, '移除转场')}>无</button>
           {TRANSITION_TYPES.map((t) => (
             <button key={t} type="button" className="dj-chip" aria-pressed={cur?.type === t}
-              onClick={() => set({ transition: { type: t, duration: cur?.duration ?? 0.5, ...(directional(t) ? { direction: cur?.direction ?? 'left' } : {}) } }, '转场「' + TRANSITION_NAMES[t] + '」')}>{TRANSITION_NAMES[t]}</button>
+              onClick={() => set({ transition: { type: t, duration: cur?.duration ?? 0.5, ...(directional(t) ? { direction: cur?.direction ?? 'left' } : {}), ...(cur?.ease ? { ease: cur.ease } : {}), ...(cur?.intensity ? { intensity: cur.intensity } : {}) } }, '转场「' + TRANSITION_NAMES[t] + '」')}>{TRANSITION_NAMES[t]}</button>
           ))}
         </div>
         {cur && <div className="dj-grid">
           <NumberField label="时长" value={cur.duration} step={0.05} min={0.05} max={3} suffix="s" ops={(v) => pu({ transition: { ...cur, duration: v } })} editLabel="转场时长" />
+          <EasingField value={cur.ease ?? (ADVANCED_TRANSITIONS.includes(cur.type as typeof ADVANCED_TRANSITIONS[number]) ? 'inOut' : 'linear')} ops={ease=>pu({transition:{...cur,ease}})} />
+          {['flip', 'cube', 'zoomBlur', 'whip'].includes(cur.type) && <NumberField label="强度" value={cur.intensity ?? 1} step={0.05} min={0.1} max={2} digits={2} ops={(v) => pu({ transition: { ...cur, intensity: v } })} editLabel="转场强度" />}
           {directional(cur.type) && (
             <Field label="方向"><Seg label="方向" value={cur.direction ?? 'left'} options={DIRECTIONS.map((d) => [d, DIR_LABEL[d]] as [typeof d, string])} onChange={(d) => set({ transition: { ...cur, direction: d } }, '转场方向')} /></Field>
           )}
@@ -164,7 +167,7 @@ export function ClipInspector({ c, tab, timeline, now }: { c: ClipCtx; tab: Clip
       </Section>
     );
   }
-  return <PictureTab c={c} anim={anim} pu={pu} set={set} box={box} />;
+  return <><Section title="裁切焦点"><div className="dj-grid">{(['x','y'] as const).map(axis=><NumberField key={axis} label={'焦点 '+axis.toUpperCase()} value={clip.focus?.[axis]??.5} min={0} max={1} step={.01} scale={100} suffix="%" ops={v=>pu({focus:{x:.5,y:.5,...clip.focus,[axis]:v}})}/>)}</div></Section><PictureTab c={c} anim={anim} pu={pu} set={set} box={box} /><TrackMatteSection item={clip} timeline={timeline} clip/></>;
 }
 
 function PictureTab({ c, anim, pu, set, box }: { c: ClipCtx; anim: { target: Target; fps: number; now: number; disabled: boolean }; pu: (p: Record<string, unknown>) => Op[]; set: (p: Record<string, unknown>, label: string) => void; box: { x: number; y: number; w: number; h: number } }) {
@@ -198,6 +201,7 @@ function PictureTab({ c, anim, pu, set, box }: { c: ClipCtx; anim: { target: Tar
           <AnimNumber {...anim} channel="opacity" label="不透明度" value={clip.opacity ?? 1} scale={100} suffix="%" step={0.01} min={0} max={1} digits={0} staticOps={(v) => pu({ opacity: v })} />
         </div>
       </Section>
+      <SpatialSection item={clip} target={anim.target} fps={anim.fps} now={anim.now} kind="clip" />
       <Section title="画面">
         <Field label="填充方式"><Seg label="填充方式" value={clip.fit ?? 'cover'} options={[['cover', '裁剪填满'], ['contain', '完整显示'], ['fill', '拉伸']]} onChange={(v) => set({ fit: v }, '填充方式')} /></Field>
         <div className="dj-grid" style={{ marginTop: 8 }}>

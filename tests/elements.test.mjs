@@ -1,3 +1,4 @@
+import {SCHEMA_VERSION} from '../packages/engine/dist/timeline.js';
 // v6 幻灯片元素：形状/图片/图标/图表/文本框的创建与净化、叠放顺序、幻灯片模板、整组操作、描述与撤销
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -172,10 +173,10 @@ test('presets: new channels are valid, progress presets combine with entrance pr
   assert.equal(r.timeline.overlays[0].animations.clipR[0].v, 1, '裁剪通道钳在 0–1');
 });
 
-test('schema v7 reads v5 data and refuses newer data', () => {
+test('schema v12 reads v5 data and refuses newer data', () => {
   const v5 = parseTimeline({ meta: { fps: 30, width: 1280, height: 720 }, version: 5, videoTracks: [{ id: 'v', clips: [] }], audioTracks: [], overlays: [{ id: 'o', text: 'hi', startSeconds: 0, endSeconds: 1, kind: 'title' }] });
-  assert.equal(v5.version, 7);
-  assert.throws(() => parseTimeline({ ...v5, version: 8 }), TimelineVersionError);
+  assert.equal(v5.version, SCHEMA_VERSION);
+  assert.throws(() => parseTimeline({ ...v5, version: SCHEMA_VERSION + 1 }), TimelineVersionError);
 });
 
 test('renderer helpers: rich-text markup, number formatting and shape paths', async () => {

@@ -1,14 +1,15 @@
+import {changedFields,fieldsOverlap} from '../../engine/dist/fieldChanges.js';
 // 项目存储与协同内核：每个项目一份权威时间线 + 单调修订号 rev + 事件日志（events.jsonl）。
 // 用户与 AI 都提交 ops；服务端用引擎共享归约器应用、严格校验、落盘、记事件、推送给订阅者。
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { parseTimeline, validateTimeline, TimelineVersionError } from '../../engine/dist/schema.js';
 import { applyOps, normalizeOp } from '../../engine/dist/ops.js';
 import { texError } from '../../engine/dist/mathServer.js';
-import { diffTimelines } from '../../engine/dist/diff.js';
+import { stableStringify, diffTimelines } from '../../engine/dist/diff.js';
 import { describeBatch } from '../../engine/dist/describe.js';
-import { atomicWriteJson, readJsonFile } from './storage.mjs';
+import { atomicWriteJson, atomicWriteJsonAsync, atomicWriteFileAsync, appendDurable, readJsonFile } from './storage.mjs';
 import { DJIAN_HOME, LEGACY_CURRENT_FILE, LEGACY_TIMELINE, LIMITS, PROJECTS_DIR, SESSIONS_FILE, TRASH_DIR, assetKind } from './config.mjs';
 import { mergeStyle, styleText } from './style.mjs';
 
@@ -56,11 +57,16 @@ class Project {
 }
 
 export class Store {
-  constructor() {
+  constructor({writeCommit=atomicWriteJsonAsync}={}) {
+    this.writeCommit=writeCommit;
     this.projects = new Map();
+    this.writes = new Map();
     fs.mkdirSync(PROJECTS_DIR, { recursive: true });
     this.migrateLegacy();
   }
+
+  serialize(id,task){if(this.closing)return Promise.reject(new StoreError(503,'引擎正在关闭'));const previous=this.writes.get(id)??Promise.resolve();const next=previous.catch(()=>{}).then(task);this.writes.set(id,next);next.finally(()=>{if(this.writes.get(id)===next)this.writes.delete(id);}).catch(()=>{});return next;}
+  async close(){this.closing=true;while(this.writes.size)await Promise.allSettled([...this.writes.values()]);}
 
   // ---------- 路径 ----------
   dir(id) { return path.join(PROJECTS_DIR, sanitizeId(id)); }
@@ -228,9 +234,11 @@ export class Store {
     if (!this.exists(pid)) throw new StoreError(404, '项目不存在', 'PROJECT_NOT_FOUND');
     p = new Project(pid);
     const file = this.timelineFile(pid);
+    let committed=readJsonFile(path.join(this.dir(pid),'commit.json'));
+    if(committed&&(!Number.isInteger(committed.rev)||committed.rev<0||committed.format!==1||!committed.timeline||!Array.isArray(committed.requests)||committed.requests.some(r=>!Array.isArray(r)||typeof r[0]!=='string'||!r[1]?.result))){try{fs.renameSync(path.join(this.dir(pid),'commit.json'),path.join(this.dir(pid),'commit.corrupt-'+stamp()+'.json'));}catch{}committed=null;}
     let raw;
     try {
-      raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+      raw = committed?.format===1 ? committed.timeline : JSON.parse(fs.readFileSync(file, 'utf8'));
       p.timeline = parseTimeline(raw);
       // 旧格式首次加载即升级落盘；升级前留一份原样备份，便于回退旧版插件
       if (raw.version !== p.timeline.version) {
@@ -254,6 +262,11 @@ export class Store {
       }
     }
     this.readJournalTail(p);
+    if(committed?.format===1&&!p.readOnly){
+      p.rev=committed.rev;p.events=p.events.filter(e=>e.rev<=p.rev);
+      if(committed.event&&!p.events.some(e=>e.rev===committed.event.rev)){p.events.push(committed.event);p.journalPending=committed.event;}
+      p.batches=new Map(committed.requests??[]);
+    }
     this.projects.set(pid, p);
     if (p.corruptNotice) this.record(p, { actor: 'system', label: '自动恢复', summary: [p.corruptNotice], changed: ['*'], patch: [] });
     return p;
@@ -264,7 +277,7 @@ export class Store {
     try { text = fs.readFileSync(this.journalFile(p.id), 'utf8'); } catch { return; }
     const lines = text.split('\n').filter(Boolean);
     for (const line of lines.slice(-LIMITS.eventRing)) {
-      try { p.events.push(JSON.parse(line)); } catch {}
+      try { const e=JSON.parse(line);if(!p.events.some(old=>old.rev===e.rev))p.events.push(e); } catch {}
     }
     p.rev = p.events.length ? p.events[p.events.length - 1].rev : 0;
   }
@@ -286,6 +299,13 @@ export class Store {
     p.lastSnapshotAt = Date.now();
     p.lastSnapshotRev = p.rev;
     return snapId;
+  }
+  async snapshotAsync(id,label,{actor='system',timeline}={}){
+    const p=this.load(id),snapId='v'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),dir=this.historyDir(id),at=new Date().toISOString();
+    await atomicWriteJsonAsync(path.join(dir,snapId+'.json'),{id:snapId,at,label,rev:p.rev,actor,timeline:timeline??p.timeline});
+    const index=[...this.snapshotIndex(id),{id:snapId,at,label:String(label??'').slice(0,80),rev:p.rev,actor}];
+    while(index.length>LIMITS.historyKept){const old=index.shift();await fs.promises.rm(path.join(dir,old.id+'.json'),{force:true});}
+    await atomicWriteJsonAsync(path.join(dir,'index.json'),index);p.lastSnapshotAt=Date.now();p.lastSnapshotRev=p.rev;return snapId;
   }
   listSnapshots(id) {
     this.load(id);
@@ -314,14 +334,22 @@ export class Store {
    * 应用一批操作。actor: user/ai/system；system=true 时以系统身份执行（撤销/恢复，绕过锁定）。
    * baseRev 落后时仍按“意图”应用（操作按 id 寻址，天然可交换），并报告与他人修改重叠的实体。
    */
-  apply(id, { ops, baseRev, actor = 'user', clientId = null, label = null, system = false, batchId = null }) {
+  requestRecord(p,{actor='user',batchId,ops,system=false,requestPayload}){
+    const key=batchId?JSON.stringify([actor,batchId]):null,digest=createHash('sha256').update(stableStringify({intent:requestPayload??ops,actor,system})).digest('hex');
+    const done=key?p.batches?.get(key):null;
+    if(done&&done.digest!==digest)throw new StoreError(409,'同一请求 ID 不能提交不同内容','REQUEST_ID_REUSED');
+    return {key,digest,replay:done?{...done.result,duplicate:true}:null};
+  }
+  apply(id,args){return this.serialize(id,()=>this.applyNow(id,args));}
+  applyIntent(id,args,build){return this.serialize(id,()=>{const p=this.load(id),record=this.requestRecord(p,args);if(record.replay)return record.replay;return this.applyNow(id,{...args,ops:build(p.timeline)});});}
+  async applyNow(id, { ops, baseRev, actor = 'user', clientId = null, label = null, system = false, batchId = null, conflictPolicy='warn', requestPayload }) {
     const p = this.load(id);
-    // 幂等：同一批次重发（网络重试、刷新后重放草稿）直接返回首次结果
-    if (batchId) {
-      const done = p.batches?.get(batchId) ?? p.events.find((e) => e.batchId === batchId);
-      if (done) return { ...(done.result ?? { rev: done.rev, receipts: [], changed: done.changed ?? [], summary: done.summary ?? [], patch: done.patch ?? [], conflicts: [] }), duplicate: true };
-    }
+    const record=this.requestRecord(p,{actor,batchId,ops,system,requestPayload}),requestKey=record.key,digest=record.digest;
+    if(record.replay)return record.replay;
+    if(p.journalPending){await appendDurable(this.journalFile(id),p.journalPending);p.journalPending=null;}
     if (p.readOnly) throw new StoreError(423, p.readOnly, 'READ_ONLY');
+    if(conflictPolicy==='reject'&&!Number.isInteger(baseRev))throw new StoreError(400,'严格冲突检查需要 baseRev，请先读取时间线','REVISION_REQUIRED');
+    if(Number.isInteger(baseRev)&&baseRev>p.rev)throw new StoreError(409,'baseRev 高于当前版本，请重新读取时间线','INVALID_REVISION');
     if (!Array.isArray(ops) || !ops.length) throw new StoreError(400, 'ops 必须是非空数组');
     if (ops.length > 2000) throw new StoreError(413, '单批操作不能超过 2000 条');
     const before = p.timeline;
@@ -336,59 +364,69 @@ export class Store {
       throw new StoreError(422, '修改后的时间线不合法，整批未保存：' + issues.join('；'), 'INVALID_RESULT', { receipts: result.receipts, issues });
     }
     const patch = diffTimelines(before, result.timeline);
-    if (!patch.length) return { rev: p.rev, receipts: result.receipts, changed: [], summary: [], patch: [], conflicts: [] };
 
-    // 与他人（其他客户端/AI）自 baseRev 以来修改过的实体重叠 → 提示，但不阻断
-    const conflicts = [];
-    if (Number.isInteger(baseRev) && baseRev < p.rev) {
-      const mine = new Set(result.changed);
-      for (const ev of p.events) {
-        if (ev.rev <= baseRev || (clientId && ev.clientId === clientId)) continue;
-        for (const key of ev.changed ?? []) if (mine.has(key)) conflicts.push({ key, rev: ev.rev, actor: ev.actor, summary: ev.summary?.[0] });
+
+    if(!patch.length&&!requestKey)return {rev:p.rev,receipts:result.receipts,changed:[],summary:[],patch:[],conflicts:[]};
+    const fieldPaths=changedFields(before,result.timeline),conflicts=[];
+    if(Number.isInteger(baseRev)&&baseRev<p.rev){
+      if(conflictPolicy==='reject'&&baseRev<(p.events[0]?.rev??p.rev+1)-1)throw new StoreError(409,'修订历史不足，请重新读取时间线','STALE_REVISION');
+      for(const ev of p.events){if(ev.rev<=baseRev||(clientId&&ev.clientId===clientId))continue;
+        const overlap=ev.fields?fieldPaths.filter(a=>ev.fields.some(b=>fieldsOverlap(a,b))):result.changed.filter(k=>(ev.changed??[]).includes(k));
+        for(const key of overlap)conflicts.push({key,rev:ev.rev,actor:ev.actor,summary:ev.summary?.[0]});
       }
     }
-
-    this.maybeSnapshot(p, actor, before);
+    if(conflictPolicy==='reject'&&conflicts.length)throw new StoreError(409,'修改字段已被其他编辑者更新，请重新读取后再提交','FIELD_CONFLICT',{conflicts,rev:p.rev});
+    await this.maybeSnapshot(p, actor, before);
     const normalized = ops.map((o) => normalizeOp(o).op ?? o);
     const summary = describeBatch(before, result.timeline, normalized, result.receipts, label ?? undefined);
-    p.timeline = result.timeline;
-    atomicWriteJson(this.timelineFile(id), p.timeline);
-    if (result.changed.includes('meta') || result.changed.includes('*')) this.touchProjectMeta(id, p.timeline.meta);
     const inverse = diffTimelines(result.timeline, before);
-    const event = this.record(p, { actor, clientId, label, summary, changed: result.changed, patch, inverse, batchId });
-    const response = { rev: event.rev, receipts: result.receipts, changed: result.changed, summary, patch, conflicts };
-    if (batchId) {
-      p.batches ??= new Map();
-      p.batches.set(batchId, { result: response });
-      if (p.batches.size > 300) p.batches.delete(p.batches.keys().next().value);
+    const event=patch.length?{rev:p.rev+1,at:new Date().toISOString(),actor,clientId,label,summary,changed:result.changed,patch,inverse,fields:fieldPaths,...(batchId?{batchId}:{})}:null;
+    const response={rev:event?.rev??p.rev,receipts:result.receipts,changed:result.changed,summary,patch,conflicts};
+    const batches=new Map(p.batches??[]);
+    if(requestKey){batches.set(requestKey,{digest,result:response,bytes:Buffer.byteLength(JSON.stringify(response))});let bytes=[...batches.values()].reduce((n,r)=>n+(r.bytes??Buffer.byteLength(JSON.stringify(r.result))),0);while(batches.size>300||(bytes>8*1024*1024&&batches.size>1)){const key=batches.keys().next().value;bytes-=batches.get(key).bytes??Buffer.byteLength(JSON.stringify(batches.get(key).result));batches.delete(key);}}
+    // One fsynced commit is authoritative for timeline, revision, event and deduplication receipt.
+    const commit={format:1,commitId:randomUUID(),timeline:result.timeline,rev:response.rev,event:event??p.events.at(-1)??null,requests:[...batches]};
+    const publish=()=>{p.timeline=result.timeline;p.batches=batches;p.rev=response.rev;if(event){p.events.push(event);if(p.events.length>LIMITS.eventRing)p.events.splice(0,p.events.length-LIMITS.eventRing);}};
+    try{await this.writeCommit(path.join(this.dir(id),'commit.json'),commit);}
+    catch(e){
+      // A rename can succeed before a directory fsync reports failure. Keep memory aligned with that visible commit.
+      const visible=readJsonFile(path.join(this.dir(id),'commit.json'));
+      if(visible?.commitId===commit.commitId){publish();if(event){p.journalPending=event;this.emit(p,{type:'ops',...event});}}
+      throw e;
     }
+    publish();
+    try{await atomicWriteJsonAsync(this.timelineFile(id),p.timeline);if(event){await appendDurable(this.journalFile(id),event);const journal=this.journalFile(id);if((await fs.promises.stat(journal)).size>LIMITS.journalBytes){const lines=(await fs.promises.readFile(journal,'utf8')).split('\n').filter(Boolean).slice(-LIMITS.journalKeepLines);await atomicWriteFileAsync(journal,lines.join('\n')+'\n');}}}
+    catch(e){if(event)p.journalPending=event;console.warn('[djian] 已持久化事务，兼容文件将在后续写入或重启时恢复：',e.message);}
+    if(event){this.emit(p,{type:'ops',...event});if(result.changed.includes('meta')||result.changed.includes('*')){try{this.touchProjectMeta(id,p.timeline.meta);}catch(e){console.warn('[djian] 项目索引写入失败，已保留完整事务：',e.message);}}}
+
     return response;
   }
 
   /** 整份替换（历史恢复/导入）：翻译成实体级系统操作，事件流保持可回放 */
-  replace(id, timeline, { actor = 'user', clientId = null, label = '替换时间线' } = {}) {
+  replace(id, timeline, options = {}) {return this.serialize(id,()=>this.replaceNow(id,timeline,options));}
+  replaceNow(id, timeline, { actor = 'user', clientId = null, label = '替换时间线' } = {}) {
     const p = this.load(id);
     const next = parseTimeline(timeline);
     const ops = diffTimelines(p.timeline, next);
     if (!ops.length) return { rev: p.rev, receipts: [], changed: [], summary: [], patch: [], conflicts: [] };
-    return this.apply(id, { ops, actor, clientId, label, system: true });
+    return this.applyNow(id, { ops, actor, clientId, label, system: true });
   }
 
-  restoreSnapshot(id, snapId, opts = {}) {
+  restoreSnapshot(id, snapId, opts = {}) {return this.serialize(id,async()=>{
     if (!/^v[\w]+$/.test(snapId)) throw new StoreError(404, '快照不存在');
     const snap = readJsonFile(path.join(this.historyDir(id), snapId + '.json'));
     if (!snap?.timeline) throw new StoreError(404, '快照不存在');
-    this.snapshot(id, '恢复前自动快照', { actor: opts.actor ?? 'user' });
-    return this.replace(id, snap.timeline, { ...opts, label: '恢复版本「' + (snap.label ?? snapId) + '」' });
-  }
+    await this.snapshotAsync(id, '恢复前自动快照', { actor: opts.actor ?? 'user' });
+    return this.replaceNow(id, snap.timeline, { ...opts, label: '恢复版本「' + (snap.label ?? snapId) + '」' });
+  });}
 
-  maybeSnapshot(p, actor, before) {
+  async maybeSnapshot(p, actor, before) {
     const now = Date.now();
     // AI 连续修改只在开始时拍一次“修改前”快照；用户修改按时间/修订数节流
     if (actor === 'ai' && (p.lastActor !== 'ai' || now - p.lastSnapshotAt > 120_000)) {
-      this.snapshot(p.id, 'AI 修改前', { actor: 'system', timeline: before });
+      await this.snapshotAsync(p.id, 'AI 修改前', { actor: 'system', timeline: before });
     } else if (actor === 'user' && (p.rev - p.lastSnapshotRev >= 50 || (p.lastSnapshotAt && now - p.lastSnapshotAt > 600_000))) {
-      this.snapshot(p.id, '自动保存', { actor: 'system', timeline: before });
+      await this.snapshotAsync(p.id, '自动保存', { actor: 'system', timeline: before });
     } else if (!p.lastSnapshotAt) {
       p.lastSnapshotAt = now;
       p.lastSnapshotRev = p.rev;

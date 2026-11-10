@@ -1,3 +1,4 @@
+import {SCHEMA_VERSION} from '../packages/engine/dist/timeline.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyOps, normalizeOp, splitOffset } from '../packages/engine/dist/ops.js';
@@ -19,7 +20,7 @@ const base = () => parseTimeline({
 
 test('legacy overlays get deterministic ids and the current schema version', () => {
   const a = base(), b = base();
-  assert.equal(a.version, 7);
+  assert.equal(a.version, SCHEMA_VERSION);
   assert.equal(a.overlays[0].id, b.overlays[0].id);
   assert.notEqual(a.overlays[0].id, a.overlays[1].id);
   assert.deepEqual(validateTimeline(a), []);

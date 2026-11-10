@@ -88,7 +88,6 @@ export function TextInspector({ o, tab, timeline, now, extra }: { o: Overlay; ta
     </>
   );
   const stroke = o.stroke;
-  const shadow = o.shadow === false ? null : o.shadow;
   const bg = o.background;
   return (
     <>
@@ -128,14 +127,6 @@ export function TextInspector({ o, tab, timeline, now, extra }: { o: Overlay; ta
         {stroke && <div className="dj-grid">
           <ColorField label="颜色" value={stroke.color} onChange={(v) => set({ stroke: { ...stroke, color: v } }, '描边颜色')} />
           <NumberField label="粗细" value={stroke.width} step={0.5} min={0} max={40} digits={1} suffix="px" ops={(v) => pu({ stroke: { ...stroke, width: v } })} editLabel="描边粗细" />
-        </div>}
-      </Section>
-      <Section title="阴影" extra={<Toggle label="" checked={Boolean(shadow)} onChange={(v) => set({ shadow: v ? { color: 'rgba(0,0,0,0.6)', blur: 8, y: 2 } : false }, v ? '开启阴影' : '关闭阴影')} />}>
-        {shadow && <div className="dj-grid">
-          <ColorField label="颜色" value={shadow.color} onChange={(v) => set({ shadow: { ...shadow, color: v } }, '阴影颜色')} />
-          <NumberField label="模糊" value={shadow.blur} step={1} min={0} max={80} digits={0} suffix="px" ops={(v) => pu({ shadow: { ...shadow, blur: v } })} editLabel="阴影模糊" />
-          <NumberField label="偏移 X" value={shadow.x ?? 0} step={1} min={-80} max={80} digits={0} ops={(v) => pu({ shadow: { ...shadow, x: v } })} editLabel="阴影偏移" />
-          <NumberField label="偏移 Y" value={shadow.y ?? 2} step={1} min={-80} max={80} digits={0} ops={(v) => pu({ shadow: { ...shadow, y: v } })} editLabel="阴影偏移" />
         </div>}
       </Section>
       {o.kind !== 'shape' && <Section title="背景" extra={<Toggle label="" checked={Boolean(bg)} onChange={(v) => set({ background: v ? { color: '#000000', opacity: 0.6, padding: 12, radius: 8 } : null }, v ? '开启背景' : '关闭背景')} />}>
