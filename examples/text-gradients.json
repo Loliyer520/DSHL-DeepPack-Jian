@@ -1,0 +1,222 @@
+{
+  "version": 21,
+  "meta": {
+    "width": 960,
+    "height": 540,
+    "fps": 30,
+    "background": "#0b1020"
+  },
+  "overlays": [
+    {
+      "kind": "text",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "x": 0.5,
+      "w": 0.85,
+      "align": "center",
+      "shadow": false,
+      "id": "label",
+      "text": "NATIVE MULTISTOP GRADIENTS",
+      "fontSize": 17,
+      "letterSpacing": 0.2,
+      "color": "#8994ae",
+      "y": 0.14,
+      "h": 0.08,
+      "fontFamily": "sans"
+    },
+    {
+      "kind": "text",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "x": 0.5,
+      "w": 0.85,
+      "align": "center",
+      "shadow": false,
+      "id": "aurora",
+      "text": "多色渐变 · AURORA",
+      "fontSize": 63,
+      "fontWeight": 800,
+      "textFill": {
+        "type": "linear",
+        "angle": 0,
+        "stops": [
+          {
+            "offset": 0,
+            "color": "#38bdf8"
+          },
+          {
+            "offset": 0.5,
+            "color": "#a78bfa"
+          },
+          {
+            "offset": 1,
+            "color": "#f472b6"
+          }
+        ]
+      },
+      "y": 0.31,
+      "h": 0.18,
+      "fontFamily": "sans"
+    },
+    {
+      "kind": "text",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "x": 0.5,
+      "w": 0.85,
+      "align": "center",
+      "shadow": false,
+      "id": "gold",
+      "text": "金属质感 · GOLD",
+      "fontSize": 56,
+      "fontWeight": 800,
+      "textFill": {
+        "type": "linear",
+        "angle": 90,
+        "stops": [
+          {
+            "offset": 0,
+            "color": "#fff3b0"
+          },
+          {
+            "offset": 0.35,
+            "color": "#d99a25"
+          },
+          {
+            "offset": 0.5,
+            "color": "#fff8cf"
+          },
+          {
+            "offset": 0.65,
+            "color": "#a86614"
+          },
+          {
+            "offset": 1,
+            "color": "#f9db79"
+          }
+        ]
+      },
+      "stroke": {
+        "color": "#9d6b22",
+        "width": 1
+      },
+      "y": 0.51,
+      "h": 0.18,
+      "fontFamily": "sans"
+    },
+    {
+      "kind": "text",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "x": 0.5,
+      "w": 0.85,
+      "align": "center",
+      "shadow": false,
+      "id": "outline",
+      "text": "GRADIENT OUTLINE",
+      "fontSize": 49,
+      "fontWeight": 900,
+      "color": "#0b1020",
+      "textStrokeFill": {
+        "type": "linear",
+        "angle": 0,
+        "stops": [
+          {
+            "offset": 0,
+            "color": "#38bdf8"
+          },
+          {
+            "offset": 0.5,
+            "color": "#a78bfa"
+          },
+          {
+            "offset": 1,
+            "color": "#f472b6"
+          }
+        ]
+      },
+      "stroke": {
+        "color": "#fff",
+        "width": 3
+      },
+      "y": 0.7,
+      "h": 0.15,
+      "fontFamily": "sans"
+    },
+    {
+      "kind": "text",
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "x": 0.5,
+      "w": 0.85,
+      "align": "center",
+      "shadow": false,
+      "id": "note",
+      "text": "2–8 色标  /  独立描边  /  动态渐变",
+      "fontSize": 20,
+      "color": "#8994ae",
+      "y": 0.87,
+      "h": 0.08,
+      "fontFamily": "sans"
+    },
+    {
+      "id": "star",
+      "kind": "icon",
+      "text": "",
+      "icon": {
+        "name": "star",
+        "fill": {
+          "type": "linear",
+          "angle": 0,
+          "stops": [
+            {
+              "offset": 0,
+              "color": "#38bdf8"
+            },
+            {
+              "offset": 0.5,
+              "color": "#a78bfa"
+            },
+            {
+              "offset": 1,
+              "color": "#f472b6"
+            }
+          ]
+        },
+        "strokeFill": {
+          "type": "linear",
+          "angle": 90,
+          "stops": [
+            {
+              "offset": 0,
+              "color": "#fff3b0"
+            },
+            {
+              "offset": 0.35,
+              "color": "#d99a25"
+            },
+            {
+              "offset": 0.5,
+              "color": "#fff8cf"
+            },
+            {
+              "offset": 0.65,
+              "color": "#a86614"
+            },
+            {
+              "offset": 1,
+              "color": "#f9db79"
+            }
+          ]
+        },
+        "strokeWidth": 1
+      },
+      "startSeconds": 0,
+      "endSeconds": 5,
+      "x": 0.91,
+      "y": 0.15,
+      "w": 0.045,
+      "h": 0.08
+    }
+  ]
+}

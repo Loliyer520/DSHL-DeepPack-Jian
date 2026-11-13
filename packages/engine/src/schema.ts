@@ -315,7 +315,8 @@ export const imageSchema = z.object({
 export const iconSchema = z.object({
   name: z.string().min(1).max(60), // 内置图标名（见 icons.ts）
   strokeWidth: z.number().min(0.25).max(6).optional(),
-  fill: colorSchema.optional(), // 图标内部填充色（缺省不填充）
+  fill: fillSchema.optional(), // 图标内部填充（缺省不填充）
+  strokeFill: fillSchema.optional(), // 覆盖通用纯色，支持多色渐变
 });
 export const chartSchema = z.object({
   type: z.enum(CHART_TYPES),
@@ -433,6 +434,8 @@ export const overlaySchema = z.object({
   position: z.enum(["top", "center", "bottom"]).default("bottom"),
   fontSize: z.number().positive().max(2000).default(64),
   color: colorSchema.default("#ffffff"),
+  textFill: fillSchema.optional(), // 字面填充，缺省使用 color
+  textStrokeFill: fillSchema.optional(), // 文字描边填充，宽度仍由 stroke.width 控制
   fontFamily: z.string().optional(),
   fontWeight: z.number().int().min(100).max(900).optional(),
   animations: animationsSchema.optional(),

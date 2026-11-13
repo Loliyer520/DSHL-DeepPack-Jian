@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "type": "profile",
   "name": "djian",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "displayName": {
     "zh-CN": "D剪 · AI 视频剪辑工作台",
     "en-US": "Djian · AI Video Editing Workbench"
@@ -45,11 +45,11 @@
     "@deepseek-ai/dsh-web-app"
   ],
   "dependencies": {
-    "@djian/engine": "vendor:djian-engine-0.2.0.tgz",
-    "@djian/webui": "vendor:djian-webui-0.2.0.tgz",
-    "@djian/host-bridge": "vendor:djian-host-bridge-0.2.0.tgz",
-    "@djian/client-ui-timeline": "vendor:djian-client-ui-timeline-0.2.0.tgz",
-    "@djian/client-ui-library": "vendor:djian-client-ui-library-0.2.0.tgz",
+    "@djian/engine": "vendor:djian-engine-0.3.0.tgz",
+    "@djian/webui": "vendor:djian-webui-0.3.0.tgz",
+    "@djian/host-bridge": "vendor:djian-host-bridge-0.3.0.tgz",
+    "@djian/client-ui-timeline": "vendor:djian-client-ui-timeline-0.3.0.tgz",
+    "@djian/client-ui-library": "vendor:djian-client-ui-library-0.3.0.tgz",
     "@remotion/renderer": "4.0.526",
     "remotion": "4.0.526",
     "react": "18.3.1",

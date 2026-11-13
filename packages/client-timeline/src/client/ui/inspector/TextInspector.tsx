@@ -1,6 +1,7 @@
 // 文字（字幕/标题）属性：文本与样式 · 位置与时间 · 动画
 import React, { useEffect, useState } from 'react';
 import type { Overlay, Timeline } from '../../../../../engine/src/schema';
+import {FillField,GradientFrames} from './GradientFields';
 import { FONTS } from '../../../../../engine/src/fonts';
 import type { Op } from '../../engine';
 import { Field } from '../common';
@@ -17,6 +18,8 @@ const STYLES: { label: string; patch: Record<string, unknown> }[] = [
   { label: '黑底白字', patch: { color: '#ffffff', stroke: null, background: { color: '#000000', opacity: 0.6, padding: 12, radius: 8 }, shadow: false } },
   { label: '白底黑字', patch: { color: '#111111', stroke: null, background: { color: '#ffffff', opacity: 0.92, padding: 12, radius: 8 }, shadow: false } },
   { label: '霓虹', patch: { color: '#fdf4ff', stroke: null, background: null, shadow: { color: '#e879f9', blur: 24 } } },
+  { label: '极光渐变', patch: { textFill: { type: 'linear', angle: 0, stops: [{ offset: 0, color: '#38bdf8' }, { offset: 0.5, color: '#a78bfa' }, { offset: 1, color: '#f472b6' }] }, stroke: null, background: null, shadow: false } },
+  { label: '金属金', patch: { textFill: { type: 'linear', angle: 90, stops: [{ offset: 0, color: '#fff3b0' }, { offset: 0.35, color: '#d99a25' }, { offset: 0.5, color: '#fff8cf' }, { offset: 0.65, color: '#a86614' }, { offset: 1, color: '#f9db79' }] }, stroke: { color: '#6f4515', width: 1 }, background: null, shadow: false } },
   { label: '纯净', patch: { color: '#ffffff', stroke: null, background: null, shadow: false } },
 ];
 
@@ -98,7 +101,7 @@ export function TextInspector({ o, tab, timeline, now, extra }: { o: Overlay; ta
       </Section>
       {extra}
       <Section title="预设样式">
-        <div className="dj-chips">{STYLES.map((s) => <button key={s.label} type="button" className="dj-chip" onClick={() => set(s.patch, '样式「' + s.label + '」')}>{s.label}</button>)}</div>
+        <div className="dj-chips">{STYLES.map((s) => <button key={s.label} type="button" className="dj-chip" onClick={() => set({textFill:null,textStrokeFill:null,...s.patch}, '样式「' + s.label + '」')}>{s.label}</button>)}</div>
       </Section>
       <Section title="字体">
         <div className="dj-grid">
@@ -113,7 +116,7 @@ export function TextInspector({ o, tab, timeline, now, extra }: { o: Overlay; ta
               {[300, 400, 500, 600, 700, 800, 900].map((w) => <option key={w} value={w}>{w}</option>)}
             </select>
           </Field>
-          <ColorField label="颜色" value={o.color} onChange={(v) => set({ color: v }, '文字颜色')} />
+
           <Toggle label="斜体" checked={Boolean(o.italic)} onChange={(v) => set({ italic: v }, '斜体')} />
           <Toggle label="下划线" checked={Boolean(o.underline)} onChange={(v) => set({ underline: v }, '下划线')} />
         </div>
@@ -123,9 +126,11 @@ export function TextInspector({ o, tab, timeline, now, extra }: { o: Overlay; ta
           <NumberField label="行高" value={o.lineHeight ?? 1.3} step={0.05} min={0.8} max={3} ops={(v) => pu({ lineHeight: v })} />
         </div>
       </Section>
+      <Section title="文字填充"><FillField value={o.textFill??o.color} allowNone={false} onChange={(value,label)=>set(typeof value==='string'?{color:value,textFill:null}:{textFill:value},label)}/><p className="dj-hint">渐变覆盖整段文字，包括强调文字。支持 2–8 个色标。</p></Section>
+      {o.kind!=='shape'&&<GradientFrames o={o} fps={fps}/>}
       <Section title="描边" extra={<Toggle label="" checked={Boolean(stroke)} onChange={(v) => set({ stroke: v ? { color: '#000000', width: 3 } : null }, v ? '开启描边' : '关闭描边')} />}>
         {stroke && <div className="dj-grid">
-          <ColorField label="颜色" value={stroke.color} onChange={(v) => set({ stroke: { ...stroke, color: v } }, '描边颜色')} />
+          <div style={{gridColumn:'1 / -1'}}><FillField value={o.textStrokeFill??stroke.color} allowNone={false} onChange={(value,label)=>set(typeof value==='string'?{stroke:{...stroke,color:value},textStrokeFill:null}:{textStrokeFill:value},label)}/></div>
           <NumberField label="粗细" value={stroke.width} step={0.5} min={0} max={40} digits={1} suffix="px" ops={(v) => pu({ stroke: { ...stroke, width: v } })} editLabel="描边粗细" />
         </div>}
       </Section>

@@ -11,6 +11,8 @@ import { evalKeyframes, formatNumber, isBoxElement } from "./timeline";
 export { formatNumber };
 import { spatialState } from "./spatial";
 import { maskState } from "./masks";
+import { TextPaint } from "./TextPaint";
+import { Paint } from "./paint";
 import { gradientOverlay } from "./gradient";
 import { glassStyle } from "./glass";
 import { pathMotion } from "./motionPath";
@@ -350,14 +352,6 @@ const headAt = (tip: Pt, ang: number, len: number, wid: number) => {
   return poly([[tip[0], tip[1]], [bx - s * wid, by + c * wid], [bx + s * wid, by - c * wid]]);
 };
 
-function Paint({ fill, id }: { fill: Fill; id: string }) {
-  if (typeof fill === "string") return null;
-  const stops = fill.stops.map((s, i) => <stop key={i} offset={s.offset} stopColor={s.color} />);
-  if (fill.type === "radial") return <radialGradient id={id} cx="50%" cy="50%" r="60%">{stops}</radialGradient>;
-  const a = ((fill.angle ?? 0) * Math.PI) / 180;
-  const c = Math.cos(a) / 2, s = Math.sin(a) / 2;
-  return <linearGradient id={id} x1={0.5 - c} y1={0.5 - s} x2={0.5 + c} y2={0.5 + s}>{stops}</linearGradient>;
-}
 export const solidOf = (fill: Fill | undefined): string | undefined => (typeof fill === "string" ? fill : fill?.stops[fill.stops.length - 1]?.color);
 const dashArray = (dash: string | undefined, sw: number) => (dash === "dashed" ? sw * 3 + " " + sw * 2 : dash === "dotted" ? "0 " + sw * 2 : undefined);
 
@@ -416,7 +410,8 @@ const ImageBox: React.FC<{ ov: Overlay }> = ({ ov }) => {
   );
 };
 
-export const IconSvg: React.FC<{ name: string | undefined; color: string; strokeWidth?: number; fill?: string; progress: number }> = ({ name, color, strokeWidth, fill, progress }) => {
+export const IconSvg: React.FC<{ name: string | undefined; color: string; strokeWidth?: number; fill?: Fill; strokeFill?: Fill; progress: number }> = ({ name, color, strokeWidth, fill, strokeFill, progress }) => {
+  const uid="dj-icon-"+React.useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const def = iconByName(name);
   if (!def) {
     return <div style={{ position: "absolute", inset: 0, border: "2px dashed " + color, borderRadius: 8, opacity: 0.5, display: "flex", alignItems: "center", justifyContent: "center", color, fontSize: 24 }}>?</div>;
@@ -424,7 +419,8 @@ export const IconSvg: React.FC<{ name: string | undefined; color: string; stroke
   const drawing = progress < 1;
   return (
     <svg viewBox="0 0 24 24" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style={{ position: "absolute", inset: 0, overflow: "visible" }}
-      fill={fill ?? "none"} stroke={color} strokeWidth={strokeWidth ?? 2} strokeLinecap="round" strokeLinejoin="round">
+      fill={typeof fill==="object"?`url(#${uid}-fill)`:fill ?? "none"} stroke={typeof strokeFill==="object"?`url(#${uid}-stroke)`:strokeFill ?? color} strokeWidth={strokeWidth ?? 2} strokeLinecap="round" strokeLinejoin="round">
+      <defs>{fill&&<Paint fill={fill} id={uid+"-fill"}/ >}{strokeFill&&<Paint fill={strokeFill} id={uid+"-stroke"}/>}</defs>
       {def.node.map(([tag, attrs], i) => React.createElement(tag, { key: i, ...attrs, ...(drawing ? { pathLength: 1, strokeDasharray: 1, strokeDashoffset: 1 - progress } : {}) }))}
     </svg>
   );
@@ -455,7 +451,7 @@ const BoxElement: React.FC<{ ov: Overlay; m: Motion; sec: number; W: number; H: 
       display: "flex", flexDirection: "column", justifyContent: valign === "top" ? "flex-start" : valign === "bottom" ? "flex-end" : "center",
       padding: pad, boxSizing: "border-box", textAlign: ov.align ?? (boxKind ? "center" : "left"), ...textStyle(ov),
     }}>
-      <TextBody ov={ov} progress={m.progress} sec={sec} />
+      <TextPaint ov={ov}><TextBody ov={ov} progress={m.progress} sec={sec} /></TextPaint>
     </div>
   ) : null;
   return (
@@ -466,9 +462,9 @@ const BoxElement: React.FC<{ ov: Overlay; m: Motion; sec: number; W: number; H: 
     }}>
       {appearance.defs}
       {bg && <div style={{ position: "absolute", inset: 0, background: bg.color, opacity: bg.opacity ?? 0.75, borderRadius: bg.radius ?? 8 }} />}
-      {ov.kind === "shape" && !ov.composition && !ov.scene3d && !ov.particles && !ov.audioReactive?.waveform && ov.shape && <ShapeSvg spec={gradientOverlay(ov,sec,resolveAnimations(ov,ov.endSeconds-ov.startSeconds)).shape!} w={w} h={h ?? w} progress={m.progress} uid={ov.id} />}
+      {ov.kind === "shape" && !ov.composition && !ov.scene3d && !ov.particles && !ov.audioReactive?.waveform && ov.shape && <ShapeSvg spec={ov.shape!} w={w} h={h ?? w} progress={m.progress} uid={ov.id} />}
       {ov.kind === "image" && ov.image && <ImageBox ov={ov} />}
-      {ov.kind === "icon" && <IconSvg name={ov.icon?.name} color={ov.color} strokeWidth={ov.icon?.strokeWidth} fill={ov.icon?.fill} progress={m.progress} />}
+      {ov.kind === "icon" && <IconSvg name={ov.icon?.name} color={ov.color} strokeWidth={ov.icon?.strokeWidth} fill={ov.icon?.fill} strokeFill={ov.icon?.strokeFill} progress={m.progress} />}
       {ov.kind === "chart" && ov.chart && <ChartSvg ov={ov} spec={ov.chart} w={w} h={h ?? w} progress={m.progress} />}
       {ov.kind === "plot" && ov.plot && <PlotSvg ov={ov} spec={ov.plot} w={w} h={h ?? w} progress={m.progress} sec={sec} unit={Math.min(W, H) / 1080} />}
       {(ov.particles||ov.audioReactive?.waveform)&&<Ambient ov={ov} w={w} h={h??w} seconds={sec}/> }
@@ -539,7 +535,7 @@ const LegacyText: React.FC<{ ov: Overlay; m: Motion; sec: number; W: number; H: 
       }}>
         {appearance.defs}
         {bg && <span aria-hidden style={{ position: "absolute", inset: 0, background: bg.color, opacity: bg.opacity ?? 0.75, borderRadius: bg.radius ?? 8, zIndex: -1 }} />}
-        <div data-djian-text="true" style={{ position: "relative" }}><TextBody ov={ov} progress={m.progress} sec={sec} /></div>
+        <div data-djian-text="true" style={{ position: "relative" }}><TextPaint ov={ov}><TextBody ov={ov} progress={m.progress} sec={sec} /></TextPaint></div>
       </div>
     </div>
   );
@@ -551,6 +547,7 @@ export const ElementView: React.FC<{ ov: Overlay }> = ({ ov }) => {
   if (ov.kind === "camera") return null;
   const anims = resolveAnimations(ov, ov.endSeconds - ov.startSeconds);
   const m = elementMotion(ov, anims, sec, W, H);
+  ov = gradientOverlay(ov,sec,anims);
   if (ov.kind === "math") return <MathElement ov={ov} m={m} W={W} H={H} sec={sec} />;
   if (isBoxElement(ov) || ov.w !== undefined) return <BoxElement ov={ov} m={m} sec={sec} W={W} H={H} />;
   return <LegacyText ov={ov} m={m} sec={sec} W={W} H={H} />;

@@ -54,6 +54,8 @@ const FIELD: Record<string, [string, (v: unknown) => string]> = {
   filter: ["滤镜", (v) => (v && typeof v === "object" ? Object.entries(v).map(([k, x]) => k + "=" + x).join(",") : "无")],
   box: ["位置大小", (v) => (v && typeof v === "object" ? ["x", "y", "w", "h"].map((k) => pct((v as Record<string, number>)[k])).join("/") : "默认")],
   crop: ["裁切", (v) => (v ? "已裁切" : "无")], text: ["文字", (v) => "「" + short(String(v ?? ""), 20) + "」"],
+  textFill: ["文字填充", (v) => typeof v === "string" ? v : v ? "多色渐变" : "跟随字色"],
+  textStrokeFill: ["文字描边填充", (v) => typeof v === "string" ? v : v ? "多色渐变" : "跟随描边颜色"],
   fontSize: ["字号", (v) => String(v)], color: ["颜色", (v) => String(v)], fontFamily: ["字体", (v) => String(v ?? "系统")],
   position: ["位置", (v) => ({ top: "顶部", center: "居中", bottom: "底部" } as Record<string, string>)[String(v)] ?? String(v)],
   x: ["横向位置", pct], y: ["纵向位置", pct], muted: ["静音", (v) => (v ? "开" : "关")], flipH: ["水平翻转", (v) => (v ? "开" : "关")],

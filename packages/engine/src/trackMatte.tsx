@@ -4,6 +4,7 @@ import { AbsoluteFill, continueRender, delayRender, cancelRender, useCurrentFram
 import type { Overlay, Timeline, TrackMatte } from './schema';
 import { sharedSnapshot } from './sharedElements';
 import { ShapeSvg, IconSvg } from './elements';
+import { Paint } from './paint';
 import { gradientOverlay } from './gradient';
 import { resolveAnimations } from './presets';
 import { evalKeyframes } from './timeline';
@@ -28,11 +29,19 @@ export function matteImage(source:Overlay|undefined,t:Timeline,seconds:number,sp
     const progress=evalKeyframes(a?.progress,sec)??1;
     let graphic='';
     if(o.kind==='shape'&&o.shape)graphic=renderToStaticMarkup(<ShapeSvg spec={o.shape} w={w} h={h} progress={progress} uid={'matte-'+o.id}/>);
-    else if(o.kind==='icon')graphic=renderToStaticMarkup(<svg width={w} height={h}><IconSvg name={o.icon?.name} color={o.color} fill={o.icon?.fill} strokeWidth={o.icon?.strokeWidth} progress={progress}/></svg>);
+    else if(o.kind==='icon')graphic=renderToStaticMarkup(<svg width={w} height={h}><IconSvg name={o.icon?.name} color={o.color} fill={o.icon?.fill} strokeFill={o.icon?.strokeFill} strokeWidth={o.icon?.strokeWidth} progress={progress}/></svg>);
     else if(o.kind==='image'&&image)graphic=`<svg width="${w}" height="${h}"><defs><clipPath id="round"><rect width="${w}" height="${h}" rx="${o.image?.radius??0}"/></clipPath></defs><image width="${w}" height="${h}" href="${escapeXml(image)}" preserveAspectRatio="${o.image?.fit==='fill'?'none':o.image?.fit==='contain'?'xMidYMid meet':'xMidYMid slice'}" clip-path="url(#round)"/></svg>`;
     else if(o.kind!=='image'){
       const align=o.align??'center',x=align==='left'?0:align==='right'?w:w/2;
-      graphic=`<text font-family="${escapeXml(overlayFontFamily(o.fontFamily))}" font-size="${o.fontSize}" font-weight="${o.fontWeight??400}" font-style="${o.italic?'italic':'normal'}" fill="${escapeXml(o.color)}" text-anchor="${align==='left'?'start':align==='right'?'end':'middle'}">${o.text.split('\n').map((line,i)=>`<tspan x="${x}" y="${o.fontSize+(i*(o.lineHeight??1.3)*o.fontSize)}">${escapeXml(line)}</tspan>`).join('')}</text>`;
+      const fill=o.textFill??o.color,stroke=o.textStrokeFill??o.stroke?.color;
+      graphic=renderToStaticMarkup(<svg width={w} height={h}>
+        <defs><Paint fill={fill} id="matte-text-fill"/>{stroke&&<Paint fill={stroke} id="matte-text-stroke"/>}</defs>
+        <text fontFamily={overlayFontFamily(o.fontFamily)} fontSize={o.fontSize} fontWeight={o.fontWeight??400} fontStyle={o.italic?'italic':'normal'}
+          fill={typeof fill==='string'?fill:'url(#matte-text-fill)'} stroke={typeof stroke==='string'?stroke:stroke?'url(#matte-text-stroke)':undefined} strokeWidth={o.stroke?.width??0} paintOrder="stroke fill"
+          textAnchor={align==='left'?'start':align==='right'?'end':'middle'}>
+          {o.text.split('\n').map((line,i)=><tspan key={i} x={x} y={o.fontSize+i*(o.lineHeight??1.3)*o.fontSize}>{line}</tspan>)}
+        </text>
+      </svg>);
     }
     const angle=o.rotate??0;
     content=`<g transform="translate(${(o.x??.5)*W} ${(o.y??.5)*H}) rotate(${angle}) translate(${-w/2} ${-h/2})" opacity="${o.opacity??1}">${graphic}</g>`;

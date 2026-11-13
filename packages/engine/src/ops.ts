@@ -310,8 +310,10 @@ function sanitizeIcon(s: Scope, v: unknown, prev?: Overlay["icon"]): Overlay["ic
   const out: NonNullable<Overlay["icon"]> = { name: name! };
   const sw = "strokeWidth" in raw ? num(raw.strokeWidth) : prev?.strokeWidth;
   if (sw !== undefined && raw.strokeWidth !== null) out.strokeWidth = clamp(sw, 0.25, 6);
-  const fill = "fill" in raw ? sanitizeColor(raw.fill) : prev?.fill;
+  const fill = "fill" in raw ? sanitizeFill(raw.fill) : prev?.fill;
   if (fill && raw.fill !== null) out.fill = fill;
+  const strokeFill = "strokeFill" in raw ? sanitizeFill(raw.strokeFill) : prev?.strokeFill;
+  if (strokeFill && raw.strokeFill !== null) out.strokeFill = strokeFill;
   return out;
 }
 
@@ -794,13 +796,13 @@ function patchAudioClip(s: Scope, hit: AudioHit, patch: Record<string, unknown>)
   }
 }
 
-const OVERLAY_KEYS = new Set(["text", "startSeconds", "endSeconds", "position", "fontSize", "color", "fontFamily", "fontWeight", "animations", "animationPreset", "effects", "x", "y", "align", "maxWidth", "lineHeight", "letterSpacing", "italic", "underline", "stroke", "shadow", "background", "kind", "track",
+const OVERLAY_KEYS = new Set(["text", "startSeconds", "endSeconds", "position", "fontSize", "color", "textFill", "textStrokeFill", "fontFamily", "fontWeight", "animations", "animationPreset", "effects", "x", "y", "align", "maxWidth", "lineHeight", "letterSpacing", "italic", "underline", "stroke", "shadow", "background", "kind", "track",
   "name", "group", "w", "h", "rotate", "opacity", "valign", "padding", "list", "accent", "counter", "textEffect", "shape", "image", "icon", "chart",
   "designLocks", "textFit", "designRole", "typography", "composition", "scene3d", "styleRole", "componentSlot", "cues", "particles", "audioReactive", "plot", "morph", "tex", "filter", "blendMode", "transform3d", "mask", "motionPath", "follow", "connector", "glass", "shared", "sweep", "trackMatte", "motionBlur", "autoSize", "layoutExclude"]);
 const BOX_FIELDS = { shape: "shape", image: "image", icon: "icon", chart: "chart", plot: "plot" } as const;
 
 function shiftGradientFrames(o: Overlay, offset: number) {
-  for (const fill of [o.shape?.fill,o.shape?.stroke?.color]) if(fill && typeof fill!=='string' && fill.keyframes) fill.keyframes=fill.keyframes.map(f=>({...f,t:f.t-offset}));
+  for (const fill of [o.shape?.fill,o.shape?.stroke?.color,o.textFill,o.textStrokeFill,o.icon?.fill,o.icon?.strokeFill]) if(fill && typeof fill!=='string' && fill.keyframes) fill.keyframes=fill.keyframes.map(f=>({...f,t:f.t-offset}));
 }
 function patchMatte(s: Scope, item: Clip | Overlay, value: unknown) {
   if(value===null){delete item.trackMatte;return;}
@@ -872,6 +874,11 @@ function patchOverlay(s: Scope, ov: Overlay, patch: Record<string, unknown>) {
   if ("position" in patch && ["top", "center", "bottom"].includes(patch.position as string)) ov.position = patch.position as Overlay["position"];
   if ("fontSize" in patch) ov.fontSize = clampOr(patch.fontSize, ov.fontSize, 4, 2000);
   if ("color" in patch) ov.color = sanitizeColor(patch.color) ?? ov.color;
+  for (const key of ["textFill", "textStrokeFill"] as const) {
+    if (!(key in patch)) continue;
+    if (patch[key] === null) delete ov[key];
+    else { const fill = sanitizeFill(patch[key]); if (fill) ov[key] = fill; else s.warnings.push(key + " 填充无效，保留原值"); }
+  }
   if ("fontFamily" in patch) setOpt(ov, "fontFamily", typeof patch.fontFamily === "string" && fontById(patch.fontFamily) ? patch.fontFamily : null);
   if ("fontWeight" in patch) {
     const w = num(patch.fontWeight);
@@ -1168,7 +1175,7 @@ function splitOverlayOp(s: Scope, op: Record<string, unknown>) {
   }
   const cut = ov.startSeconds + off;
   const left: Overlay = { ...base, endSeconds: cut };
-  const right: Overlay = { ...base, id: takeId(s, op.newId, "o"), startSeconds: cut };
+  const right: Overlay = { ...cloneValue(base), id: takeId(s, op.newId, "o"), startSeconds: cut };
   delete right.cues;
   if(right.composition)right.composition={...right.composition,inPoint:right.composition.inPoint+off*right.composition.speed};
   if(right.scene3d)right.scene3d={...right.scene3d,timeOffset:(right.scene3d.timeOffset??0)+off};

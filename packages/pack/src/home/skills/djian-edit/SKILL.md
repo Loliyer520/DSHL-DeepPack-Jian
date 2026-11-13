@@ -67,6 +67,7 @@ description: 视频剪辑操作速查——剪段、拼接、画中画、字幕�
 - 蓝色光晕：`shadow:{color:"#38bdf8",opacity:0.6,blur:24,x:0,y:0,spread:2}`。发光要显式设 `y:0`，可用同色的近光与远光两层。`shadow:false` 关闭（包括默认字幕阴影），`shadow:null` 恢复默认。
 - 静态滤镜：`filter:{blur:6,brightness:1.1,contrast:1.05,saturate:0.8,grayscale:0,sepia:0,hueRotate:0}`。亮度/对比度/饱和度默认 1，其他默认 0；同名动画通道覆盖静态值，清除关键帧后恢复静态值。
 - 混合：`blendMode:"multiply"` 正片叠底、`"screen"` 滤色、`"overlay"` 叠加、`"soft-light"` 柔光，默认 `"normal"`。`filter:null` / `blendMode:null` 清除。
+- 文字/图标渐变：文字字面用 `textFill`，文字描边用 `textStrokeFill`（同时设 `stroke:{color,width}` 开启描边）；图标描边用 `icon.strokeFill`，内部用 `icon.fill`。都支持纯色或 2–8 色标的线性/径向渐变及渐变关键帧；不需要复制文字模拟渐变。字面渐变统一覆盖整段文字，包括强调色。
 - 渐变已有原生支持：`shape.fill:{type:"linear",angle:90,stops:[{offset:0,color:"#0f172a"},{offset:0.4,color:"#2563eb"},{offset:1,color:"#38bdf8"}]}`，2–8 个色标。不要用多条矩形拼渐变。
 
 阴影跟随元素的不透明度、移动、缩放和旋转，基于真实透明轮廓；不改变盒子尺寸。文字与形状属于同一元素时整体投影，不额外给内部文字叠一次阴影。滤镜模糊作用于元素自身，不是玻璃背景模糊。

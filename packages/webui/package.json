@@ -1,13 +1,13 @@
 {
   "name": "@djian/webui",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "files": [
     "server"
   ],
   "dependencies": {
-    "@djian/engine": "0.2.0"
+    "@djian/engine": "0.3.0"
   },
   "scripts": {
     "start": "node server/index.mjs"

@@ -26,7 +26,7 @@ test('published timeline bundle activates using only browser host seeds', () => 
       });
     }}},
   };
-  vm.runInNewContext(readFileSync(new URL('../packages/client-timeline/lib/client.js', import.meta.url), 'utf8'), sandbox);
+  vm.runInNewContext(readFileSync(process.env.DJIAN_TIMELINE_BUNDLE || new URL('../packages/client-timeline/lib/client.js', import.meta.url), 'utf8'), sandbox);
   assert.equal(typeof plugin.apply, 'function');
   assert.deepEqual(Array.from(plugin.inject), ['slots', 'sidebarRightTabs', 'sidebarRight']);
   const cleanups = [];

@@ -1,6 +1,6 @@
 {
   "name": "@djian/engine",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "D剪渲染引擎：JSON 时间线进 → mp4 出（Remotion）",
   "type": "module",
   "main": "dist/render.js",

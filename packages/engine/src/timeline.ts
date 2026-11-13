@@ -3,7 +3,7 @@
 import { springEase } from "./spring.js";
 import type { Animations, AudioClip, Clip, Keyframe, Overlay, Timeline } from "./schema.js";
 
-export const SCHEMA_VERSION = 20;
+export const SCHEMA_VERSION = 21;
 
 // 共享常量（schema 与 ops 共用；放在这里避免浏览器端引入 zod）
 export const ANIM_CHANNELS = ["x", "y", "scale", "scaleX", "scaleY", "opacity", "rotation", "volume", "brightness", "contrast", "saturate", "blur", "clipL", "clipR", "clipT", "clipB", "progress", "rotationX", "rotationY", "z", "perspective", "pathProgress", "maskX", "maskY", "maskW", "maskH", "maskFeather", "sweepProgress", "gradientAngle", "gradientShift", "gradientHue"] as const;

@@ -19,6 +19,10 @@ export function gradientAt(fill: Fill | undefined, seconds: number, animations?:
   return {...result,angle:(result.angle??0)+(evalKeyframes(animations?.gradientAngle,seconds)??0),stops:result.stops.map(s=>({...s,color:hue?`hsl(from ${s.color} calc(h + ${hue}) s l)`:s.color,offset:Math.max(0,Math.min(1,s.offset+shift))})).sort((a,b)=>a.offset-b.offset)};
 }
 export function gradientOverlay(o: Overlay, seconds: number, animations?: Animations): Overlay {
-  if(!o.shape)return o;
-  return {...o,shape:{...o.shape,fill:gradientAt(o.shape.fill,seconds,animations),stroke:o.shape.stroke?{...o.shape.stroke,color:gradientAt(o.shape.stroke.color,seconds,animations)!}:undefined}};
+  return {...o,
+    textFill: gradientAt(o.textFill,seconds,animations),
+    textStrokeFill: gradientAt(o.textStrokeFill,seconds,animations),
+    ...(o.icon ? {icon:{...o.icon,fill:gradientAt(o.icon.fill,seconds,animations),strokeFill:gradientAt(o.icon.strokeFill,seconds,animations)}} : {}),
+    ...(o.shape ? {shape:{...o.shape,fill:gradientAt(o.shape.fill,seconds,animations),stroke:o.shape.stroke?{...o.shape.stroke,color:gradientAt(o.shape.stroke.color,seconds,animations)!}:undefined}} : {}),
+  };
 }

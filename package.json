@@ -22,6 +22,8 @@
     "test:motion": "npm run build:engine && node tests/integration/motion-effects.mjs",
     "test:choreography": "npm run build:engine && node tests/integration/choreography.mjs",
     "test:polish": "npm run build:engine && node tests/integration/polish.mjs",
+    "test:text-gradient-ui": "npm run build:engine && node tests/integration/text-gradient-ui.mjs",
+    "test:text-gradient": "npm run build:engine && node tests/integration/text-gradient.mjs",
     "test:surface": "npm run build:engine && node tests/integration/surface.mjs",
     "test:layout-blur": "npm run build:engine && node tests/integration/layout-blur.mjs",
     "test:ambient": "npm run build:engine && node tests/integration/ambient.mjs",

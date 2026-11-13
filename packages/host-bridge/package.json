@@ -1,6 +1,6 @@
 {
   "name": "@djian/host-bridge",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "D剪 宿主桥接插件：会话感知的原生剪辑工具、用户编辑事件注入模型上下文、AI 状态同步",
@@ -25,6 +25,6 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@djian/engine": "0.2.0"
+    "@djian/engine": "0.3.0"
   }
 }
