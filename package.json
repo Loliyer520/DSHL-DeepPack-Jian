@@ -13,6 +13,8 @@
     "test:render": "npm run build:engine && node tests/integration/render-smoke.mjs",
     "test:spatial": "npm run build:engine && node tests/integration/spatial-transitions.mjs",
     "test:effects": "npm run build:engine && node tests/integration/element-effects.mjs",
+    "test:video-elements": "npm run build:engine && node tests/integration/video-elements.mjs",
+    "test:video-preview": "npm run build:engine && node tests/integration/video-preview.mjs",
     "test:seek": "npm run build:engine && node tests/integration/media-seek.mjs",
     "start:engine": "npm run build:engine && node packages/webui/server/index.mjs",
     "pack": "node packages/pack/scripts/build-dspack.mjs",

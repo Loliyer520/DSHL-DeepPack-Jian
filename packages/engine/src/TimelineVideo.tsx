@@ -1,3 +1,4 @@
+import {StableVideo,VideoClock,useRootVideoClock} from './StableVideo';
 import {FrameMetrics} from './FrameMetrics';
 import {effectiveDesign,activeDesignScene} from './design';
 import {modelIndex} from './modelIndex';
@@ -15,7 +16,7 @@ import {
   staticFile,
   useCurrentFrame,
   useVideoConfig,
-  Video,
+  getRemotionEnvironment,
   delayRender,
   continueRender,
 } from "remotion";
@@ -142,9 +143,7 @@ const MediaLayer: React.FC<{
   const src = resolve(clip.src);
   const media = clip.type === "image"
     ? <Img src={src} onError={onError} style={mediaStyle} />
-    : clip.freeze
-      ? <Freeze frame={0}><Video src={src} onError={onError} startFrom={startFromFrames} muted style={mediaStyle} /></Freeze>
-      : <Video src={src} onError={onError} startFrom={startFromFrames} playbackRate={clip.speed ?? 1} volume={volume} style={mediaStyle} />;
+    : <StableVideo src={src} onError={onError} inPoint={startFromFrames/fps} freeze={clip.freeze} speed={clip.speed??1} volume={volume} style={mediaStyle}/>;
   const layerOpacity = (clip.opacity ?? 1) * (applyTransform ? anim.opacity ?? 1 : 1);
   return (
     <AbsoluteFill style={{
@@ -356,6 +355,7 @@ export interface TimelineVideoProps {
 const ABSOLUTE_URL = /^(?:[a-z]+:)?\/\//i;
 
 export const TimelineVideo: React.FC<TimelineVideoProps> = ({ timeline, quality = 'full', assetBase, directSources = false, fontsBase, mathBase, cameraOff = false, measure = false, onMediaError, silent = false, proxies }) => {
+  const videoClock=useRootVideoClock();
   timeline=React.useMemo(()=>prepareScheduledTimeline(timeline),[timeline]);
   const { fps, width, height } = useVideoConfig();
   const frame = useCurrentFrame();
@@ -365,9 +365,10 @@ export const TimelineVideo: React.FC<TimelineVideoProps> = ({ timeline, quality 
   }, [assetBase, directSources, proxies]);
   const voice = React.useMemo(() => voiceIntervals(timeline), [timeline]);
   const nested = React.useMemo(()=>silent?[]:nestedAudio(timeline),[timeline,silent]);
-  const nestedRenderer=React.useMemo(()=>function Nested({document,seconds,width:w,height:h}:{document:string;seconds:number;width:number;height:number}){
+  const nestedRenderer=React.useMemo(()=>function Nested({document,seconds,width:w,height:h,speed=1}:{document:string;seconds:number;width:number;height:number;speed?:number}){
+    const videoClock=useRootVideoClock();
     const child=React.useMemo(()=>JSON.parse(document) as Timeline,[document]);
-    return <div style={{position:'absolute',inset:0,overflow:'hidden'}}><div style={{width:child.meta.width,height:child.meta.height,transformOrigin:'0 0',transform:`scale(${w/child.meta.width},${h/child.meta.height})`}}><Freeze frame={Math.max(0,seconds*fps)}><Sequence from={0} width={child.meta.width} height={child.meta.height}><TimelineVideo timeline={child} quality={quality} assetBase={assetBase} directSources={directSources} fontsBase={fontsBase} mathBase={mathBase} onMediaError={onMediaError} silent proxies={proxies}/></Sequence></Freeze></div></div>;
+    return <VideoClock.Provider value={{...videoClock,rate:videoClock.rate*speed,nested:true}}><div style={{position:'absolute',inset:0,overflow:'hidden'}}><div style={{width:child.meta.width,height:child.meta.height,transformOrigin:'0 0',transform:`scale(${w/child.meta.width},${h/child.meta.height})`}}><Freeze frame={Math.max(0,seconds*fps)}><Sequence from={0} width={child.meta.width} height={child.meta.height}><TimelineVideo timeline={child} quality={quality} assetBase={assetBase} directSources={directSources} fontsBase={fontsBase} mathBase={mathBase} onMediaError={onMediaError} silent proxies={proxies}/></Sequence></Freeze></div></div></VideoClock.Provider>;
   },[fps,quality,assetBase,directSources,fontsBase,mathBase,onMediaError,proxies]);
   const [mainTrack, ...overlayTracks] = timeline.videoTracks;
   const overlays = React.useMemo(() => elementOrder(timeline.overlays.filter((o) => o.kind !== "camera")), [timeline.overlays]);
@@ -378,7 +379,7 @@ export const TimelineVideo: React.FC<TimelineVideoProps> = ({ timeline, quality 
   const byId = React.useMemo(() => new Map(overlays.map((o) => [o.id, o])), [overlays]);
   const groups=React.useMemo(()=>{const result=new Map<string,Overlay[]>(),index=modelIndex(timeline);for(const o of overlays)if(o.group&&index.groups.has(o.group)){if(!result.has(o.group))result.set(o.group,[]);result.get(o.group)!.push(o);}return result;},[timeline,overlays]);
   return (
-    <CompositionRenderer.Provider value={nestedRenderer}><RenderQuality.Provider value={quality}><MediaErrorHandler.Provider value={onMediaError}>
+    <VideoClock.Provider value={videoClock}><CompositionRenderer.Provider value={nestedRenderer}><RenderQuality.Provider value={quality}><MediaErrorHandler.Provider value={onMediaError}>
       <AssetResolver.Provider value={resolver}>
         <MathBase.Provider value={mathBase}><MatteTimeline.Provider value={timeline}>
           <AbsoluteFill data-djian-stage="true" style={{ backgroundColor: activeDesignScene(timeline,frame/fps) ? effectiveDesign(timeline,frame/fps).background : timeline.meta.background ?? "#000" }}>
@@ -400,13 +401,13 @@ export const TimelineVideo: React.FC<TimelineVideoProps> = ({ timeline, quality 
               if (hiddenMattes.has(ov.id) || activePairs.some(p => p.target.id === ov.id)) return null;
               const from = secToFrames(fps, ov.startSeconds),duration=Math.max(1,secToFrames(fps,ov.endSeconds)-from);
               const source = ov.morph ? byId.get(ov.morph.from) : undefined;
-              return <Sequence key={ov.id} from={from} durationInFrames={duration} style={{mixBlendMode:ov.blendMode}}>
-                <TemporalBlur spec={state?.motionBlur && state.motionBlur.shutterAngle!==0 ? undefined : ov.motionBlur} max={duration-1}>
+              return <Sequence key={ov.id} from={from} durationInFrames={duration} premountFor={ov.video?Math.min(fps,from):undefined} style={{mixBlendMode:ov.blendMode}}>
+                <TemporalBlur spec={(!getRemotionEnvironment().isRendering&&(ov.video||ov.composition))||(state?.motionBlur && state.motionBlur.shutterAngle!==0) ? undefined : ov.motionBlur} max={duration-1}>
                   <SampledElement ov={ov} source={source} timeline={timeline} overlays={overlays} cameras={cameras} from={from}/>
                 </TemporalBlur>
               </Sequence>;
               };
-              return state ? <TemporalBlur key={'group:'+ov.group} spec={state.motionBlur} min={Math.round(Math.min(...members.map(o=>o.startSeconds))*fps)} max={Math.round(Math.max(...members.map(o=>o.endSeconds))*fps)-1}><GroupLayer state={state} members={members}>{members.map(render)}</GroupLayer></TemporalBlur> : render(ov);
+              return state ? <TemporalBlur key={'group:'+ov.group} spec={!getRemotionEnvironment().isRendering&&members.some(o=>o.video||o.composition)?undefined:state.motionBlur} min={Math.round(Math.min(...members.map(o=>o.startSeconds))*fps)} max={Math.round(Math.max(...members.map(o=>o.endSeconds))*fps)-1}><GroupLayer state={state} members={members}>{members.map(render)}</GroupLayer></TemporalBlur> : render(ov);
             })}
             {activePairs.map(pair => {
               const A = sharedSnapshot(pair.source,timeline,pair.source.endSeconds-1/fps);
@@ -419,7 +420,7 @@ export const TimelineVideo: React.FC<TimelineVideoProps> = ({ timeline, quality 
           </AbsoluteFill>
         </MatteTimeline.Provider></MathBase.Provider>
       </AssetResolver.Provider>
-    </MediaErrorHandler.Provider></RenderQuality.Provider></CompositionRenderer.Provider>
+    </MediaErrorHandler.Provider></RenderQuality.Provider></CompositionRenderer.Provider></VideoClock.Provider>
   );
 };
 

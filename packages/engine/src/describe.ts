@@ -14,6 +14,7 @@ const kindName = (o: Overlay | undefined) => {
   switch (o?.kind) {
     case "shape": return SHAPE_LABEL[o.shape?.type ?? "rect"] ?? "形状";
     case "image": return "图片";
+    case "video": return "视频";
     case "icon": return "图标";
     case "chart": return CHART_LABEL[o.chart?.type ?? "column"] ?? "图表";
     case "text": return "文本";

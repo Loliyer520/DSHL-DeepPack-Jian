@@ -10,12 +10,14 @@ export function checkTimeline(t:Timeline,assets?:CheckAsset[],depth=0):CheckIssu
  const out:CheckIssue[]=[],assetMap=assets?new Map(assets.map(a=>[a.name,a])):null;
  const issue=(code:string,severity:CheckIssue['severity'],id:string,time:number,message:string)=>out.push({code,severity,id,time,message});
  const checkSource=(src:string,id:string,time:number)=>{if(assetMap&&!assetMap.has(src)&&!/^https?:|^data:/.test(src))issue('missing-asset','error',id,time,'找不到素材：'+src);};
- for(const [name,def] of Object.entries(t.components??{}))for(const o of def.overlays)if(o.image)checkSource(o.image.src,'component:'+name,0);
+ for(const [name,def] of Object.entries(t.components??{}))for(const o of def.overlays){if(o.image)checkSource(o.image.src,'component:'+name,0);if(o.video)checkSource(o.video.src,'component:'+name,0);}
  for(const [group,state] of Object.entries(t.groups??{}))if(state.component&&!t.components?.[state.component.name])issue('missing-component','warning',group,0,'组件定义不存在：'+state.component.name);
  const visible=t.overlays.filter(o=>o.kind!=='camera'&&(o.opacity??1)>0);
  for(const o of visible){const text=o.text.replace(/\*\*|==|\[#[\da-f]+\]|\[\/\]/gi,''),duration=o.endSeconds-o.startSeconds;
   if(o.composition&&depth<4){const c=o.composition;try{for(const inner of checkTimeline(JSON.parse(c.timeline),assets,depth+1)){const time=o.startSeconds+(inner.time-c.inPoint)/c.speed;if(time<o.endSeconds)out.push({...inner,id:o.id,time:Math.max(o.startSeconds,time),message:'合成「'+c.name+'」：'+inner.message});}}catch{issue('composition-invalid','error',o.id,o.startSeconds,'合成内部时间线无效');}}
   if(o.image)checkSource(o.image.src,o.id,o.startSeconds);
+  if(o.video){const v=o.video;checkSource(v.src,o.id,o.startSeconds);const a=assetMap?.get(v.src);if(a?.duration&&(v.inPoint>=a.duration||(!v.freeze&&v.inPoint+(o.endSeconds-o.startSeconds)*v.speed>a.duration+.05)))issue('source-range','error',o.id,o.startSeconds,'视频元素源范围超过素材时长，请裁短显示区间或调整倍速');}
+
   if(text.trim()&&o.kind!=='math'){
    const cps=[...text.replace(/\s/g,'')].length/duration;if(cps>12)issue('reading-speed','warning',o.id,o.startSeconds,`文字阅读速度约 ${cps.toFixed(1)} 字/秒，建议延长显示时间`);
    if(duration<.6)issue('short-text','warning',o.id,o.startSeconds,'文字显示少于 0.6 秒');

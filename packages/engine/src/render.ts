@@ -271,7 +271,7 @@ export async function renderVideo(opts: RenderOptions): Promise<{ outFile: strin
           outputLocation: scratch ? path.join(scratch, "video.mp4") : outFile,
           ...(scratch ? { audioCodec: "pcm-16" as const, separateAudioTo: path.join(scratch, "audio.wav") } : {}),
           scale: opts.scale ?? 1,
-          concurrency: opts.concurrency ?? Math.max(1, Math.floor(os.cpus().length / 2)),
+          concurrency: opts.concurrency ?? Math.max(1, Math.min(4, Math.floor(os.cpus().length / 2))),
           ...(opts.crf != null ? { crf: opts.crf } : {}),
           ...(selected !== SOFTWARE_ENCODER ? { ffmpegOverride: ({ args }: { args: string[] }) => applyHardwareEncoder(args, selected, opts.crf ?? 18) } : {}),
           timeoutInMilliseconds: 120_000,

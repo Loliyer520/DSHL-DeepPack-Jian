@@ -11,8 +11,8 @@ import { readPref, writePref } from '../prefs';
 import { IconPicker, ShapeThumb } from './inspector/ElementInspector';
 import { TexPreview } from './inspector/MathInspector';
 
-type Tab = 'text' | 'shape' | 'icon' | 'chart' | 'image' | 'slide' | 'math';
-const TABS: [Tab, string, IconName][] = [['slide', '幻灯片', 'slides'], ['text', '文字', 'text'], ['shape', '形状', 'shapes'], ['math', '数学', 'sigma'], ['icon', '图标', 'star'], ['chart', '图表', 'chart'], ['image', '图片', 'image']];
+type Tab = 'text' | 'shape' | 'icon' | 'chart' | 'image' | 'video' | 'slide' | 'math';
+const TABS: [Tab, string, IconName][] = [['slide', '幻灯片', 'slides'], ['text', '文字', 'text'], ['shape', '形状', 'shapes'], ['math', '数学', 'sigma'], ['icon', '图标', 'star'], ['chart', '图表', 'chart'], ['image', '图片', 'image'], ['video','视频','film']];
 
 const TEMPLATE_HINT: Record<string, string> = { cover: '主标题、副标题、眉题', section: '章节号 + 标题', cards: '2–4 张卡片，带图标', bullets: '要点列表 + 配图图标', stats: '1–4 个数字滚动', quote: '大号引文 + 出处', compare: '左右两栏对比', timeline: '2–6 个时间节点', steps: '2–5 步流程', chart: '标题 + 柱状/折线/饼图', imageText: '图片 + 文字要点', formula: '标题 + 逐笔书写的公式', graph: '标题 + 函数图像', ending: '结尾致谢页' };
 
@@ -44,16 +44,16 @@ const CHART_SAMPLE: Record<string, { data: { label: string; value: number }[]; w
   donut: { data: [{ label: '甲', value: 45 }, { label: '乙', value: 30 }, { label: '丙', value: 25 }], w: 0.4, h: 0.5 },
 };
 
-function useImages(enabled: boolean) {
+function useImages(enabled: boolean, kind: 'image'|'video'='image') {
   const project = useStore((s) => s.project);
   const [list, setList] = useState<AssetInfo[] | null>(null);
   const pid = project?.id;
   useEffect(() => {
     if (!enabled || !pid) return;
     const ac = new AbortController();
-    api.assets(pid, ac.signal).then((r) => setList(r.assets.filter((a) => a.type === 'image'))).catch(() => setList([]));
+    api.assets(pid, ac.signal).then((r) => setList(r.assets.filter((a) => a.type === kind))).catch(() => setList([]));
     return () => ac.abort();
-  }, [enabled, pid]);
+  }, [enabled, pid, kind]);
   return list;
 }
 
@@ -64,6 +64,7 @@ export function InsertPanel({ x, y, actions, onClose, scope }: { x: number; y: n
   const [pos, setPos] = useState({ x, y });
   const timeline = useStore((s) => s.timeline);
   const images = useImages(tab === 'image');
+  const videos = useImages(tab === 'video','video');
   useEffect(() => writePref(scope, 'insertTab', tab), [scope, tab]);
   // 关闭后焦点回到编辑器（否则留在 body 上，Ctrl+Z / Delete 等快捷键失效）
   useEffect(() => () => {
@@ -136,6 +137,8 @@ export function InsertPanel({ x, y, actions, onClose, scope }: { x: number; y: n
         <p className="dj-hint">相同元素在播放头处“变形”（右键菜单）：公式按字符平滑移动，形状逐点变形，坐标系里的函数连续变化。</p>
       </>
     );
+  } else if (tab === 'video') {
+    body=<><div className="dj-pickgrid">{(videos??[]).map(a=><button key={a.name} title={a.name} onClick={done(()=>actions.addVideoElement(a))}>{a.thumb&&<img src={absolute(a.thumb)} alt="" loading="lazy"/>}<span>{a.name}</span></button>)}</div>{videos&&!videos.length&&<p className="dj-hint">素材库还没有视频，请先上传。</p>}{!videos&&<p className="dj-hint">正在读取素材…</p>}<p className="dj-hint">从素材库插入视频元素，与图文自由混排。默认静音，可在属性里开启原声。</p></>;
   } else if (tab === 'image') {
     body = (
       <div className="dj-imgpick">

@@ -20,7 +20,7 @@ test('text and icon gradients survive creation, editing, roundtrip and undo',()=
   assert.equal(next.overlays[0].textFill,undefined);
   assert.equal(next.overlays[1].icon.strokeFill,undefined);
   assert.ok(timelinesEqual(applyOps(next,diffTimelines(next,t),{actor:"system"}).timeline,t));
-  assert.equal(t.version,21);
+  assert.equal(t.version,22);
 });
 
 test('text and icon gradient keyframes retain phase when splitting, without changing the source',()=>{
@@ -50,5 +50,5 @@ test('new gradient fields obey color design locks and older documents migrate wi
   const o={...blank(),designLocks:['color']};
   assert.deepEqual(protectDesignPatch(o,{textFill:fill,textStrokeFill:fill,text:'keep'}),{text:'keep'});
   const old=parseTimeline({version:20,meta:{width:320,height:240,fps:30},overlays:[{id:'old',text:'plain',color:'#fff',startSeconds:0,endSeconds:1}]});
-  assert.equal(old.version,21);assert.equal(old.overlays[0].textFill,undefined);
+  assert.equal(old.version,22);assert.equal(old.overlays[0].textFill,undefined);
 });

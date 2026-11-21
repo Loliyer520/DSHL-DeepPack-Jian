@@ -153,3 +153,7 @@ description: 视频剪辑操作速查——剪段、拼接、画中画、字幕�
 - `autoSize:{maxWidth:.6,minWidth:.04,padding:16}` 让文字/带字形状按内容重算 w/h，支持自动换行。宽度为画布分数，内边距为像素。使用保守字宽估计，特殊字体可增加留白或手动尺寸。
 - `state.layout:{direction:'row'|'column'|'grid',x:.5,y:.5,width?,height?,gap:16,padding:16,align:'center',justify:'start',columns:3,background:'背景id'}` 自动排组内成员。缺省宽高包裹内容，背景引用要在同组。`layoutExclude:true` 可排除成员；连接器、跟随对象默认不参与流式排列。state 更新需保留旧动画等字段。
 - 可视化路径编辑器支持形状、运动路径和自定义遮罩。仍写回标准 SVG path；编辑圆弧时转为三次贝塞尔。节点移动连带平移相邻控制柄，可镜像控制柄并细分曲线，支持撤销。
+
+## 视频元素
+
+视频可以与图文共用元素层：`addOverlay{kind:"video",video:{src:"demo.mp4",inPoint:0,speed:1,muted:true,volume:1,fit:"contain",radius:12},startSeconds:0,endSeconds:3,x:0.5,y:0.5,w:0.6,h:0.4}`。用 `updateOverlay.patch.video` 修改，`arrangeOverlay` 排层级。默认静音，需原声设置 `muted:false`。源范围必须覆盖显示时长和倍速，导出前预检；不能用图片元素指向视频文件。大素材建议生成预览代理，导出仍用原素材。视频可被形状/文字遮罩，不支持作为遮罩源。

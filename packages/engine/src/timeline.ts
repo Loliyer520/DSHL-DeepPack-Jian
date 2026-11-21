@@ -3,14 +3,14 @@
 import { springEase } from "./spring.js";
 import type { Animations, AudioClip, Clip, Keyframe, Overlay, Timeline } from "./schema.js";
 
-export const SCHEMA_VERSION = 21;
+export const SCHEMA_VERSION = 22;
 
 // 共享常量（schema 与 ops 共用；放在这里避免浏览器端引入 zod）
 export const ANIM_CHANNELS = ["x", "y", "scale", "scaleX", "scaleY", "opacity", "rotation", "volume", "brightness", "contrast", "saturate", "blur", "clipL", "clipR", "clipT", "clipB", "progress", "rotationX", "rotationY", "z", "perspective", "pathProgress", "maskX", "maskY", "maskW", "maskH", "maskFeather", "sweepProgress", "gradientAngle", "gradientShift", "gradientHue"] as const;
 // v6 元素（幻灯片式图层）：overlays 里每一项都是一个元素，kind 决定画什么
 // v7 数学动画：math 公式（text 为 LaTeX）/ plot 坐标系与函数图像 / camera 镜头（不可见，推拉平移同组元素）
-export const ELEMENT_KINDS = ["subtitle", "title", "text", "shape", "image", "icon", "chart", "math", "plot", "camera"] as const;
-export const BOX_KINDS = ["shape", "image", "icon", "chart", "plot"] as const;
+export const ELEMENT_KINDS = ["subtitle", "title", "text", "shape", "image", "video", "icon", "chart", "math", "plot", "camera"] as const;
+export const BOX_KINDS = ["shape", "image", "video", "icon", "chart", "plot"] as const;
 export const SHAPE_TYPES = ["rect", "ellipse", "triangle", "rightTriangle", "diamond", "pentagon", "hexagon", "octagon", "star", "parallelogram", "trapezoid", "chevron", "blockArrow", "plus", "heart", "callout", "ring", "line", "arrow", "doubleArrow", "path"] as const;
 export const LINE_SHAPES = ["line", "arrow", "doubleArrow"] as const;
 // 坐标系里的对象：函数 y=f(x) / 参数曲线 / 极坐标曲线 / 点 / 切线 / 曲线下面积 / 黎曼和 / 向量 / 线段 / 文字标注
@@ -188,7 +188,7 @@ export function elementOrder(overlays: readonly Overlay[]): Overlay[] {
 }
 
 /** 元素显示名：name > 文字 > 类型名 */
-export const KIND_LABEL: Record<string, string> = { shape: "形状", image: "图片", icon: "图标", chart: "图表", text: "文本", title: "标题", subtitle: "字幕", math: "公式", plot: "坐标系", camera: "镜头" };
+export const KIND_LABEL: Record<string, string> = { shape: "形状", image: "图片", video: "视频", icon: "图标", chart: "图表", text: "文本", title: "标题", subtitle: "字幕", math: "公式", plot: "坐标系", camera: "镜头" };
 export const SHAPE_LABEL: Record<string, string> = {
   rect: "矩形", ellipse: "椭圆", triangle: "三角形", rightTriangle: "直角三角形", diamond: "菱形", pentagon: "五边形", hexagon: "六边形",
   octagon: "八边形", star: "星形", parallelogram: "平行四边形", trapezoid: "梯形", chevron: "箭头标签", blockArrow: "块箭头", plus: "十字",

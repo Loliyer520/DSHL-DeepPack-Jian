@@ -7,7 +7,7 @@ import {modelIndex,inheritIndex} from './modelIndex.js';
 // D剪 时间线操作（ops）——唯一的语义实现。
 // 面板乐观更新、服务端权威应用、AI 工具都调用这里的 applyOps，保证三方行为一致。
 // 纯函数、无 zod 依赖（浏览器包体友好）；服务端在应用后再用 validateTimeline 做严格校验。
-import { parseTimeline, compositionSchema, focusSchema, scene3dSchema, cueSchema, themeSchema, componentSchema, particlesSchema, audioReactiveSchema, groupStateSchema, maskSchema, motionPathSchema, followSchema, connectorSchema, glassSchema, sharedElementSchema, trackMatteSchema, sweepSchema, animationClipSchema, gradientFrameSchema, motionBlurSchema, autoSizeSchema } from "./schema.js";
+import { parseTimeline, videoElementSchema, compositionSchema, focusSchema, scene3dSchema, cueSchema, themeSchema, componentSchema, particlesSchema, audioReactiveSchema, groupStateSchema, maskSchema, motionPathSchema, followSchema, connectorSchema, glassSchema, sharedElementSchema, trackMatteSchema, sweepSchema, animationClipSchema, gradientFrameSchema, motionBlurSchema, autoSizeSchema } from "./schema.js";
 import type { Animations, AudioClip, AudioTrack, Clip, Effect, Keyframe, Marker, Overlay, Timeline, VideoTrack } from "./schema.js";
 import {
   ANIM_CHANNELS, isMatteSource,
@@ -797,9 +797,9 @@ function patchAudioClip(s: Scope, hit: AudioHit, patch: Record<string, unknown>)
 }
 
 const OVERLAY_KEYS = new Set(["text", "startSeconds", "endSeconds", "position", "fontSize", "color", "textFill", "textStrokeFill", "fontFamily", "fontWeight", "animations", "animationPreset", "effects", "x", "y", "align", "maxWidth", "lineHeight", "letterSpacing", "italic", "underline", "stroke", "shadow", "background", "kind", "track",
-  "name", "group", "w", "h", "rotate", "opacity", "valign", "padding", "list", "accent", "counter", "textEffect", "shape", "image", "icon", "chart",
+  "name", "group", "w", "h", "rotate", "opacity", "valign", "padding", "list", "accent", "counter", "textEffect", "shape", "image", "video", "icon", "chart",
   "designLocks", "textFit", "designRole", "typography", "composition", "scene3d", "styleRole", "componentSlot", "cues", "particles", "audioReactive", "plot", "morph", "tex", "filter", "blendMode", "transform3d", "mask", "motionPath", "follow", "connector", "glass", "shared", "sweep", "trackMatte", "motionBlur", "autoSize", "layoutExclude"]);
-const BOX_FIELDS = { shape: "shape", image: "image", icon: "icon", chart: "chart", plot: "plot" } as const;
+const BOX_FIELDS = { shape: "shape", image: "image", video: "video", icon: "icon", chart: "chart", plot: "plot" } as const;
 
 function shiftGradientFrames(o: Overlay, offset: number) {
   for (const fill of [o.shape?.fill,o.shape?.stroke?.color,o.textFill,o.textStrokeFill,o.icon?.fill,o.icon?.strokeFill]) if(fill && typeof fill!=='string' && fill.keyframes) fill.keyframes=fill.keyframes.map(f=>({...f,t:f.t-offset}));
@@ -958,6 +958,10 @@ function patchOverlay(s: Scope, ov: Overlay, patch: Record<string, unknown>) {
   if ("counter" in patch) setOpt(ov, "counter", sanitizeCounter(patch.counter) ?? null);
   if ("textEffect" in patch) setOpt(ov, "textEffect", sanitizeTextEffect(patch.textEffect) ?? null);
   if ("shape" in patch) setOpt(ov, "shape", patch.shape === null ? null : sanitizeShape(patch.shape, ov.shape) ?? ov.shape);
+  if ("video" in patch) {
+    if(patch.video===null)delete ov.video;
+    else {if(!isObj(patch.video))fail('video 必须是对象');const raw={...ov.video,...patch.video as object};const parsed=videoElementSchema.safeParse(raw);if(!parsed.success)fail('视频元素参数无效：'+parsed.error.issues[0]?.message);const spec=parsed.data!;spec.src=checkAsset(s,spec.src);if(IMAGE_EXT.test(spec.src)||/\.(wav|mp3|m4a|flac|ogg|aac|opus)$/i.test(spec.src))fail('视频元素需要视频素材');ov.video=spec;}
+  }
   if ("image" in patch) setOpt(ov, "image", patch.image === null ? null : sanitizeImageSpec(s, patch.image, ov.image) ?? ov.image);
   if ("icon" in patch) setOpt(ov, "icon", patch.icon === null ? null : sanitizeIcon(s, patch.icon, ov.icon) ?? ov.icon);
   if ("chart" in patch) setOpt(ov, "chart", patch.chart === null ? null : sanitizeChart(patch.chart, ov.chart) ?? ov.chart);
@@ -1181,6 +1185,7 @@ function splitOverlayOp(s: Scope, op: Record<string, unknown>) {
   if(right.scene3d)right.scene3d={...right.scene3d,timeOffset:(right.scene3d.timeOffset??0)+off};
   right.shape = right.shape ? cloneValue(right.shape) : undefined;
   shiftGradientFrames(right, off);
+  if(right.video&&!right.video.freeze)right.video.inPoint+=off*right.video.speed;
   delete right.morph; // 变形只发生在左半段开头
   if (base.animations) right.animations = shiftAnimations(base.animations, off);
   s.t.overlays.splice(hit.index, 1, left, right);
@@ -1312,16 +1317,16 @@ function moveTrackOp(s: Scope, op: Record<string, unknown>) {
   s.touched.add("track:" + hit.track.id);
 }
 
-const BOX_KIND_DEFAULT_W: Record<string, number> = { shape: 0.25, image: 0.4, icon: 0.08, chart: 0.5, text: 0.5, plot: 0.6 };
+const BOX_KIND_DEFAULT_W: Record<string, number> = { shape: 0.25, image: 0.4, video: 0.4, icon: 0.08, chart: 0.5, text: 0.5, plot: 0.6 };
 const DEFAULT_FONT_SIZE: Record<string, number> = { chart: 28, plot: 28, text: 40, math: 72 };
 
 /** 新建一个元素（addOverlay 与幻灯片模板共用）：按 kind 补缺省尺寸与样式，插到 index（缺省末尾 = 最上层） */
 function overlayDesignRole(value:unknown): "heading"|"subheading"|"body"|"caption"|"accent" {if(!["heading","subheading","body","caption","accent"].includes(String(value)))fail("未知设计角色");return value as any;}
 function createOverlay(s: Scope, op: Record<string, unknown>, index?: number): Overlay {
   const inferred = pick(ELEMENT_KINDS, op.kind)
-    ?? (op.shape !== undefined ? "shape" : op.image !== undefined ? "image" : op.icon !== undefined ? "icon" : op.chart !== undefined ? "chart"
+    ?? (op.shape !== undefined ? "shape" : op.image !== undefined ? "image" : op.video !== undefined ? "video" : op.icon !== undefined ? "icon" : op.chart !== undefined ? "chart"
       : op.plot !== undefined ? "plot" : typeof op.tex === "string" ? "math" : undefined);
-  const boxKind = inferred === "shape" || inferred === "image" || inferred === "icon" || inferred === "chart" || inferred === "plot";
+  const boxKind = inferred === "shape" || inferred === "image" || inferred === "video" || inferred === "icon" || inferred === "chart" || inferred === "plot";
   const tex = typeof op.tex === "string" ? op.tex : undefined;
   if (typeof op.text !== "string" && tex === undefined && !boxKind && inferred !== "camera" && !isObj(op.counter)) fail("addOverlay 缺少 text（形状/图片/图标/图表/坐标系/镜头元素可省略；公式写 LaTeX）");
   // 镜头没给时间时覆盖整组（一页幻灯片）
@@ -1353,7 +1358,7 @@ function createOverlay(s: Scope, op: Record<string, unknown>, index?: number): O
       const w = clampOr(patch.w, 0.25, 0.002, 4);
       const shapeType = typeof op.shape === "string" ? op.shape : isObj(op.shape) ? op.shape.type : undefined;
       patch.h = (LINE_SHAPES as readonly string[]).includes(String(shapeType)) ? Math.max(0.004, 24 / H)
-        : inferred === "chart" ? 0.45 : inferred === "image" ? 0.4
+        : inferred === "chart" ? 0.45 : inferred === "image" || inferred === "video" ? 0.4
         : inferred === "plot" ? Math.min(4, (w * W) / H / 1.6) // 坐标系缺省 16:10
         : Math.min(4, (w * W) / H); // 缺省按像素等宽（正方形/圆）
     }
@@ -1362,6 +1367,7 @@ function createOverlay(s: Scope, op: Record<string, unknown>, index?: number): O
   if (at !== undefined) s.t.overlays.splice(clamp(Math.round(at), 0, s.t.overlays.length), 0, ov);
   else s.t.overlays.push(ov);
   patchOverlay(s, ov, patch);
+  if(ov.kind==='video'&&!ov.video)fail('视频元素缺少 video.src');
   trackOfOverlayTouch(s, ov.id);
   return ov;
 }
@@ -1391,6 +1397,7 @@ function transformOp(s: Scope, op: Record<string, unknown>) {
   // B 继承 A 的样子：显式关键帧平移到新起点（progress 去掉，B 一出现就是完整的），预设只留出场/循环
   const B: Overlay = { ...cloneValue(A), id: takeId(s, op.newId, "o"), startSeconds: at, endSeconds: end };
   shiftGradientFrames(B,off);
+  if(B.video&&!B.video.freeze)B.video.inPoint+=off*B.video.speed;
   delete B.morph;
   if (A.animations) {
     const shifted = shiftAnimations(A.animations, off) as Record<string, Keyframe[] | undefined> | undefined;
@@ -1735,8 +1742,9 @@ function studioOp(s:Scope,op:Record<string,unknown>){
    if(!image&&duration!==undefined){const length=video?c.clipDuration:c.duration;let inPoint=Math.min(c.inPoint,Math.max(0,duration-length*c.speed));const speed=Math.min(c.speed,(duration-inPoint)/length);if(speed<.1)fail('替换素材太短，无法在允许倍速范围内保持原时长');patch.inPoint=inPoint;patch.speed=speed;}
    plans.push({op:'updateClip',id:c.id,patch});
   }
+  for(const o of s.t.overlays)if(o.video?.src===from){if(IMAGE_EXT.test(to)||/\.(wav|mp3|m4a|flac|ogg|aac|opus)$/i.test(to))fail('视频元素需替换为视频素材');const v={...o.video,src:to};if(duration!==undefined&&!v.freeze){v.inPoint=Math.min(v.inPoint,Math.max(0,duration-(o.endSeconds-o.startSeconds)*v.speed));v.speed=Math.min(v.speed,(duration-v.inPoint)/(o.endSeconds-o.startSeconds));if(v.speed<.1)fail('替换视频太短');}plans.push({op:'updateOverlay',id:o.id,patch:{video:v}});}
   for(const o of s.t.overlays)if(o.image?.src===from){if(!IMAGE_EXT.test(to))fail('图片元素只能替换为图片素材');plans.push({op:'updateOverlay',id:o.id,patch:{image:{...o.image,src:to}}});}
-  for(const [name,def] of Object.entries(s.t.components??{}))for(const o of def.overlays){if(o.image?.src===from){if(!IMAGE_EXT.test(to))fail('组件中的图片只能替换为图片');o.image.src=to;s.touched.add('component:'+name);}if(o.audioReactive?.src===from){delete o.audioReactive;s.touched.add('component:'+name);}}
+  for(const [name,def] of Object.entries(s.t.components??{}))for(const o of def.overlays){if(o.video?.src===from){if(IMAGE_EXT.test(to)||/\.(wav|mp3|m4a|flac|ogg|aac|opus)$/i.test(to))fail('组件视频需替换为视频');o.video.src=to;s.touched.add('component:'+name);}if(o.image?.src===from){if(!IMAGE_EXT.test(to))fail('组件中的图片只能替换为图片');o.image.src=to;s.touched.add('component:'+name);}if(o.audioReactive?.src===from){delete o.audioReactive;s.touched.add('component:'+name);}}
   for(const [group,state] of Object.entries(s.t.groups??{}))if(state.component?.values){let changed=false;const values=cloneValue(state.component.values);for(const value of Object.values(values))if(value.imageSrc===from){value.imageSrc=to;changed=true;}if(changed)plans.push({op:'updateGroup',group,state:{...state,component:{...state.component,values}}});}
   const relinkNested=(o:Overlay)=>{if(o.composition){const result=applyOps(JSON.parse(o.composition.timeline),[{op:'replaceAsset',from,to}],s.ctx);if(result.receipts.some(r=>r.status==='rejected'))fail('内部合成素材替换失败');o.composition.timeline=JSON.stringify(result.timeline);}};
   for(const o of s.t.overlays)if(o.composition){relinkNested(o);s.touched.add(o.id);}

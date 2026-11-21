@@ -27,7 +27,7 @@ import { FillField, GradientFrames } from './GradientFields';
 import { AppearanceSection } from './AppearanceSection';
 
 export type ElTab = 'style' | 'text' | 'layout' | 'animation';
-const STYLE_TAB: Record<string, string> = { shape: '形状', image: '图片', icon: '图标', chart: '图表', plot: '坐标系' };
+const STYLE_TAB: Record<string, string> = { shape: '形状', image: '图片', video: '视频', icon: '图标', chart: '图表', plot: '坐标系' };
 export function elementTabs(o: Overlay): [ElTab, string][] {
   if (o.kind === 'math') return [['style', '公式'], ['layout', '位置'], ['animation', '动画']];
   if (o.kind === 'camera') return [['style', '镜头'], ['animation', '动画']];
@@ -156,6 +156,18 @@ function ImagePanel({ o }: { o: Overlay }) {
       </Section>
     </>
   );
+}
+
+function VideoPanel({o}:{o:Overlay}){
+ const {commit}=useEdit(),v=o.video!,set=(patch:Record<string,unknown>,label:string)=>commit(pu(o,{video:patch}),label);
+ return <Section title="视频素材"><p className="dj-hint">{v.src} · 与文字、图形共用元素层级，可组合、遮罩和动画。</p><div className="dj-grid">
+ <NumberField label="源入点" value={v.inPoint} min={0} step={.05} suffix="s" ops={value=>pu(o,{video:{inPoint:value}})}/>
+ <NumberField label="倍速" value={v.speed} min={.1} max={8} step={.1} suffix="×" ops={value=>pu(o,{video:{speed:value}})}/>
+ <NumberField label="音量" value={v.volume} min={0} max={1} step={.01} scale={100} suffix="%" ops={value=>pu(o,{video:{volume:value}})}/>
+ <Toggle label="静音" checked={v.muted} onChange={muted=>set({muted},'视频静音')}/>
+ <Toggle label="定格" checked={!!v.freeze} onChange={freeze=>set({freeze},'视频定格')}/>
+ <NumberField label="圆角" value={v.radius??0} min={0} max={2000} step={1} suffix="px" ops={radius=>pu(o,{video:{radius}})}/>
+ </div><Seg label="适应方式" value={v.fit??'cover'} options={[["cover","裁切填满"],["contain","完整显示"],["fill","拉伸"]]} onChange={fit=>set({fit},'视频适应')}/></Section>;
 }
 
 // ---------- 图标 ----------
@@ -392,6 +404,7 @@ function ElementInspectorBody({ o, tab, timeline, now, actions }: { o: Overlay; 
   }
   if (tab === 'text') return <TextInspector o={o} tab="text" timeline={timeline} now={now} extra={<TextBoxSection o={o} />} />;
   if (o.kind === 'shape' && o.shape) return <ShapePanel o={o} timeline={timeline} />;
+  if (o.kind === 'video' && o.video) return <VideoPanel o={o}/>;
   if (o.kind === 'image' && o.image) return <ImagePanel o={o} />;
   if (o.kind === 'icon' && o.icon) return <IconPanel timeline={timeline} o={o} />;
   if (o.kind === 'chart' && o.chart) return <ChartPanel o={o} />;

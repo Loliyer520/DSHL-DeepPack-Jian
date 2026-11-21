@@ -32,6 +32,7 @@ function elementLine(o, z) {
     o.text?.trim() ? '「' + short(o.text, 40) + '」' : '',
     box, o.rotate ? '旋转 ' + o.rotate + '°' : '', o.opacity !== undefined ? '不透明 ' + pct(o.opacity) : '',
     o.text?.trim() || kind === 'chart' ? o.fontSize + 'px' : '', o.textFill ? '字面'+fillText(o.textFill) : o.color !== '#ffffff' ? o.color : '', o.fontFamily ?? '',
+    o.video ? '视频 '+o.video.src+' 入点'+o.video.inPoint+'s ×'+o.video.speed+(o.video.muted?' 静音':' 原声') : '',
     o.shape ? fillText(o.shape.fill) + (o.shape.stroke ? ' 描边' + fillText(o.shape.stroke.color) : '') + (o.shape.radius ? ' 圆角' + o.shape.radius : '') : '',
     o.list ? '列表 ' + o.list : '', o.counter ? '数字 ' + o.counter.from + '→' + o.counter.to : '', o.textEffect ? '逐' + ({ char: '字', word: '词', line: '行' }[o.textEffect.by ?? 'char']) + ' ' + o.textEffect.type : '',
     o.shadow ? '阴影 ' + (Array.isArray(o.shadow) ? o.shadow : [o.shadow]).map((s) => (s.inset ? '内阴影 ' : '') + s.color + ' 模糊' + s.blur + ' 偏移(' + (s.x ?? 0) + ',' + (s.y ?? (!o.kind || ['subtitle', 'title', 'text'].includes(o.kind) ? 2 : 4)) + ')' + (s.opacity !== undefined ? ' ' + pct(s.opacity) : '') + (s.spread ? ' 扩展' + s.spread : '')).join(' / ') : o.shadow === false ? '无阴影' : '',

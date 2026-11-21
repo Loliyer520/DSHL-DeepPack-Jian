@@ -14,8 +14,8 @@ const snapT = (t: Timeline, s: number) => Math.round(s * t.meta.fps) / t.meta.fp
 /** 复制/粘贴整页时给副本一个新分组，避免和原页合并成一块 */
 const newGroupId = () => 'g' + Date.now().toString(36).slice(-5) + Math.random().toString(36).slice(2, 5);
 
-export type ElementKind = 'text' | 'title' | 'counter' | 'shape' | 'icon' | 'image' | 'chart' | 'math' | 'plot';
-export const KIND_NAME: Record<string, string> = { subtitle: '字幕', title: '标题', text: '文本框', shape: '形状', image: '图片', icon: '图标', chart: '图表', math: '公式', plot: '坐标系', camera: '镜头' };
+export type ElementKind = 'text' | 'title' | 'counter' | 'shape' | 'icon' | 'image' | 'video' | 'chart' | 'math' | 'plot';
+export const KIND_NAME: Record<string, string> = { subtitle: '字幕', title: '标题', text: '文本框', shape: '形状', image: '图片', video: '视频', icon: '图标', chart: '图表', math: '公式', plot: '坐标系', camera: '镜头' };
 
 /** 完整选中的分组（整页幻灯片）：组 id → 成员 */
 export function selectedGroups(t: Timeline, items: Selected[]): Map<string, Overlay[]> {
@@ -73,6 +73,7 @@ export function createActions(ed: Editor) {
       shape: { kind: 'shape', shape: { type: shapeType, ...(shapeType === 'rect' || shapeType === 'callout' ? { radius: px(24) } : {}) }, w: shapeType === 'line' || shapeType === 'arrow' || shapeType === 'doubleArrow' ? 0.3 : 0.2, animationPreset: 'popIn' },
       icon: { kind: 'icon', icon: { name: 'star' }, w: 0.08, animationPreset: 'popIn' },
       image: { kind: 'image', w: 0.4, animationPreset: 'fadeIn' },
+      video: { kind: 'video', w: 0.4 },
       chart: { kind: 'chart', chart: { type: 'column', data: [{ label: '一月', value: 32 }, { label: '二月', value: 48 }, { label: '三月', value: 41 }, { label: '四月', value: 66 }], showValues: true }, w: 0.5, h: 0.45, fontSize: px(26), animationPreset: 'growIn' },
       math: { kind: 'math', text: 'e^{i\\pi} + 1 = 0', fontSize: px(96), animationPreset: 'write' },
       plot: { kind: 'plot', plot: { x: [-5, 5], y: [-3, 3], grid: true, items: [{ type: 'fn', id: 'f', fn: 'sin(x)', label: '$y=\\sin x$' }] }, w: 0.7, h: (0.7 * tl.meta.width) / tl.meta.height / 1.6, fontSize: px(26), animationPreset: 'create' },
@@ -81,7 +82,7 @@ export function createActions(ed: Editor) {
     if (kind === 'shape') merged.shape = { ...(defaults.shape.shape as object), ...(spec.shape as object | undefined) };
     if (kind === 'chart' && spec.chart) merged.chart = { ...(defaults.chart.chart as object), ...(spec.chart as object) };
     const op: Op = { op: 'addOverlay', startSeconds: at, endSeconds: at + 4, x: 0.5, y: 0.5, ...merged };
-    const LABEL: Record<ElementKind, string> = { text: '文本框', title: '标题', counter: '数字', shape: '形状', icon: '图标', image: '图片', chart: '图表', math: '公式', plot: '坐标系' };
+    const LABEL: Record<ElementKind, string> = { text: '文本框', title: '标题', counter: '数字', shape: '形状', icon: '图标', image: '图片', video: '视频', chart: '图表', math: '公式', plot: '坐标系' };
     const r = run([op], '插入' + LABEL[kind]);
     if (r[0]?.id) ed.sel.select({ kind: 'overlay', id: r[0].id });
   };
@@ -232,6 +233,10 @@ export function createActions(ed: Editor) {
     },
     addElement,
     /** 把图片素材作为可自由摆放的图片元素（按原图比例，最大占画面 80%） */
+    addVideoElement(asset: Pick<AssetInfo,'name'|'width'|'height'|'duration'>) {
+      const tl=t();if(!tl)return;const w=.5,h=Math.min(1,w*tl.meta.width/tl.meta.height*(asset.height??9)/(asset.width??16));
+      addElement('video',{video:{src:asset.name,inPoint:0,speed:1,muted:true,volume:1,fit:'contain'},w,h,endSeconds:now()+Math.min(4,asset.duration??4)});
+    },
     addImageElement(asset: Pick<AssetInfo, 'name' | 'width' | 'height'>) {
       const tl = t(); if (!tl) return;
       const W = tl.meta.width, H = tl.meta.height;

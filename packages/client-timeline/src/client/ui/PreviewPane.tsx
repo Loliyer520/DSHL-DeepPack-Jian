@@ -38,10 +38,10 @@ export function PreviewPane({ actions }: { actions: Actions }) {
   const pid = project?.id;
   const onMediaError = useCallback((src: string) => {
     const name = decodeURIComponent(String(src).split('/').pop() ?? src);
-    const show = () => setFailure('无法加载素材「' + name + '」');
+    const show = () => setFailure('无法解码或加载素材「' + name + '」，可尝试生成预览代理或转换为 H.264 视频');
     if (!pid) { show(); return; }
     fetch(mediaUrl(pid, name), { method: 'HEAD', signal: AbortSignal.timeout(8000) })
-      .then((r) => { if (!r.ok) show(); })
+      .then(() => show())
       .catch(show);
   }, [pid]);
   // 选中镜头时关掉镜头效果：看到整个画布与镜头框，才能拖动取景
@@ -57,7 +57,7 @@ export function PreviewPane({ actions }: { actions: Actions }) {
     ]);
     if (texts.length) prefetchMath(mathBase, texts);
   }, [timeline, mathBase]);
-  useEffect(()=>{let active=true;const refresh=()=>{if(!project||localStorage.getItem('djian.proxies')!=='1'){setProxies({});return;}void request<{items:{name:string;url:string|null}[]}>('GET','/api/p/'+encodeURIComponent(project.id)+'/proxies').then(r=>{if(active)setProxies(old=>{const next=Object.fromEntries(r.items.filter(p=>p.url).map(p=>[p.name,engineBase()+p.url]));return JSON.stringify(old)===JSON.stringify(next)?old:next;});}).catch(()=>{});};refresh();window.addEventListener('djian-proxies',refresh);const timer=setInterval(refresh,5000);return()=>{active=false;clearInterval(timer);window.removeEventListener('djian-proxies',refresh);};},[project?.id]);
+  useEffect(()=>{let active=true;const refresh=()=>{if(!project||localStorage.getItem('djian.proxies')==='0'){setProxies({});return;}void request<{items:{name:string;url:string|null}[]}>('GET','/api/p/'+encodeURIComponent(project.id)+'/proxies').then(r=>{if(active)setProxies(old=>{const next=Object.fromEntries(r.items.filter(p=>p.url).map(p=>[p.name,engineBase()+p.url]));return JSON.stringify(old)===JSON.stringify(next)?old:next;});}).catch(()=>{});};refresh();window.addEventListener('djian-proxies',refresh);const timer=setInterval(refresh,5000);return()=>{active=false;clearInterval(timer);window.removeEventListener('djian-proxies',refresh);};},[project?.id]);
   const inputProps = useMemo(() => (timeline && project ? { timeline, quality, proxies, assetBase: assetBaseUrl(project.id), fontsBase: fontsBaseUrl(), mathBase, cameraOff, onMediaError } : null), [timeline, project, onMediaError, mathBase, cameraOff, quality, proxies]);
   if (!timeline || !inputProps) return <div className="dj-stage-empty">正在连接剪辑引擎…</div>;
   ed.clock.fps = timeline.meta.fps;

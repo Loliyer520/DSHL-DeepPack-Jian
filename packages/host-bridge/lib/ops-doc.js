@@ -14,6 +14,7 @@ export const OPS_DOC = [
   '【轨道】addTrack{kind:"video"|"audio", name?, role?} · updateTrack{id, patch:{name?, volume?, muted?, hidden?, locked?, role?:"music"|"voice"|"sfx", duck?:{level, ramp?}}} · moveTrack{id, index} · removeTrack{id}',
   '  · 给配乐轨设 duck:{level:0.25} 并把人声轨 role 设为 "voice"，人声出现时配乐自动压低（闪避）',
   '  · 被用户锁定(locked)的轨道不能修改；尊重锁定，不要擅自解锁',
+  '【元素层视频】addOverlay{kind:"video",video:{src:"素材.mp4",inPoint:0,speed:1,muted:true,volume:1,fit:"contain",radius:16},startSeconds:0,endSeconds:4,x:0.5,y:0.5,w:0.6,h:0.4}；与文字/图形共用 overlays 顺序，index/arrangeOverlay 控制遮挡，可分组/预合成/动画/遮罩。默认静音，设 muted:false 开原声。源时长需覆盖 (endSeconds-startSeconds)*speed+inPoint；不循环，定格使用 freeze:true。更新用 updateOverlay.patch.video。',
   '【文字/字幕】addOverlay{text, startSeconds, endSeconds, position?, fontSize?, color?, fontFamily?, fontWeight?, x?, y?, align?, maxWidth?, stroke?{color,width}, shadow?{color,blur,x?,y?,opacity?,spread?,inset?}|[阴影层…]|false, background?{color,opacity?,padding?,radius?}, animationPreset?, kind?:"subtitle"|"title"}',
   '  · removeOverlay{id} · updateOverlay{id, patch} · splitOverlay{id, atSeconds}；x/y 为文字中心的画布分数位置（给出后覆盖 position）',
   '【幻灯片元素】overlays 里每项都是一个元素，kind：subtitle 字幕（永远最上层）/ title 标题 / text 文本框 / shape 形状 / image 图片 / icon 图标 / chart 图表 / math 公式 / plot 坐标系 / camera 镜头。全部用 addOverlay/updateOverlay/removeOverlay，原生可编辑——不要把文字或图形做成图片再导入。',

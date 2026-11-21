@@ -19,7 +19,7 @@ export function precompose(t:Timeline,ids:string[],name:string):{child:Timeline;
 export function referencedAssets(t:Timeline,depth=0):string[]{
  if(depth>4)throw new Error('嵌套合成最多 4 层');
  const out=[...t.videoTracks,...t.audioTracks].flatMap(tr=>tr.clips.map(c=>c.src));
- for(const o of [...t.overlays,...Object.values(t.components??{}).flatMap(c=>c.overlays)]){if(o.image)out.push(o.image.src);if(o.audioReactive?.src)out.push(o.audioReactive.src);if(o.composition)out.push(...referencedAssets(JSON.parse(o.composition.timeline),depth+1));}
+ for(const o of [...t.overlays,...Object.values(t.components??{}).flatMap(c=>c.overlays)]){if(o.image)out.push(o.image.src);if(o.video)out.push(o.video.src);if(o.audioReactive?.src)out.push(o.audioReactive.src);if(o.composition)out.push(...referencedAssets(JSON.parse(o.composition.timeline),depth+1));}
  for(const g of Object.values(t.groups??{}))for(const v of Object.values(g.component?.values??{}))if(v.imageSrc)out.push(v.imageSrc);
  return [...new Set(out)];
 }
@@ -27,6 +27,8 @@ type Sound={src:string;start:number;end:number;inPoint:number;speed:number;gain:
 export function nestedAudio(t:Timeline,depth=0):Sound[]{
  if(depth>=4)return [];
  const result:Sound[]=[];
+ for(const o of t.overlays){const v=o.video;if(!v||v.muted||v.freeze)continue;const a=resolveAnimations(o,o.endSeconds-o.startSeconds);result.push({src:v.src,start:o.startSeconds,end:o.endSeconds,inPoint:v.inPoint,speed:v.speed,gain:s=>v.volume*(evalKeyframes(a?.volume,s)??1)});}
+
  for(const o of t.overlays){if(!o.composition)continue;const ref=o.composition,child=JSON.parse(ref.timeline) as Timeline,sounds:Sound[]=[],starts=mainTrackStarts(child);
   for(const [ti,tr] of child.videoTracks.entries())for(const c of tr.clips){if(tr.hidden||tr.muted||c.muted||c.type==='image'||c.freeze)continue;const start=ti===0?(starts.get(c.id)??0):(c.atSeconds??0);const anim=resolveAnimations(c,c.clipDuration);sounds.push({src:c.src,start,end:start+c.clipDuration,inPoint:c.inPoint,speed:c.speed??1,gain:s=>c.volume*(evalKeyframes(anim?.volume,s)??1)*fade(s,c.clipDuration,c.fadeIn,c.fadeOut)});}
   for(const tr of child.audioTracks)for(const c of tr.clips){if(tr.muted||c.muted)continue;sounds.push({src:c.src,start:c.atSeconds,end:c.atSeconds+c.duration,inPoint:c.inPoint,speed:c.speed??1,gain:s=>duck(tr,child,c.atSeconds+s)*tr.volume*c.volume*(evalKeyframes(c.animations?.volume,s)??1)*fade(s,c.duration,c.fadeIn,c.fadeOut)});}

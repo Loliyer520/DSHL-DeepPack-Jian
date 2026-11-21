@@ -35,7 +35,7 @@ export const OPS_PARAMETERS: Record<string,any> = {
           x: NUM, y: NUM, w: NUM, h: NUM, group: { type: 'string' }, to: { type: 'string' }, template: { type: 'string' }, theme: { type: ['string','object'] }, from: {type:'string'}, width:NUM, height:NUM, mode:{type:'string'}, values:{type:'object'}, component:{type:'object'}, role:{type:['string','null']},
           textFill: { type: ['object','string','null'], description: '文字填充：纯色或 2–8 色标的 linear/radial 渐变，可含 keyframes；null 恢复 color' },
           textStrokeFill: { type: ['object','string','null'], description: '文字描边填充，同 textFill；需 stroke.width 开启描边' },
-          shape: { type: 'object' }, image: { type: 'object' }, icon: { type: 'object' }, chart: { type: 'object' }, items: { type: 'array', items: { type: 'object' } },
+          shape: { type: 'object' }, image: { type: 'object' }, video: {type:'object',description:'元素层视频：src,inPoint,speed,muted,volume,fit,radius,freeze；与图文统一排序'}, icon: { type: 'object' }, chart: { type: 'object' }, items: { type: 'array', items: { type: 'object' } },
           shadow: { description: '元素原生阴影/发光，优先于复制形状；对象为单层，数组为多层，false 关闭', oneOf: [
             { type: 'boolean', enum: [false] },
             { type: 'object', properties: { color: { type: 'string' }, blur: { type: 'number', minimum: 0, maximum: 200 }, opacity: { type: 'number', minimum: 0, maximum: 1 }, spread: { type: 'number', minimum: -100, maximum: 200 }, inset: { type: 'boolean' }, x: NUM, y: NUM }, required: ['color', 'blur'] },

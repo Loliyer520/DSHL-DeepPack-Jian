@@ -4,6 +4,7 @@ import { CompositionRenderer } from './renderContext';
 // 坐标约定：x/y 为元素中心在画布上的比例位置，w/h 为盒子占画布宽/高的比例；字号、描边、圆角、内边距为画布像素。
 // 动画：x/y 通道为画布比例偏移；clipL/R/T/B 为擦除；progress 驱动打字机/描边/数字滚动/图表生长。
 import React from "react";
+import {StableVideo} from "./StableVideo";
 import { SampleAnchor } from "./TemporalBlur";
 import { Img, useCurrentFrame, useVideoConfig } from "remotion";
 import type { Animations, Fill, Overlay, ShapeSpec } from "./schema";
@@ -463,12 +464,13 @@ const BoxElement: React.FC<{ ov: Overlay; m: Motion; sec: number; W: number; H: 
       {appearance.defs}
       {bg && <div style={{ position: "absolute", inset: 0, background: bg.color, opacity: bg.opacity ?? 0.75, borderRadius: bg.radius ?? 8 }} />}
       {ov.kind === "shape" && !ov.composition && !ov.scene3d && !ov.particles && !ov.audioReactive?.waveform && ov.shape && <ShapeSvg spec={ov.shape!} w={w} h={h ?? w} progress={m.progress} uid={ov.id} />}
+      {ov.kind === "video" && ov.video && <VideoBox ov={ov}/>}
       {ov.kind === "image" && ov.image && <ImageBox ov={ov} />}
       {ov.kind === "icon" && <IconSvg name={ov.icon?.name} color={ov.color} strokeWidth={ov.icon?.strokeWidth} fill={ov.icon?.fill} strokeFill={ov.icon?.strokeFill} progress={m.progress} />}
       {ov.kind === "chart" && ov.chart && <ChartSvg ov={ov} spec={ov.chart} w={w} h={h ?? w} progress={m.progress} />}
       {ov.kind === "plot" && ov.plot && <PlotSvg ov={ov} spec={ov.plot} w={w} h={h ?? w} progress={m.progress} sec={sec} unit={Math.min(W, H) / 1080} />}
       {(ov.particles||ov.audioReactive?.waveform)&&<Ambient ov={ov} w={w} h={h??w} seconds={sec}/> }
-      {ov.composition&&<CompositionBox document={ov.composition.timeline} seconds={ov.composition.inPoint+sec*ov.composition.speed} width={w} height={h??w}/>}
+      {ov.composition&&<CompositionBox document={ov.composition.timeline} seconds={ov.composition.inPoint+sec*ov.composition.speed} speed={ov.composition.speed} width={w} height={h??w}/>}
       {ov.scene3d&&<SceneView scene={ov.scene3d} seconds={sec} width={w} height={h??w}/>}
       {textBlock}
     </div>
@@ -553,4 +555,6 @@ export const ElementView: React.FC<{ ov: Overlay }> = ({ ov }) => {
   return <LegacyText ov={ov} m={m} sec={sec} W={W} H={H} />;
 };
 
-function CompositionBox(props:{document:string;seconds:number;width:number;height:number}){const Renderer=React.useContext(CompositionRenderer);return Renderer?<Renderer {...props}/>:null;}
+function CompositionBox(props:{document:string;seconds:number;width:number;height:number;speed?:number}){const Renderer=React.useContext(CompositionRenderer);return Renderer?<Renderer {...props}/>:null;}
+
+function VideoBox({ov}:{ov:Overlay}){const resolve=React.useContext(AssetResolver),report=React.useContext(MediaErrorHandler),v=ov.video!;return <div style={{position:'absolute',inset:0,overflow:'hidden',borderRadius:v.radius??0}}><StableVideo src={resolve(v.src)} inPoint={v.inPoint} speed={v.speed} freeze={v.freeze} muted style={{width:'100%',height:'100%',objectFit:v.fit??'cover',display:'block'}} onError={report?()=>report(v.src):undefined}/></div>;}

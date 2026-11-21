@@ -312,6 +312,11 @@ export const imageSchema = z.object({
   radius: z.number().min(0).max(2000).optional(),
   border: outlineSchema.optional(),
 });
+export const videoElementSchema=z.object({
+  src:z.string().min(1),inPoint:z.number().min(0).default(0),speed:z.number().min(.1).max(8).default(1),
+  volume:z.number().min(0).max(1).default(1),muted:z.boolean().default(true),freeze:z.boolean().optional(),
+  fit:z.enum(['cover','contain','fill']).optional(),radius:z.number().min(0).max(2000).optional(),
+});
 export const iconSchema = z.object({
   name: z.string().min(1).max(60), // 内置图标名（见 icons.ts）
   strokeWidth: z.number().min(0.25).max(6).optional(),
@@ -483,6 +488,7 @@ export const overlaySchema = z.object({
   textEffect: textEffectSchema.optional(), // 逐字/逐词/逐行入场
   shape: shapeSchema.optional(),
   image: imageSchema.optional(),
+  video: videoElementSchema.optional(),
   icon: iconSchema.optional(),
   chart: chartSchema.optional(),
   // ---- v7 数学动画 ----
@@ -662,6 +668,7 @@ function relationshipIssues(overlays: Overlay[]): string[] {
   const byId = new Map(overlays.map(o => [o.id, o]));
   const issues: string[] = [];
   for (const o of overlays) {
+    if(o.kind==='video'&&!o.video)issues.push('overlays.'+o.id+': 视频元素缺少 video 素材设置');
     if(o.trackMatte){
       const source=byId.get(o.trackMatte.source);
       if(!source||source.id===o.id||source.trackMatte||source.group!==o.group||!isMatteSource(source))issues.push('overlays.'+o.id+': 遮罩源无效或不在同一分组');
