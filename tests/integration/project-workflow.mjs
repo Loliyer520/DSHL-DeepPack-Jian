@@ -11,6 +11,8 @@ try{
  const pid=ok(await e.api('POST','/api/session-project',{sessionId:'workflow'})).project.id,base='/api/p/'+pid;
  const audio=ok(await e.api('POST',base+'/assets/import',{path:path.resolve('examples/assets/ambient-pulse.wav')})).name;
  const video=ok(await e.api('POST',base+'/assets/import',{path:path.resolve('examples/assets/a.mp4')})).name;
+ const checkedVideo=ok(await e.api('POST',base+'/video-check',{name:video}));assert.equal(checkedVideo.meta.hasVideo,true);assert.ok(checkedVideo.meta.codec);assert.deepEqual(checkedVideo.findings,[]);
+ ok(await e.api('POST',base+'/auto-proxy',{enabled:true}));const auto=ok(await e.api('POST',base+'/assets/import',{path:path.resolve('examples/assets/a.mp4')}));assert.equal(auto.autoProxy,true);assert.ok(ok(await e.api('GET',base+'/proxies')).items.some(p=>p.name===auto.name));ok(await e.api('POST',base+'/auto-proxy',{enabled:false}));
  const child=parseTimeline({meta:{fps:30,width:320,height:180,background:'#09111f'},audioTracks:[{id:'audio',volume:.6,clips:[{id:'sound',src:audio,atSeconds:0,inPoint:0,duration:2}]}],overlays:[{id:'card',kind:'shape',text:'',startSeconds:0,endSeconds:2,x:.5,y:.5,w:.8,h:.8,shape:{type:'rect',fill:'#2563eb',radius:10},animations:{rotation:[{t:0,v:-10},{t:2,v:10}]}},{id:'title',kind:'text',text:'{{title}}',startSeconds:0,endSeconds:2,fontSize:30,x:.5,y:.5,color:'#ffffff'}]});
  const ops=[{op:'setMeta',patch:{width:480,height:270,fps:30}},{op:'addOverlay',id:'nested',kind:'shape',text:'',x:.5,y:.5,w:.9,h:.8,startSeconds:0,endSeconds:1,composition:{name:'card',timeline:JSON.stringify(child),inPoint:.25,speed:1.5,volume:.8}}];
  const edit=ok(await e.api('POST',base+'/ops',{ops}));assert.ok(edit.receipts.every(r=>r.status==='applied'),JSON.stringify(edit));
@@ -30,6 +32,8 @@ try{
  assert.equal(ok(await e.api('GET',base+'/timeline')).rev,rev,'batch export must not mutate source');
  // Proxy source must be referenced; use a PiP hidden behind the card for this check.
  ok(await e.api('POST',base+'/ops',{ops:[{op:'addClip',id:'video',src:video,track:'pip',clipDuration:1,atSeconds:0}]}));
+ const report=ok(await e.api('GET',base+'/video-check'));assert.ok(report.items.some(v=>v.name===video));
+ const preflight=ok(await e.api('GET',base+'/delivery/preflight'));assert.equal(preflight.canExport,true,JSON.stringify(preflight.issues));
  ok(await e.api('POST',base+'/proxies',{}));let proxy;for(let i=0;i<60;i++){proxy=ok(await e.api('GET',base+'/proxies')).items[0];if(proxy?.status==='ready'||proxy?.status==='error')break;await new Promise(r=>setTimeout(r,500));}assert.equal(proxy?.status,'ready',JSON.stringify(proxy));assert.equal((await fetch(e.base+proxy.url,{method:'HEAD'})).status,200);
  const archive=Buffer.from(await(await fetch(e.base+base+'/archive')).arrayBuffer());fs.writeFileSync('dist/project-workflow.djproj',archive);const doc=JSON.parse(gunzipSync(archive));assert.ok(doc.files.some(f=>f.name===audio));
  const upload=async bytes=>{const r=await fetch(e.base+'/api/projects/import-archive',{method:'POST',headers:{'X-Djian-Client':'test'},body:bytes});return {status:r.status,body:await r.json()};};
@@ -39,6 +43,9 @@ try{
  const linked=ok(await e.api('POST','/api/p/'+missingProject.id+'/relink',{from:'missing.wav',to:audio,batchId:'relink-once'}));assert.ok(linked.receipts.every(r=>r.status!=='rejected'),JSON.stringify(linked));assert.equal(ok(await e.api('POST','/api/p/'+missingProject.id+'/relink',{from:'missing.wav',to:audio,batchId:'relink-once'})).duplicate,true);assert.deepEqual(ok(await e.api('GET','/api/p/'+missingProject.id+'/missing')).missing,[]);
  const corrupt=JSON.parse(gunzipSync(archive));corrupt.files[0].sha256='0'.repeat(64);assert.equal((await upload(gzipSync(JSON.stringify(corrupt)))).status,400);
  doc.files[0].name='../bad';const unsafe=await upload(gzipSync(JSON.stringify(doc)));assert.equal(unsafe.status,400);
+ const brokenPath=path.join(e.dataDir,'broken.mp4');fs.writeFileSync(brokenPath,'not a valid video stream');const broken=ok(await e.api('POST',base+'/assets/import',{path:brokenPath})).name;
+ ok(await e.api('POST',base+'/ops',{ops:[{op:'addClip',id:'broken-video',src:broken,track:'pip',clipDuration:1,atSeconds:5}]}));
+ const brokenCheck=ok(await e.api('GET',base+'/delivery/preflight'));assert.equal(brokenCheck.canExport,false);assert.ok(brokenCheck.issues.some(i=>i.code==='video-decode'&&i.message.includes(broken)),JSON.stringify(brokenCheck.issues));
  ok(await e.api('DELETE',base+'/cache'));assert.equal(ok(await e.api('GET',base+'/proxies')).items[0].status,'none');
  console.log('PASS nested visual + audible export, batch snapshot queue cancel/retry, proxy generation, portable archive round-trip and traversal rejection');
 }finally{await e.stop();}

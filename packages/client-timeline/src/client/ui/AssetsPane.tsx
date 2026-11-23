@@ -125,7 +125,7 @@ export function AssetsPane({ actions }: { actions: Actions }) {
             {a.thumb ? <img src={absolute(a.thumb)} alt="" loading="lazy" draggable={false} /> : <span className="dj-athumb"><Icon name={a.type === 'audio' ? 'music' : a.type === 'image' ? 'image' : 'film'} /></span>}
             <div style={{ minWidth: 0 }}>
               <div className="dj-aname">{a.name}</div>
-              <small>{a.error ? <span style={{ color: 'var(--dj-danger)' }}>无法读取：{a.error}</span> : [TYPE_LABEL[a.type], fmtDur(a.duration), a.width && a.height ? a.width + '×' + a.height : '', fmtSize(a.size), a.usage ? '已用 ' + a.usage : ''].filter(Boolean).join(' · ')}</small>
+              <small>{a.error ? <span style={{ color: 'var(--dj-danger)' }}>无法读取：{a.error}</span> : [TYPE_LABEL[a.type], fmtDur(a.duration), a.width && a.height ? a.width + '×' + a.height : '', a.codec, a.fps ? a.fps+' fps':'', a.type==='video'&&a.variableFrameRate?'可变帧率':a.type==='video'&&a.hdr?'HDR':a.type==='video'&&a.rotation?`旋转 ${a.rotation}°`:'',fmtSize(a.size), a.usage ? '已用 ' + a.usage : ''].filter(Boolean).join(' · ')}</small>
             </div>
             <button className="dj-icon-btn" title={a.type === 'audio' ? '添加到音频轨' : '插入主轨（播放头处）'} aria-label={'添加 ' + a.name} onClick={() => actions.addAsset(a)}><Icon name="plus" /></button>
           </div>

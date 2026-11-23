@@ -91,7 +91,7 @@ export interface Receipt { index: number; op: string; status: 'applied' | 'ignor
 export type Op = { op: string; [k: string]: unknown };
 export interface OpsResult { rev: number; receipts: Receipt[]; changed: string[]; summary: string[]; patch: Op[]; conflicts: { key: string; rev: number; actor: string; summary?: string }[]; duplicate?: boolean }
 export interface EngineEvent { rev: number; at: string; actor: 'user' | 'ai' | 'system'; clientId: string | null; label: string | null; summary: string[]; changed: string[]; patch?: Op[]; inverse?: Op[] }
-export interface AssetInfo { name: string; type: 'video' | 'image' | 'audio'; size: number; duration: number | null; width: number | null; height: number | null; hasAudio: boolean; usage: number; error: string | null; thumb: string | null; media: string }
+export interface AssetInfo { name: string; type: 'video' | 'image' | 'audio'; size: number; duration: number | null; width: number | null; height: number | null; hasAudio: boolean; usage: number; error: string | null; thumb: string | null; media: string;codec?:string|null;fps?:number|null;variableFrameRate?:boolean;hdr?:boolean;rotation?:number;mediaError?:string|null }
 export interface Presence { clientId: string; actor: 'user' | 'ai'; status?: string | null; label?: string | null; at: number }
 export interface Snapshot { id: string; at: string; label: string; rev: number | null; actor: string }
 export interface ExportStatus { jobId: string; status: 'queued' | 'rendering' | 'done' | 'error' | 'cancelled'; progress: { percent: number; stage: string }; result?: { fileName: string; sizeBytes: number }; diagnostic?: {code:string;stage:string;hint:string;detail:string}; error?: string }

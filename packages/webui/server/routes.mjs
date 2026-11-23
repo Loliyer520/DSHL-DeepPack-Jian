@@ -266,13 +266,15 @@ function uniqueName(dir, name) {
 /** 把临时文件登记为素材：校验类型、改成不重名的最终文件名、探测 */
 async function admitAsset(store, pid, temp, wantedName) {
   const name = safeAssetName(wantedName);
-  if (!name || !assetKind(name)) { fs.rmSync(temp, { force: true }); throw new HttpError(400, '文件名或格式不支持（视频/图片/音频）'); }
+  const kind=assetKind(name);
+  if (!name || !kind) { fs.rmSync(temp, { force: true }); throw new HttpError(400, '文件名或格式不支持（视频/图片/音频）'); }
   const dir = store.assetsDir(pid);
   const final = uniqueName(dir, name);
   fs.renameSync(temp, path.join(dir, final));
   const meta = await assetMeta(store, pid, final);
   store.notifyAssets(pid, { action: 'added', name: final });
-  return { ok: true, name: final, type: meta.kind, duration: meta.duration ?? null, width: meta.width ?? null, height: meta.height ?? null };
+  if(kind==='video'&&store.readProjectMeta(pid)?.autoProxy===true)store.proxyService?.start(pid,[final]);
+  return { ok: true, name: final, type: meta.kind, duration: meta.duration ?? null, width: meta.width ?? null, height: meta.height ?? null,autoProxy:kind==='video'&&store.readProjectMeta(pid)?.autoProxy===true };
 }
 
 function usageMap(timeline) {
@@ -295,7 +297,7 @@ function registerAssetRoutes(r, { store, project }) {
       const meta = await assetMeta(store, pid, name).catch(() => null);
       if (!meta) continue;
       assets.push({
-        name, type: meta.kind, size: meta.size, duration: meta.duration ?? null, width: meta.width ?? null, height: meta.height ?? null,
+        name, type: meta.kind, size: meta.size, duration: meta.duration ?? null, width: meta.width ?? null, height: meta.height ?? null,codec:meta.codec??null,fps:meta.fps??null,variableFrameRate:meta.variableFrameRate??false,hdr:meta.hdr??false,rotation:meta.rotation??0,mediaError:meta.error??null,
         hasAudio: meta.hasAudio ?? meta.kind === 'audio', usage: usage.get(name) ?? 0, error: meta.error ?? null,
         thumb: meta.kind === 'audio' ? null : base(pid, name) + '/thumb',
         media: '/api/p/' + encodeURIComponent(pid) + '/media/' + encodeURIComponent(name),
@@ -507,7 +509,7 @@ function registerRenderRoutes(r, { store, render, project }) {
   r.add('POST', '/api/p/:pid/export', async (req, res, { params }) => {
     const pid = project(params);
     const body = await readJson(req);
-    sendJson(res, 202, { started: true, jobId: render.startExport(pid, { scale: body?.scale, quality: body?.quality, baseRev:body?.baseRev }) });
+    sendJson(res, 202, { started: true, jobId: await render.startExport(pid, { scale: body?.scale, quality: body?.quality, baseRev:body?.baseRev }) });
   });
   r.add('GET', '/api/export/:job', (req, res, { params }) => sendJson(res, 200, render.status(params.job)));
   r.add('POST', '/api/export/:job/cancel', (req, res, { params }) => { render.cancelExport(params.job); sendJson(res, 200, { ok: true }); });

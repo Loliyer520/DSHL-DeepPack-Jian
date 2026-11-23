@@ -102,11 +102,16 @@ export function runTool(which, args, { timeoutMs = 60_000, maxBytes = 64 * 1024 
 
 /** ffprobe：时长/尺寸/帧率/是否有音视频 */
 export async function probe(file) {
-  const { stdout } = await runTool('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', file], { timeoutMs: 20_000, maxBytes: 4 * 1024 * 1024 });
+  const { stdout } = await runTool('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', '-show_frames', '-read_intervals', '%+#2', file], { timeoutMs: 30_000, maxBytes: 8 * 1024 * 1024 });
   const info = JSON.parse(stdout.toString('utf8') || '{}');
   const streams = info.streams ?? [];
   const video = streams.find((s) => s.codec_type === 'video' && s.disposition?.attached_pic !== 1);
   const audio = streams.find((s) => s.codec_type === 'audio');
+  const frames = info.frames ?? [];
+  const timeBase = video?.time_base?.split('/').map(Number);
+  const frameDuration = timeBase?.[1] ? timeBase[0] / timeBase[1] : null;
+  const pts = frames.map((f) => Number(f.best_effort_timestamp_time)).filter(Number.isFinite);
+  const rotation = Number(video?.tags?.rotate ?? video?.side_data_list?.find((d) => d.rotation != null)?.rotation ?? 0);
   const duration = Number(info.format?.duration ?? video?.duration ?? audio?.duration);
   const [num, den] = String(video?.avg_frame_rate ?? video?.r_frame_rate ?? '0/1').split('/').map(Number);
   return {
@@ -116,7 +121,20 @@ export async function probe(file) {
     fps: num && den ? Math.round((num / den) * 100) / 100 : null,
     hasVideo: Boolean(video),
     hasAudio: Boolean(audio),
+    codec: video?.codec_name ?? null,
+    pixelFormat: video?.pix_fmt ?? null,
+    variableFrameRate: Boolean(video?.r_frame_rate && video?.avg_frame_rate && video.r_frame_rate !== video.avg_frame_rate),
+    nonMonotonicTimestamps: pts.some((v, i) => i > 0 && v < pts[i - 1]),
+    frameDuration: frameDuration && Number.isFinite(frameDuration) ? Math.round(frameDuration * 1e6) / 1e6 : null,
+    rotation: Number.isFinite(rotation) ? rotation : 0,
+    hdr: /10|12|16/.test(video?.pix_fmt ?? '') || /smpte2084|arib-std-b67/i.test(video?.color_transfer ?? ''),
   };
+}
+
+/** Decode one real frame at a requested point without writing a media file. */
+export async function checkVideoFrame(file, seconds) {
+  const { stdout } = await runTool('ffmpeg', ['-v','error','-ss',String(Math.max(0,seconds)),'-i',file,'-map','0:v:0','-frames:v','1','-vf','scale=16:16','-f','null','-'], { timeoutMs:30_000,maxBytes:1024*1024 });
+  return { ok:true, stderr:stdout.length };
 }
 
 export async function thumbnail(file, out, { kind, duration }) {

@@ -71,15 +71,15 @@ export class RenderService {
   }
 
   // ---------- 导出 ----------
-  startExport(pid, options = {}) {
+  async startExport(pid, options = {}) {
     if (this.activeJob?.status === 'rendering') throw new HttpError(409, '已有导出任务进行中，请稍候或先取消');
     return this.enqueue(pid,options);
   }
-  enqueue(pid,{scale=1,quality='standard',timeline,name,baseRev,sourceRev}={}) {
+  async enqueue(pid,{scale=1,quality='standard',timeline,name,baseRev,sourceRev}={}) {
     if(this.closing)throw new HttpError(503,'引擎正在关闭');
     const p=this.store.load(pid),snapshot=structuredClone(timeline??p.timeline);
     if(baseRev!==undefined&&baseRev!==p.rev)throw new HttpError(409,'项目已变化，请重新预检后导出');
-    const preflight=deliveryPreflight(this.store,pid,snapshot);if(!preflight.canExport)throw new HttpError(400,'导出预检未通过：'+preflight.issues.filter(i=>i.severity==='error').map(i=>i.message).join('；'));
+    const preflight=await deliveryPreflight(this.store,pid,snapshot,{decode:true});if(!preflight.canExport)throw new HttpError(400,'导出预检未通过：'+preflight.issues.filter(i=>i.severity==='error').map(i=>i.message).join('；'));
     if(!timelineHasContent(snapshot))throw new HttpError(400,'时间线为空');
     if([...this.jobs.values()].filter(j=>['queued','rendering'].includes(j.status)).length>=100)throw new HttpError(429,'导出队列最多 100 项');
     const jobId=randomUUID(),dir=path.join(EXPORTS_DIR,pid);fs.mkdirSync(dir,{recursive:true});
@@ -98,7 +98,7 @@ export class RenderService {
     .finally(()=>{job.finishedAt=Date.now();this.activeJob=null;const done=[...this.jobs.values()].filter(j=>!['queued','rendering'].includes(j.status));for(const old of done.slice(0,-100))this.jobs.delete(old.jobId);this.drainQueue();});
   }
   list(pid){return [...this.jobs.values()].filter(j=>j.pid===pid).map(j=>this.status(j.jobId));}
-  retry(jobId){const j=this.jobs.get(jobId);if(!j||!['error','cancelled'].includes(j.status))throw new HttpError(400,'只能重试失败或取消的任务');return this.enqueue(j.pid,{timeline:j.timeline,scale:j.scale,quality:j.quality,name:j.name,sourceRev:j.rev});}
+  async retry(jobId){const j=this.jobs.get(jobId);if(!j||!['error','cancelled'].includes(j.status))throw new HttpError(400,'只能重试失败或取消的任务');return this.enqueue(j.pid,{timeline:j.timeline,scale:j.scale,quality:j.quality,name:j.name,sourceRev:j.rev});}
 
   cancelExport(jobId) {
     const job = this.jobs.get(jobId);

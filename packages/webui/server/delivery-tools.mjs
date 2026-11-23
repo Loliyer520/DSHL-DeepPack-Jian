@@ -8,14 +8,22 @@ import {checkMediaQuality,subtitleProposals,audioProposals} from '../../engine/d
 import {referencedAssets} from '../../engine/dist/compositions.js';
 import {FONTS} from '../../engine/dist/fonts.js';
 import {FONTS_DIR,assetKind} from './config.mjs';
-import {runTool,probe} from './media-tools.mjs';
+import {runTool,probe,checkVideoFrame} from './media-tools.mjs';
 import {readJson,sendJson,HttpError} from './http.mjs';
 
-export function deliveryPreflight(store,pid,timeline=store.load(pid).timeline){
+export async function deliveryPreflight(store,pid,timeline=store.load(pid).timeline,{decode=false}={}){
  const assets=fs.readdirSync(store.assetsDir(pid)).filter(n=>assetKind(n)).map(name=>({name,...store.readAssetMeta(pid,name)}));
  const available=FONTS.filter(f=>fs.existsSync(path.join(FONTS_DIR,f.file))).map(f=>f.id);
  const issues=[...checkTimeline(timeline,assets),...checkMediaQuality(timeline,assets,available)];
  for(const name of referencedAssets(timeline))if(!store.assetExists(pid,name)&&!issues.some(i=>i.code==='missing-asset'&&i.message.includes(name)))issues.push({code:'missing-asset',severity:'error',time:0,message:'找不到素材：'+name});
+ if(decode){const videos=referencedAssets(timeline).filter(n=>assetKind(n)==='video');for(const name of videos.slice(0,100)){
+  const file=store.assetPath(pid,name),meta=assets.find(a=>a.name===name);if(!file||!store.assetExists(pid,name))continue;
+  if(meta?.variableFrameRate)issues.push({code:'video-vfr',severity:'warning',time:0,message:`${name} 是可变帧率视频；若出现音画漂移，建议生成兼容副本。`});
+  if(meta?.hdr)issues.push({code:'video-hdr',severity:'warning',time:0,message:`${name} 含 HDR/高位深信号；当前导出可能需要色调映射。`});
+  if(meta?.rotation)issues.push({code:'video-rotation',severity:'info',time:0,message:`${name} 含 ${meta.rotation}° 旋转元数据。`});
+  const points=[0,...(meta?.duration>2?[meta.duration/2,Math.max(0,meta.duration-.2)]:[])];
+  for(const time of [...new Set(points)])try{await checkVideoFrame(file,time);}catch(e){issues.push({code:'video-decode',severity:'error',time,message:`${name} 在 ${time.toFixed(2)} 秒无法解码：${e.message}`});}
+ }if(videos.length>100)issues.push({code:'video-decode-limit',severity:'warning',time:0,message:`工程包含 ${videos.length} 个视频素材；本次仅对前 100 个唯一视频抽帧检查。`});}
  return {rev:store.load(pid).rev,issues,canExport:!issues.some(i=>i.severity==='error')};
 }
 export function exportFailure(error,stage){
@@ -44,7 +52,7 @@ async function imageBackground(file){
 export async function inspectDelivery(store,pid,{audio=false}={}){
  const {timeline:t,rev}=store.load(pid),measurements={};
  for(const name of referencedAssets(t)){const file=store.assetPath(pid,name);if(!file||!store.assetExists(pid,name))continue;const st=fs.statSync(file),cached=store.readAssetMeta(pid,name);if(cached?.size===st.size&&cached?.mtimeMs===Math.floor(st.mtimeMs))continue;try{store.writeAssetMeta(pid,name,{...await probe(file),kind:assetKind(name),size:st.size,mtimeMs:Math.floor(st.mtimeMs)});}catch(e){store.writeAssetMeta(pid,name,{error:e.message,size:st.size,mtimeMs:Math.floor(st.mtimeMs)});}}
- const result=deliveryPreflight(store,pid,t),issues=[...result.issues];
+ const result=await deliveryPreflight(store,pid,t,{decode:true}),issues=[...result.issues];
  const images=[...new Set(t.overlays.filter(o=>o.image).map(o=>o.image.src))];
  for(const name of images.slice(0,20)){const file=store.assetPath(pid,name);if(!file||!store.assetExists(pid,name))continue;try{const m=await imageBackground(file);if(!m.hasTransparency&&m.whiteCorners===4)issues.push({code:'image-white-background',severity:'info',id:t.overlays.find(o=>o.image?.src===name)?.id,time:0,message:name+' 的四角样本为不透明白色；若原意为透明贴图，请更换带透明通道的 PNG/WebP。白色背景也可能是有意设计。'});}catch(e){issues.push({code:'image-unchecked',severity:'info',time:0,message:'图片背景未能检测：'+name});}}
  if(images.length>20)issues.push({code:'image-limit',severity:'info',time:0,message:'图片背景检测限于前 20 个图片元素素材'});
@@ -67,7 +75,7 @@ export function registerDeliveryTools(r,{store,project}){
   });sendJson(res,200,result);
  });
 
- r.add('GET','/api/p/:pid/delivery/preflight',(req,res,{params})=>sendJson(res,200,deliveryPreflight(store,project(params))));
+ r.add('GET','/api/p/:pid/delivery/preflight',async(req,res,{params})=>sendJson(res,200,await deliveryPreflight(store,project(params),undefined,{decode:true})));
  r.add('POST','/api/p/:pid/delivery/inspect',async(req,res,{params})=>{const b=await readJson(req);sendJson(res,200,await inspectDelivery(store,project(params),{audio:b?.audio===true}));});
  r.add('POST','/api/p/:pid/delivery/subtitles',async(req,res,{params})=>{const pid=project(params),b=await readJson(req);if(b?.keywords!==undefined&&(!Array.isArray(b.keywords)||b.keywords.length>20||b.keywords.some(s=>typeof s!=='string'||s.length>40)))throw new HttpError(400,'关键词最多 20 个，每个最多 40 字');const {timeline,rev}=store.load(pid);sendJson(res,200,{rev,proposals:subtitleProposals(timeline,{maxChars:Number(b?.maxChars)||18,safeBottom:Number(b?.safeBottom)||.12,keywords:b?.keywords??[]})});});
 }
